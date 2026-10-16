@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
     private static final String SELECTED_GAME_URL_KEY = "selected_game_url";
     private static final String GAME_LIST_URL = "https://iappht.sslqq.cn/user/getFile.php?fid=7487";
     private static final String PTLOGIN_BASE = "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=%s&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=%s&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
+    private static final String KEY_SYNCED_DATA = "synced_data";
     private static final String KEY_LOCAL_ON = "local_on";
     private static final String KEY_CLOUD_ON = "cloud_on";
     private static final String LOCAL_GAME_DATA = "和平|1106467070;王者|1104466820;火影|1104307008;使命|1106838536;PUBG|1106545419;CF|1104512706;三角洲|1110543085;暗区突围|1110196838;永劫无间|102150659;无畏契约|1111677210;极品飞车|1108169089;香肠派对|1107970117;QQ飞车|1104922185;LOL手游|1106040804;斗地主|363;金铲铲|1109811436;DNF起源|1104294055;天天酷跑|100692648;洛克王国|1110613799;部落冲突|1105771533;高能英雄|1110329808;妄想山海|1109838467";
@@ -506,17 +507,54 @@ private void setupImmersiveMode() {
         return String.format(PTLOGIN_BASE, appid, appid);
     }
 
+    private void syncToLocal(java.util.List<GameItem> items) {
+        if (items == null || items.isEmpty()) return;
+        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        String old = p.getString(KEY_SYNCED_DATA, "");
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        StringBuilder sb = new StringBuilder();
+        for (String line : old.split(";")) {
+            int i = line.indexOf("|");
+            if (i <= 0) continue;
+            String appid = line.substring(i + 1);
+            if (seen.add(appid)) {
+                if (sb.length() > 0) sb.append(";");
+                sb.append(line);
+            }
+        }
+        for (GameItem it : items) {
+            String appid = extractAppid(it.url);
+            if (appid == null || appid.isEmpty()) continue;
+            if (seen.add(appid)) {
+                if (sb.length() > 0) sb.append(";");
+                sb.append(it.name).append("|").append(appid);
+            }
+        }
+        p.edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
+        addLog("[sync] cloud appid saved: " + items.size());
+    }
+
+    private String extractAppid(String url) {
+        if (url == null) return null;
+        Matcher m = Pattern.compile("client_id=([0-9]+)").matcher(url);
+        return m.find() ? m.group(1) : null;
+    }
+
     private void loadGameList() {
         SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
         boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
         gameList.clear();
         if (localOn) {
-            for (String line : LOCAL_GAME_DATA.split(";")) {
+            String synced = p.getString(KEY_SYNCED_DATA, "");
+            String all = LOCAL_GAME_DATA + (synced.isEmpty() ? "" : ";" + synced);
+            java.util.HashSet<String> seen = new java.util.HashSet<>();
+            for (String line : all.split(";")) {
                 int i = line.indexOf("|");
                 if (i <= 0) continue;
                 String name = line.substring(0, i);
                 String appid = line.substring(i + 1);
+                if (!seen.add(appid)) continue;
                 gameList.add(new GameItem("", name, buildLocalUrl(appid)));
             }
             addLog("[local] games: " + gameList.size());
@@ -532,6 +570,7 @@ private void setupImmersiveMode() {
             }
         }
     }
+
 
 
     private void loadGameListFromServer() {
@@ -582,6 +621,7 @@ private void setupImmersiveMode() {
             gameList.add(item);
         }
 
+        syncToLocal(gameList);
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
