@@ -15,6 +15,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
@@ -47,6 +48,10 @@ public class MainActivity extends Activity {
     private static final String SELECTED_GAME_NAME_KEY = "selected_game_name";
     private static final String SELECTED_GAME_URL_KEY = "selected_game_url";
     private static final String GAME_LIST_URL = "https://iappht.sslqq.cn/user/getFile.php?fid=7487";
+    private static final String PTLOGIN_BASE = "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=%s&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=%s&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
+    private static final String KEY_LOCAL_ON = "local_on";
+    private static final String KEY_CLOUD_ON = "cloud_on";
+    private static final String LOCAL_GAME_DATA = "和平|1106467070;王者|1104466820;火影|1104307008;使命|1106838536;PUBG|1106545419;CF|1104512706;三角洲|1110543085;暗区突围|1110196838;永劫无间|102150659;无畏契约|1111677210;极品飞车|1108169089;香肠派对|1107970117;QQ飞车|1104922185;LOL手游|1106040804;斗地主|363;金铲铲|1109811436;DNF起源|1104294055;天天酷跑|100692648;洛克王国|1110613799;部落冲突|1105771533;高能英雄|1110329808;妄想山海|1109838467";
     private static final String KEY_STORAGE_URI = "storage_uri";
     
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
@@ -67,6 +72,9 @@ public class MainActivity extends Activity {
     private TextView storagePermissionStatusText;
     private TextView tvLog;
     private ScrollView scrollLog;
+    private CheckBox cbLocalSource;
+    private CheckBox cbCloudSource;
+
     private Window mWindow;
 
     private List<GameItem> gameList = new ArrayList<>();
@@ -95,7 +103,7 @@ public class MainActivity extends Activity {
         
         checkAndRequestAllPermissions();
         
-        loadGameListFromServer();
+        loadGameList();
     }
     
     /**
@@ -148,6 +156,9 @@ private void setupImmersiveMode() {
         hideButton = findViewById(R.id.btn_hide);
         showButton = findViewById(R.id.btn_show);
         selectDirectoryButton = findViewById(R.id.btn_select_directory);
+        cbLocalSource = findViewById(R.id.cb_local_source);
+        cbCloudSource = findViewById(R.id.cb_cloud_source);
+        setupSourceToggles();
         directoryStatusText = findViewById(R.id.txt_directory_status);
         storagePermissionStatusText = findViewById(R.id.txt_storage_permission_status);
         tvLog = findViewById(R.id.tv_log);
@@ -450,7 +461,7 @@ private void setupImmersiveMode() {
         if (gameList.isEmpty()) {
             addLog("[游戏] 列表为空，正在加载...");
             Toast.makeText(this, "正在加载游戏列表，请稍后...", Toast.LENGTH_SHORT).show();
-            loadGameListFromServer();
+            loadGameList();
             return;
         }
 
@@ -476,6 +487,52 @@ private void setupImmersiveMode() {
                 })
                 .show();
     }
+
+    private void setupSourceToggles() {
+        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        cbLocalSource.setChecked(p.getBoolean(KEY_LOCAL_ON, true));
+        cbCloudSource.setChecked(p.getBoolean(KEY_CLOUD_ON, false));
+        cbLocalSource.setOnCheckedChangeListener((v, c) -> {
+            getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_LOCAL_ON, c).apply();
+            loadGameList();
+        });
+        cbCloudSource.setOnCheckedChangeListener((v, c) -> {
+            getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_CLOUD_ON, c).apply();
+            loadGameList();
+        });
+    }
+
+    private String buildLocalUrl(String appid) {
+        return String.format(PTLOGIN_BASE, appid, appid);
+    }
+
+    private void loadGameList() {
+        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
+        boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
+        gameList.clear();
+        if (localOn) {
+            for (String line : LOCAL_GAME_DATA.split(";")) {
+                int i = line.indexOf("|");
+                if (i <= 0) continue;
+                String name = line.substring(0, i);
+                String appid = line.substring(i + 1);
+                gameList.add(new GameItem("", name, buildLocalUrl(appid)));
+            }
+            addLog("[local] games: " + gameList.size());
+        }
+        if (cloudOn) {
+            loadGameListFromServer();
+        } else {
+            if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
+                saveSelectedGame(gameList.get(0).name, gameList.get(0).url);
+            }
+            if (gameList.isEmpty()) {
+                addLog("[game] no data source");
+            }
+        }
+    }
+
 
     private void loadGameListFromServer() {
         addLog("[网络] 正在加载游戏列表...");
@@ -512,7 +569,6 @@ private void setupImmersiveMode() {
             return;
         }
 
-        gameList.clear();
         Pattern pattern = Pattern.compile("图标：(.*?)；名称：(.*?)；链接：〖链接(.*?)〗；");
         Matcher matcher = pattern.matcher(data);
 

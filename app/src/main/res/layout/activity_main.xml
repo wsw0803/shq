@@ -150,6 +150,44 @@
 
     </LinearLayout>
 
+    <!-- data source -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="> 数据源"
+        android:textSize="11sp"
+        android:textColor="#00D4FF"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0F1219"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <CheckBox
+            android:id="@+id/cb_local_source"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="本地 appid"
+            android:textColor="#FFFFFF"
+            android:buttonTint="#00D4FF"
+            android:padding="6dp" />
+
+        <CheckBox
+            android:id="@+id/cb_cloud_source"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="云端 appid"
+            android:textColor="#FFFFFF"
+            android:buttonTint="#00D4FF"
+            android:padding="6dp" />
+
+    </LinearLayout>
+
     <!-- Root 工具 -->
     <TextView
         android:layout_width="wrap_content"
