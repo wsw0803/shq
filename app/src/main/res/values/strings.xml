@@ -1,3 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">WEI上号器</string>
+    <string name="settings">设置</string>
+    <string name="back">返回</string>
 </resources>

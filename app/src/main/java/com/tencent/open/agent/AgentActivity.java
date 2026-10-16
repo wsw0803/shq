@@ -20,6 +20,7 @@ import android.widget.ScrollView;
 import android.widget.Toast;
 
 import com.tencent.tim.R;
+import com.tencent.tim.BaseActivity;
 import com.tencent.tim.NormalWebViewClient;
 import com.tencent.tim.HangUpWebViewClient;
 
@@ -35,7 +36,7 @@ import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class AgentActivity extends Activity {
+public class AgentActivity extends BaseActivity {
 
     private static final String PREF_NAME = "MyPrefs";
     private static final String KEY_RAW_TEXT = "raw_text";

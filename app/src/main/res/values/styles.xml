@@ -4,9 +4,16 @@
         <item name="colorPrimary">@color/bg_primary</item>
         <item name="colorPrimaryDark">@color/bg_primary</item>
         <item name="colorAccent">@color/accent_cyan</item>
-        <item name="android:windowBackground">@color/bg_primary</item>
+        <item name="android:windowBackground">@drawable/bg_window</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:windowAnimationStyle">@style/AppWindowAnim</item>
+    </style>
+    <style name="AppWindowAnim">
+        <item name="android:activityOpenEnterAnimation">@anim/slide_in_right</item>
+        <item name="android:activityOpenExitAnimation">@anim/fade_out</item>
+        <item name="android:activityCloseEnterAnimation">@anim/fade_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/slide_out_right</item>
     </style>
     <style name="SectionLabel">
         <item name="android:textSize">11sp</item>

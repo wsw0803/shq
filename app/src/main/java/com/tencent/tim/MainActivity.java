@@ -42,7 +42,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class MainActivity extends Activity {
+public class MainActivity extends BaseActivity {
 
     private static final String PREF_NAME = "myPrefs";
     private static final String SELECTED_GAME_NAME_KEY = "selected_game_name";
@@ -167,6 +167,8 @@ private void setupImmersiveMode() {
 
         updateSelectGameButtonText();
         updateStorageStatus();
+        android.widget.Button sb = findViewById(R.id.btn_settings);
+        sb.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));
     }
     
     private void loadStorageMethod() {
