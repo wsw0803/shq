@@ -495,12 +495,27 @@ private void setupImmersiveMode() {
         cbCloudSource.setChecked(p.getBoolean(KEY_CLOUD_ON, false));
         cbLocalSource.setOnCheckedChangeListener((v, c) -> {
             getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_LOCAL_ON, c).apply();
-            loadGameList();
+            onSourceToggled();
         });
         cbCloudSource.setOnCheckedChangeListener((v, c) -> {
             getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_CLOUD_ON, c).apply();
-            loadGameList();
+            onSourceToggled();
         });
+    }
+
+    private void onSourceToggled() {
+        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
+        boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
+        if (!localOn && !cloudOn) {
+            p.edit().remove(SELECTED_GAME_NAME_KEY).remove(SELECTED_GAME_URL_KEY).remove(KEY_SYNCED_DATA).apply();
+            selectedGameName = "";
+            selectedGameUrl = "";
+            gameList.clear();
+            updateSelectGameButtonText();
+            addLog("[source] 两个开关已关闭，缓存已清空");
+        }
+        loadGameList();
     }
 
     private String buildLocalUrl(String appid) {
