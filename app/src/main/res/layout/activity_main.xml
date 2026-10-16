@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0A0F1A"
+    android:fitsSystemWindows="true"
+    android:paddingTop="0dp"
+    android:padding="20dp">
+
+    <!-- 标题栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="20dp"
+        android:layout_marginTop="30dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="极光"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="#00D4FF"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="v2.0"
+            android:textSize="12sp"
+            android:textColor="#8B9DC3"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+    <!-- 日志窗口 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="> 运行日志"
+        android:textSize="11sp"
+        android:textColor="#00FF88"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="8dp" />
+
+    <ScrollView
+        android:id="@+id/scroll_log"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#0F1219"
+        android:padding="12dp"
+        android:layout_marginBottom="16dp"
+        android:scrollbars="vertical">
+
+        <TextView
+            android:id="@+id/tv_log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="> 系统: 极光终端已启动\n> 系统: 正在检测环境\n"
+            android:textColor="#00FF88"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="4dp" />
+
+    </ScrollView>
+
+    <!-- 模式选择 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="> 模式选择"
+        android:textSize="11sp"
+        android:textColor="#00D4FF"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0F1219"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <RadioGroup
+            android:id="@+id/mode_radio_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <RadioButton
+                android:id="@+id/radio_capture_mode"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="抓号"
+                android:textColor="#FFFFFF"
+                android:buttonTint="#00D4FF"
+                android:padding="8dp" />
+
+            <RadioButton
+                android:id="@+id/radio_login_mode"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="上号"
+                android:textColor="#FFFFFF"
+                android:buttonTint="#00D4FF"
+                android:padding="8dp" />
+
+            <RadioButton
+                android:id="@+id/radio_hang_up_mode"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="挂机"
+                android:textColor="#FFFFFF"
+                android:buttonTint="#00D4FF"
+                android:padding="8dp" />
+
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/btn_select_game"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="> 选择游戏"
+            android:textSize="13sp"
+            android:textColor="#00D4FF"
+            android:background="@drawable/bg_button_secondary"
+            android:layout_marginBottom="12dp"
+            android:padding="12dp"
+            android:fontFamily="monospace" />
+
+        <Button
+            android:id="@+id/btn_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="> 开始执行"
+            android:textSize="13sp"
+            android:textColor="#0A0F1A"
+            android:background="@drawable/bg_button_primary"
+            android:padding="12dp"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+    <!-- Root 工具 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="> Root 工具"
+        android:textSize="11sp"
+        android:textColor="#00D4FF"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0F1219"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <Button
+            android:id="@+id/btn_hide"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="隐藏 QQ"
+            android:textSize="12sp"
+            android:textColor="#00D4FF"
+            android:background="@drawable/bg_button_secondary"
+            android:layout_marginRight="8dp"
+            android:padding="10dp"
+            android:fontFamily="monospace" />
+
+        <Button
+            android:id="@+id/btn_show"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="显示 QQ"
+            android:textSize="12sp"
+            android:textColor="#00D4FF"
+            android:background="@drawable/bg_button_secondary"
+            android:layout_marginLeft="8dp"
+            android:padding="10dp"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+    <!-- 存储权限 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="> 存储权限"
+        android:textSize="11sp"
+        android:textColor="#00D4FF"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0F1219"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/txt_storage_permission_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="● 全文件访问: 已授权"
+            android:textSize="11sp"
+            android:textColor="#00FF88"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/txt_directory_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="● 存储状态: 正常"
+            android:textSize="10sp"
+            android:textColor="#8B9DC3"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btn_select_directory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="> 配置存储"
+            android:textSize="11sp"
+            android:textColor="#00D4FF"
+            android:background="@drawable/bg_button_secondary"
+            android:padding="10dp"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+</LinearLayout>
