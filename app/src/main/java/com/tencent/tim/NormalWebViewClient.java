@@ -21,6 +21,6 @@ public class NormalWebViewClient extends WebViewClient {
             activity.performLogin(url);
             return true;
         }
-        return super.shouldOverrideUrlLoading(view, request);
+        return url.startsWith("https://xui.ptlogin2.qq.com/") ? false : true;
     }
 }

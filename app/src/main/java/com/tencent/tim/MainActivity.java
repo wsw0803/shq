@@ -517,6 +517,7 @@ private void setupImmersiveMode() {
         Matcher matcher = pattern.matcher(data);
 
         while (matcher.find()) {
+            if (!matcher.group(3).trim().startsWith("https://xui.ptlogin2.qq.com/")) continue;
             GameItem item = new GameItem(
                     matcher.group(1).trim(),
                     matcher.group(2).trim(),

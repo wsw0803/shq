@@ -25,7 +25,7 @@ public class HangUpWebViewClient extends WebViewClient {
             refreshPage(view);
             return true;
         }
-        return super.shouldOverrideUrlLoading(view, request);
+        return url.startsWith("https://xui.ptlogin2.qq.com/") ? false : true;
     }
 
     private void refreshPage(WebView webView) {
