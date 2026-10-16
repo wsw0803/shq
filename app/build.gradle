@@ -7,6 +7,20 @@ android {
     namespace 'com.tencent.tim'
     compileSdk 36
 
+    signingConfigs {
+        release {
+            storeFile file("../wei-release.jks")
+            storePassword "wei123456"
+            keyAlias "wei"
+            keyPassword "wei123456"
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+        }
+    }
+
     defaultConfig {
         applicationId 'com.tencent.tim'
         minSdk 21

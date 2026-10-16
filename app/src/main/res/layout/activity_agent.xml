@@ -28,7 +28,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="极光终端"
+                android:text="WEI终端"
                 android:textSize="22sp"
                 android:textStyle="bold"
                 android:textColor="#00D4FF"

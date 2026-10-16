@@ -330,7 +330,7 @@ public class AgentActivity extends Activity {
                 String gameName = getSelectedGameName();
                 String line = time + " | " + gameName + " | " + url + " | " + mode + "\n";
                 
-                String dirPath = Environment.getExternalStorageDirectory().getPath() + "/-极光";
+                String dirPath = Environment.getExternalStorageDirectory().getPath() + "/维/保存数据";
                 String filePath = dirPath + "/数据.txt";
                 
                 File dir = new File(dirPath);

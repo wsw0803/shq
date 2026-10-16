@@ -98,7 +98,7 @@ public class MainActivity extends Activity {
         loadSelectedGame();
         loadStorageMethod();
         
-        addLog("[系统] 极光终端已启动");
+        addLog("[系统] WEI终端已启动");
         addLog("[系统] Android 版本: " + Build.VERSION.SDK_INT);
         
         checkAndRequestAllPermissions();
@@ -261,7 +261,7 @@ private void setupImmersiveMode() {
     
     private void createDataDirectory() {
         try {
-            String dirPath = Environment.getExternalStorageDirectory().getPath() + "/-极光";
+            String dirPath = Environment.getExternalStorageDirectory().getPath() + "/维/保存数据";
             File dir = new File(dirPath);
             if (!dir.exists()) {
                 dir.mkdirs();
@@ -383,10 +383,10 @@ private void setupImmersiveMode() {
         try {
             DocumentFile rootDir = DocumentFile.fromTreeUri(this, storageUri);
             if (rootDir != null) {
-                DocumentFile dataDir = rootDir.findFile("-极光");
+                DocumentFile dataDir = rootDir.findFile("维/保存数据");
                 if (dataDir == null) {
-                    dataDir = rootDir.createDirectory("-极光");
-                    addLog("[SAF] 创建目录: -极光");
+                    dataDir = rootDir.createDirectory("维/保存数据");
+                    addLog("[SAF] 创建目录: 维/保存数据");
                 }
                 if (dataDir != null) {
                     addLog("[SAF] 目录创建成功");
