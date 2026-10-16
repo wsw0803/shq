@@ -14,13 +14,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Install SDK
-        run: yes | sdkmanager --licenses || true
-      - name: Build
-        run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon
-      - name: Upload
+      - name: Prepare SDK
+        run: |
+          echo sdk.dir=$ANDROID_HOME > local.properties
+          echo no | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools" || true
+      - name: Build release
+        run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
