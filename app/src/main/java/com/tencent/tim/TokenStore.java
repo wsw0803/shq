@@ -147,14 +147,14 @@ public class TokenStore {
         try {
             Process p = Runtime.getRuntime().exec("su");
             java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
-            os.writeBytes("dumpsys activity recents | grep cmp= | head -20; dumpsys activity activities | grep cmp= | head -20; dumpsys window | grep mCurrentFocus | head -2\n");
+            os.writeBytes("dumpsys activity recents\n");
             os.writeBytes("exit\n");
             os.flush();
             os.close();
             java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
             StringBuilder sb = new StringBuilder();
             String ln;
-            while ((ln = br.readLine()) != null) sb.append(ln).append('\n');
+            while ((ln = br.readLine()) != null) { String g = gameOfPackage(ln); if (!g.isEmpty()) { br.close(); p.waitFor(); return g; } }
             br.close();
             p.waitFor();
             return gameOfPackage(sb.toString());
