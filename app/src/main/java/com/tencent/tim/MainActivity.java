@@ -754,7 +754,7 @@ private void setupImmersiveMode() {
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(5000);
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -784,7 +784,7 @@ private void setupImmersiveMode() {
         Matcher matcher = pattern.matcher(data); java.util.List<GameItem> cloudParsed = new java.util.ArrayList<GameItem>();
 
         while (matcher.find()) {
-            if (!matcher.group(3).trim().startsWith("https://xui.ptlogin2.qq.com/")) continue;
+            if (extractAppid(matcher.group(3).trim()) == null) continue;
             GameItem item = new GameItem(
                     matcher.group(1).trim(),
                     matcher.group(2).trim(),
@@ -802,6 +802,7 @@ private void setupImmersiveMode() {
             gameList.add(it);
         }
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
+        addLog("[游戏] 云端解析: " + cloudParsed.size());
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
             GameItem first = gameList.get(0);
