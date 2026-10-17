@@ -308,11 +308,11 @@ public class AgentActivity extends BaseActivity {
                 json.put("pf", "desktop_m_qq-10000144-android-2002-");
                 json.put("page_type", "1");
 
-                String saved = url;
+                String saved = normalizeAuthUrl(url);
                 saveRawDataToPreferences(saved);
 
                 if (!"login".equals(currentMode)) {
-                    saveAccountToFile(saved, currentMode != null ? currentMode : "抓号模式");
+                    saveAccountToFile(saved, appidFrom(url), currentMode != null ? currentMode : "抓号模式");
                 } else {
                     Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
                 }
@@ -330,6 +330,39 @@ public class AgentActivity extends BaseActivity {
         } else {
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private String appidFrom(String url) {
+        String a = com.tencent.tim.TokenStore.appidOfUrl(url);
+        if (a == null || a.isEmpty()) {
+            String su = getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", "");
+            a = com.tencent.tim.TokenStore.appidOfUrl(su);
+        }
+        return (a == null || a.isEmpty()) ? "未知" : a;
+    }
+
+    private String normalizeAuthUrl(String url) {
+        if (url == null || url.isEmpty()) return url;
+        if (url.startsWith("auth://tauth.qq.com") && url.contains("access_token=")) return url;
+        String at = grab(url, "access_token=([^&#]+)");
+        if (at.isEmpty()) return url;
+        String openid = grab(url, "openid=([^&#]+)");
+        String pay = grab(url, "pay_token=([^&#]+)");
+        String exp = grab(url, "expires_in=([^&#]+)");
+        if (exp.isEmpty()) exp = "7776000";
+        String authTime = grab(url, "auth_time=([^&#]+)");
+        String pfkey = grab(url, "key=([^&#]+)");
+        StringBuilder sb = new StringBuilder("auth://tauth.qq.com/?#");
+        sb.append("access_token=").append(at);
+        sb.append("&expires_in=").append(exp);
+        sb.append("&openid=").append(openid);
+        sb.append("&pay_token=").append(pay);
+        sb.append("&ret=0");
+        sb.append("&pf=desktop_m_qq-10000144-android-2002-");
+        if (!pfkey.isEmpty()) sb.append("&pfkey=").append(pfkey);
+        if (!authTime.isEmpty()) sb.append("&auth_time=").append(authTime);
+        sb.append("&page_type=0");
+        return sb.toString();
     }
 
     private String withAppid(String url) {
@@ -361,19 +394,13 @@ public class AgentActivity extends BaseActivity {
                 .getString("selected_game_name", "未知游戏");
     }
 
-    public void saveAccountToFile(String url, String mode) {
+    public void saveAccountToFile(String url, String appid, String mode) {
         new Thread(() -> {
             try {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
                 String gameName = getSelectedGameName();
-                String appid = com.tencent.tim.TokenStore.appidOfUrl(url);
-                if (appid == null || appid.isEmpty()) {
-                    String su = getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", "");
-                    appid = com.tencent.tim.TokenStore.appidOfUrl(su);
-                }
-                if (appid == null || appid.isEmpty()) appid = "未知";
-                final String aidShown = appid;
-                String line = time + " | " + aidShown + " | " + url + " | " + mode;
+                final String aidShown = (appid == null || appid.isEmpty()) ? "未知" : appid;
+                String line = com.tencent.tim.TokenStore.joinLine("", time, aidShown, url, mode);
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(gameName, line);
                 final String g = gameName;
                 runOnUiThread(() -> {
