@@ -700,7 +700,7 @@ private void setupImmersiveMode() {
         gameList.clear();
         if (localOn) {
             String synced = p.getString(KEY_SYNCED_DATA, "");
-            String all = synced.isEmpty() ? LOCAL_GAME_DATA : synced;
+            String all = cloudOn ? (synced.isEmpty() ? LOCAL_GAME_DATA : synced) : LOCAL_GAME_DATA;
             java.util.HashSet<String> seen = new java.util.HashSet<>();
             for (String line : all.split(";")) {
                 int i = line.indexOf("|");
