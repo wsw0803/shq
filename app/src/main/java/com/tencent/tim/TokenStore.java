@@ -15,8 +15,6 @@ public class TokenStore {
     public static final String[] GAMES = {"和平", "王者", "三角洲", "无畏契约"};
     public static final String[] APPIDS = {"1106467070", "1104466820", "1110543085", "1111677210"};
     public static final String ROOT_NAME = "WEI";
-    public static final String DATA_NAME = "";
-    public static final String FILE_NAME = "数据.txt";
     public static String lastError = "";
     public static android.content.Context appContext = null;
     public static void init(android.content.Context c) { if (c != null) appContext = c.getApplicationContext(); }
@@ -31,10 +29,6 @@ public class TokenStore {
         File d = new File(Environment.getExternalStorageDirectory(), "Download");
         try { if (!d.exists()) d.mkdirs(); } catch (Throwable ignored) {}
         return d;
-    }
-
-    public static File gameDir(String game) {
-        return rootDir();
     }
 
     public static File gameFile(String game) {
@@ -178,26 +172,6 @@ public class TokenStore {
         }
     }
 
-    public static boolean rootAppend(File f, String line) {
-        try {
-            String txt = line.endsWith("\n") ? line : line + "\n";
-            String payload = android.util.Base64.encodeToString(txt.getBytes("UTF-8"), android.util.Base64.NO_WRAP);
-            String dir = f.getParentFile().getAbsolutePath();
-            String path = f.getAbsolutePath();
-            String cmd = "mkdir -p '" + dir + "'; echo " + payload + " | base64 -d >> '" + path + "'; chmod 666 '" + path + "'";
-            Process p = Runtime.getRuntime().exec("su");
-            java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
-            os.writeBytes(cmd + "\n");
-            os.writeBytes("exit\n");
-            os.flush();
-            os.close();
-            int code = p.waitFor();
-            if (code != 0) lastError = "root 退出码 " + code; return code == 0;
-        } catch (Exception e) {
-            return RootUtil.append(f, line);
-        }
-    }
-
     public static List<Entry> loadAll() {
         List<Entry> all = new ArrayList<>();
         for (String g : listGameFolders()) all.addAll(loadGame(g));
@@ -205,7 +179,7 @@ public class TokenStore {
     }
 
     public static boolean saveGameEntry(String game, String line) {
-        if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
+        if (game == null || game.isEmpty()) game = "其他";
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
         java.util.List<String> out = new java.util.ArrayList<String>();
