@@ -333,18 +333,14 @@ public class TokenStore {
             while ((line = br.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
-                String[] sp = line.split(String.valueOf((char)124)); if (sp.length >= 5) { StringBuilder b = new StringBuilder(); for (int i = 0; i < 4; i++) { if (i > 0) b.append((char)124); b.append(sp[i]); } line = b.toString(); }
+                Entry pe = parseLine(line, "");
                 String game = gameOfUrl(line);
-                if (game == null || game.isEmpty()) {
-                    Entry e = parseLine(line, "");
-                    if (e != null) game = e.game;
-                }
+                if ((game == null || game.isEmpty()) && pe != null && java.util.Arrays.asList(GAMES).contains(pe.game)) game = pe.game;
                 if (game != null && !game.isEmpty()) {
-                    if (saveGameEntry(game, line)) res.added++;
-                } else {
-                    if (line.contains("access_token=") || line.contains("openid=") || (line.length() >= 16 && !line.contains(" "))) {
-                        res.unknownLines.add(line);
-                    }
+                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode);
+                    if (saveGameEntry(game, keep)) res.added++;
+                } else if (pe != null && !pe.accessToken.isEmpty()) {
+                    res.unknownLines.add(line);
                 }
             }
             br.close();
