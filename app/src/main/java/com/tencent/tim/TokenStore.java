@@ -24,11 +24,11 @@ public class TokenStore {
     }
 
     public static File gameDir(String game) {
-        return new File(rootDir(), game);
+        return rootDir();
     }
 
     public static File gameFile(String game) {
-        return new File(gameDir(game), FILE_NAME);
+        return new File(rootDir(), game + ".txt");
     }
 
     public static String appidOfGame(String game) {
@@ -124,7 +124,7 @@ public class TokenStore {
     public static java.util.List<String> listGameFolders() {
         java.util.List<String> names = new ArrayList<String>();
         for (String g : GAMES) names.add(g);
-        File[] dirs = rootDir().listFiles();
+        File[] dirs = null;
         if (dirs != null) {
             for (File d : dirs) {
                 if (d.isDirectory() && !names.contains(d.getName())) names.add(d.getName());

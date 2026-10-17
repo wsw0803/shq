@@ -265,7 +265,7 @@ public class AgentActivity extends BaseActivity {
         String g = com.tencent.tim.TokenStore.gameOfUrl(url);
         String appid = com.tencent.tim.TokenStore.appidOfUrl(url);
         if (g != null && !g.isEmpty()) {
-            tv.setText("自动识别: " + g + "  ·  appid " + appid + "  ·  保存到 维/保存数据/" + g);
+            tv.setText("自动识别: " + g + "  ·  appid " + appid + "  ·  保存到 维/保存数据/" + g + ".txt");
             tv.setTextColor(0xFF34D399);
         } else {
             tv.setText("自动识别: 未识别到游戏（将存入其他目录）");
