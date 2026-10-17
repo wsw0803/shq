@@ -104,7 +104,7 @@ public class TokenStore {
             e.time = parts[0].trim();
             e.raw = parts[2].trim();
             e.mode = parts[3].trim();
-            if (parts.length >= 5) e.note = parts[4].trim();
+            if (parts.length >= 5) { StringBuilder nb = new StringBuilder(); for (int k = 4; k < parts.length; k++) { if (k > 4) nb.append((char)124); nb.append(parts[k]); } e.note = nb.toString().trim(); }
         } else if (parts.length >= 2) {
             e.time = parts[0].trim();
             e.raw = parts[1].trim();
@@ -159,12 +159,11 @@ public class TokenStore {
             os.flush();
             os.close();
             java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
-            StringBuilder sb = new StringBuilder();
             String ln;
             while ((ln = br.readLine()) != null) { String g = gameOfPackage(ln); if (!g.isEmpty()) { br.close(); p.waitFor(); return g; } }
             br.close();
             p.waitFor();
-            return gameOfPackage(sb.toString());
+            return "";
         } catch (Exception e) {
             return "";
         }
@@ -200,18 +199,20 @@ public class TokenStore {
         if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
-        if (!token.isEmpty() && f.exists()) { deleteEntry(game, token); }
-        try {
-            File dir = gameDir(game);
-            if (!dir.exists()) dir.mkdirs();
-            FileWriter w = new FileWriter(f, true);
-            w.append(line);
-            if (!line.endsWith("\n")) w.append("\n");
-            w.flush();
-            w.close();
-            if (f.exists()) return true;
-        } catch (Exception ignored) {}
-        return RootUtil.append(f, line);
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (f.exists()) {
+            try {
+                Scanner sc = new Scanner(f, "UTF-8");
+                while (sc.hasNextLine()) {
+                    String ln = sc.nextLine();
+                    if (!token.isEmpty() && lineHasToken(ln, token)) continue;
+                    out.add(ln);
+                }
+                sc.close();
+            } catch (Exception ignored) {}
+        }
+        out.add(line);
+        return writeLinesAtomic(f, out);
     }
 
     public static String rebuildUrl(Entry e) {
@@ -225,45 +226,39 @@ public class TokenStore {
     }
 
     public static boolean deleteEntry(String game, String token) {
+        File f = gameFile(game);
+        if (!f.exists()) return false;
+        java.util.List<String> keep = new java.util.ArrayList<String>();
         try {
-            File f = gameFile(game);
-            if (!f.exists()) return false;
-            java.util.List<String> keep = new java.util.ArrayList<String>();
             Scanner sc = new Scanner(f, "UTF-8");
             while (sc.hasNextLine()) {
                 String ln = sc.nextLine();
-                if (ln.contains(token)) continue;
+                if (lineHasToken(ln, token)) continue;
                 keep.add(ln);
             }
             sc.close();
-            FileWriter w = new FileWriter(f, false);
-            for (int i = 0; i < keep.size(); i++) {
-                w.append(keep.get(i));
-                w.append("\n");
-            }
-            w.flush();
-            w.close();
-            return true;
         } catch (Exception e) {
-            lastError = "删除失败: " + e;
+            lastError = "read fail: " + e.getMessage();
             return false;
         }
+        if (!writeLinesAtomic(f, keep)) { lastError = "delete fail"; return false; }
+        return true;
     }
 
     public static boolean updateNote(String game, String token, String note) {
         File f = gameFile(game);
         if (!f.exists()) return false;
+        java.util.List<String> lines = new java.util.ArrayList<String>();
+        boolean found = false;
         try {
-            java.util.List<String> lines = new java.util.ArrayList<String>();
             Scanner sc = new Scanner(f, "UTF-8");
-            boolean found = false;
             while (sc.hasNextLine()) {
                 String line = sc.nextLine();
-                if (!found && line.contains(token)) {
+                if (!found && lineHasToken(line, token)) {
                     String[] parts = line.split(String.valueOf((char)124));
                     StringBuilder sb = new StringBuilder();
                     if (parts.length >= 4) {
-                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()).append(" | ").append(note);
+                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()).append(" | ").append(note.replace(String.valueOf((char)124), "/"));
                     } else {
                         sb.append(line).append(" | ").append(note);
                     }
@@ -274,12 +269,10 @@ public class TokenStore {
                 }
             }
             sc.close();
-            if (!found) return false;
-            java.io.FileWriter fw = new java.io.FileWriter(f, false);
-            for (int i = 0; i < lines.size(); i++) fw.append(lines.get(i)).append(String.valueOf((char)10));
-            fw.flush(); fw.close();
-            return true;
         } catch (Exception e) { lastError = "note fail: " + e.getMessage(); return false; }
+        if (!found) return false;
+        if (!writeLinesAtomic(f, lines)) { lastError = "note fail"; return false; }
+        return true;
     }
 
     public static void copy(String label, String text, android.content.Context c) {
@@ -379,4 +372,33 @@ public class TokenStore {
         out.close();
     }
 
+    private static boolean writeLinesAtomic(File f, java.util.List<String> lines) {
+        try {
+            File tmp = new File(f.getAbsolutePath() + ".tmp");
+            FileWriter w = new FileWriter(tmp, false);
+            for (int i = 0; i < lines.size(); i++) { w.append(lines.get(i)); w.append((char)10); }
+            w.flush(); w.close();
+            if (!lines.isEmpty() && tmp.length() == 0) { tmp.delete(); return false; }
+            File bak = new File(f.getAbsolutePath() + ".bak");
+            if (f.exists()) {
+                if (bak.exists()) bak.delete();
+                if (!f.renameTo(bak)) { tmp.delete(); return false; }
+            }
+            if (!tmp.renameTo(f)) {
+                if (bak.exists()) bak.renameTo(f);
+                tmp.delete();
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            lastError = "write fail: " + e.getMessage();
+            return false;
+        }
+    }
+
+    private static boolean lineHasToken(String line, String token) {
+        if (line == null || token == null || token.isEmpty()) return false;
+        Entry e = parseLine(line, "");
+        return e != null && token.equals(e.accessToken);
+    }
 }

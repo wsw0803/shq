@@ -172,6 +172,7 @@ private void setupImmersiveMode() {
             viewToken.setOnClickListener(v -> TokenDialog.show(this, "", null));
         }
         android.widget.Button sb = findViewById(R.id.btn_settings);
+        if (sb == null) return;
         sb.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));
     }
     
