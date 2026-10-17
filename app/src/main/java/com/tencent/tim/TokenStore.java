@@ -142,6 +142,18 @@ public class TokenStore {
         return names;
     }
 
+    public static String nextGameWithAccounts(String current) {
+        if (current != null && !current.isEmpty() && !loadGame(current).isEmpty()) return current;
+        java.util.List<String> all = listGameFolders();
+        int idx = all.indexOf(current);
+        if (idx < 0) idx = 0;
+        for (int i = 1; i <= all.size(); i++) {
+            String g = all.get((idx + i) % all.size());
+            if (!loadGame(g).isEmpty()) return g;
+        }
+        return "";
+    }
+
     public static String gameOfPackage(String t) {
         if (t == null) return "";
         String s = t.toLowerCase();

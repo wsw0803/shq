@@ -26,7 +26,7 @@ jobs:
       - name: Calculate Version
         id: version
         run: |
-          COUNT=$(git rev-list --count HEAD)
+          COUNT=${GITHUB_RUN_NUMBER}
           MAJOR=$((COUNT / 100))
           MINOR=$(((COUNT % 100) / 10))
           PATCH=$((COUNT % 10))

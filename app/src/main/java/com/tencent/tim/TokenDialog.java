@@ -425,7 +425,7 @@ public class TokenDialog {
                 android.widget.Toast.makeText(c, done ? "已删除" : "删除失败", android.widget.Toast.LENGTH_SHORT).show();
                 if (done) {
                     if (parent != null) parent.dismiss();
-                    show(c, "", cb);
+                    show(c, TokenStore.nextGameWithAccounts(e.game), cb);
                 }
             }
         });
