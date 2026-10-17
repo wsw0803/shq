@@ -49,6 +49,7 @@ public class MainActivity extends BaseActivity {
     private static final String GAME_LIST_URL = "https://iappht.sslqq.cn/user/getFile.php?fid=7487";
     private static final String PTLOGIN_BASE = "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=%s&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=%s&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
     private static final String KEY_SYNCED_DATA = "synced_data";
+    private static final String KEY_CLOUD_APPID_ENABLED = "cloud_appid_enabled";
     private static final String KEY_STORAGE_URI = "storage_uri";
     
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
@@ -61,6 +62,7 @@ public class MainActivity extends BaseActivity {
     private RadioButton radioLoginMode;
     private RadioButton radioHangUpMode;
     private Button selectGameButton;
+    private Button cloudAppidButton;
     private Button startButton;
     private Button hideButton;
     private Button showButton;
@@ -98,13 +100,7 @@ public class MainActivity extends BaseActivity {
         
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
-        loadGameList();
-        if (gameList.isEmpty()) {
-            addLog("[游戏] 无本地缓存，联网拉取云端列表");
-            loadGameListFromServer();
-        } else {
-            addLog("[游戏] 使用本地缓存，跳过云端: " + gameList.size());
-        }
+        refreshGameList();
         checkForUpdates();
     }
     
@@ -180,6 +176,7 @@ private void setupImmersiveMode() {
         radioLoginMode = findViewById(R.id.radio_login_mode);
         radioHangUpMode = findViewById(R.id.radio_hang_up_mode);
         selectGameButton = findViewById(R.id.btn_select_game);
+        cloudAppidButton = findViewById(R.id.btn_cloud_appid);
         startButton = findViewById(R.id.btn_start);
         hideButton = findViewById(R.id.btn_hide);
         showButton = findViewById(R.id.btn_show);
@@ -190,6 +187,10 @@ private void setupImmersiveMode() {
         scrollLog = findViewById(R.id.scroll_log);
 
         updateSelectGameButtonText();
+        if (cloudAppidButton != null) {
+            cloudAppidButton.setOnClickListener(v -> toggleCloudAppid());
+        }
+        updateCloudAppidButton();
         updateStorageStatus();
         android.widget.Button viewToken = findViewById(R.id.btn_view_token);
         if (viewToken != null) {
@@ -650,6 +651,39 @@ private void setupImmersiveMode() {
         dlg.show();
     }
 
+    private boolean isCloudAppidEnabled() {
+        return getSharedPreferences(PREF_NAME, MODE_PRIVATE).getBoolean(KEY_CLOUD_APPID_ENABLED, true);
+    }
+
+    private void updateCloudAppidButton() {
+        if (cloudAppidButton == null) return;
+        cloudAppidButton.setText(isCloudAppidEnabled() ? "云端AppID: 开启" : "云端AppID: 关闭 仅本地缓存");
+    }
+
+    private void toggleCloudAppid() {
+        boolean next = !isCloudAppidEnabled();
+        getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_CLOUD_APPID_ENABLED, next).apply();
+        updateCloudAppidButton();
+        gameList.clear();
+        if (next) {
+            getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().remove(KEY_SYNCED_DATA).apply();
+            addLog("[云端] 已开启 缓存已删除 拉取云端");
+            loadGameListFromServer();
+        } else {
+            addLog("[云端] 已关闭 仅使用本地缓存");
+            loadGameList();
+        }
+    }
+
+    private void refreshGameList() {
+        gameList.clear();
+        if (isCloudAppidEnabled()) {
+            loadGameListFromServer();
+        } else {
+            addLog("[云端] 已关闭 启动只加载本地缓存");
+            loadGameList();
+        }
+    }
     private String buildLocalUrl(String appid) {
         return String.format(PTLOGIN_BASE, appid, appid);
     }
@@ -738,7 +772,8 @@ private void setupImmersiveMode() {
 
     public void parseGameData(String data) {
         if (data == null || data.isEmpty()) {
-            addLog("[游戏] 列表为空");
+            addLog("[游戏] 云端为空 回退本地");
+            loadGameList();
             return;
         }
 
@@ -755,7 +790,14 @@ private void setupImmersiveMode() {
             cloudParsed.add(item);
         }
 
-        syncToLocal(cloudParsed); java.util.HashSet<String> _ex = new java.util.HashSet<String>(); for (GameItem _g0 : gameList) if (_g0.url != null) _ex.add(_g0.url); for (GameItem _g1 : cloudParsed) if (_g1.url != null && _ex.add(_g1.url)) gameList.add(_g1);
+        syncToLocal(cloudParsed);
+        gameList.clear();
+        java.util.HashSet<String> seenIds = new java.util.HashSet<String>();
+        for (GameItem it : cloudParsed) {
+            String aid = extractAppid(it.url);
+            if (aid != null && !seenIds.add(aid)) continue;
+            gameList.add(it);
+        }
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
