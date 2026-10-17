@@ -358,15 +358,16 @@ public class AgentActivity extends BaseActivity {
                 .getString("selected_game_name", "未知游戏");
     }
 
-    public void saveAccountToFile(String url, String mode) {
+    public void saveAccountToFile(String urlIn, String mode) {
+        final String urlArg = urlIn;
         new Thread(() -> {
             try {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
                 String game = getSelectedGameName();
-                if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = com.tencent.tim.TokenStore.gameOfUrl(url);
+                if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = com.tencent.tim.TokenStore.gameOfUrl(urlArg);
 
-                
                 if (game == null || game.isEmpty()) game = "其他";
+                String url = urlArg;
                 if (url != null && url.indexOf("appid=") < 0 && url.indexOf("client_id=") < 0) {
                     String aid = com.tencent.tim.TokenStore.appidOfGame(game);
                     if (aid == null || aid.isEmpty()) {
