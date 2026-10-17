@@ -58,9 +58,7 @@ public class TokenDialog {
         root.addView(title);
 
         TextView tip = new TextView(c);
-        tip.setText("成功导入 " + added + " 条。
-有 " + tokens.size() + " 条 Token 无法自动识别游戏。
-请选择要将它们保存到哪个标签：");
+        tip.setText("成功导入 " + added + " 条。\n有 " + tokens.size() + " 条 Token 无法自动识别游戏。\n请选择要将它们保存到哪个标签：");
         tip.setTextColor(0xFF8A9BB8);
         tip.setTextSize(12);
         tip.setGravity(Gravity.CENTER);
