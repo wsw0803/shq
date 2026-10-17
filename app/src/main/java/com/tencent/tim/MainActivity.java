@@ -255,7 +255,7 @@ private void setupImmersiveMode() {
 
     public void startImportFilePicker() {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
-        intent.setType("*/*");
+        intent.setType("text/plain");
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
         startActivityForResult(intent, 1002);
     }
