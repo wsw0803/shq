@@ -370,7 +370,8 @@ public class AgentActivity extends BaseActivity {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
                 String game = com.tencent.tim.TokenStore.gameOfUrl(url);
                 if (game == null || game.isEmpty()) game = getSelectedGameName();
-                if (game == null || game.isEmpty() || !isKnownGame(game)) game = "和平";
+                if (game == null || game.isEmpty()) game = getSelectedGameName();
+                if (game == null || game.isEmpty()) game = "其他";
                 String line = time + " | " + game + " | " + url + " | " + mode;
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(game, line);
                 final String g = game;

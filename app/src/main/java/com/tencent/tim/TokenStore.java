@@ -129,7 +129,7 @@ public class TokenStore {
     public static boolean saveGameEntry(String game, String line) {
         try {
             File dir = gameDir(game);
-            if (!dir.exists() && !dir.mkdirs()) return false;
+            if (!dir.exists()) dir.mkdirs();
             File f = gameFile(game);
             String token = grab(line, "access_token=([^&\\s]+)");
             if (!token.isEmpty() && f.exists()) {
