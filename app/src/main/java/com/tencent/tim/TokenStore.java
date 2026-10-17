@@ -226,7 +226,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
     }
 
     public static boolean saveGameEntry(String game, String line) {
-        if (line != null && line.indexOf("proxy.htm") >= 0) { String at = grab(line, "access_token=([^&\\s]+)"); if (at.isEmpty()) { lastError = "SDK 中转页缺少 access_token"; return false; } String oid = grab(line, "openid=([^&\\s]+)"); String pt = grab(line, "pay_token=([^&\\s]+)"); String full = line; int ak = full.indexOf("access_token="); if (ak > 0) full = full.substring(ak); int bar = full.indexOf(" |"); if (bar >= 0) full = full.substring(0, bar); int hs = full.lastIndexOf((char)35); if (hs >= 0) full = full.substring(hs + 1); String nu = "auth://tauth.qq.com/?#" + full; line = line.replaceAll("https?://[^ |]+", java.util.regex.Matcher.quoteReplacement(nu)); }
+        
         if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
