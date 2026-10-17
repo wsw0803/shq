@@ -256,7 +256,7 @@ public class TokenDialog {
         noteBtn.setTextSize(12);
         noteBtn.setPadding(dp(c, 20), dp(c, 10), dp(c, 8), dp(c, 10));
         noteBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showNoteDialog(c, e, dlg); }
+            public void onClick(View v) { showNoteDialog(c, e, dlg, cb); }
         });
         row.addView(noteBtn);
 
@@ -346,7 +346,7 @@ public class TokenDialog {
     }
 
 
-    private static void showNoteDialog(final Context c, final TokenStore.Entry e, final Dialog parent) {
+    private static void showNoteDialog(final Context c, final TokenStore.Entry e, final Dialog parent, final OnPick cb) {
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(c);
         b.setTitle("设置备注");
         final android.widget.EditText et = new android.widget.EditText(c);
@@ -360,6 +360,11 @@ public class TokenDialog {
                 String newNote = et.getText().toString().trim();
                 boolean done = TokenStore.updateNote(e.game, e.accessToken, newNote);
                 android.widget.Toast.makeText(c, done ? "备注已保存" : "保存失败", android.widget.Toast.LENGTH_SHORT).show();
+                if (done) {
+                    e.note = newNote;
+                    if (parent != null && parent.isShowing()) parent.dismiss();
+                    show(c, e.game, cb);
+                }
                 if (done && parent != null) parent.dismiss();
             }
         });
