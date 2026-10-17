@@ -76,6 +76,40 @@ public class TokenDialog {
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
         hs.addView(tabRow);
         root.addView(hs);
+        LinearLayout actionRow = new LinearLayout(c);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[] acts = {"手动添加", "导出到Download", "从Download导入"};
+        for (int ai = 0; ai < acts.length; ai++) {
+            final int idx = ai;
+            TextView b = new TextView(c);
+            b.setText(acts[ai]);
+            b.setTextSize(11);
+            b.setTextColor(0xFF22D3EE);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(dp(c, 8), dp(c, 8), dp(c, 8), dp(c, 8));
+            b.setBackground(glass(c, 10, false));
+            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            blp.leftMargin = dp(c, 3);
+            blp.rightMargin = dp(c, 3);
+            b.setLayoutParams(blp);
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (idx == 0) showAddDialog(c, dlg);
+                    else if (idx == 1) {
+                        int n = TokenStore.exportAll();
+                        android.widget.Toast.makeText(c, n > 0 ? ("已导出 " + n + " 个文件到 Download/WEI") : "没有可导出的数据", android.widget.Toast.LENGTH_LONG).show();
+                    } else {
+                        int n = TokenStore.importAll();
+                        android.widget.Toast.makeText(c, n > 0 ? ("已导入 " + n + " 条新记录") : "未发现新记录", android.widget.Toast.LENGTH_LONG).show();
+                        dlg.dismiss();
+                        show(c, "", cb);
+                    }
+                }
+            });
+            actionRow.addView(b);
+        }
+        root.addView(actionRow);
+
 
         final ScrollView scroll = new ScrollView(c);
         final LinearLayout box = new LinearLayout(c);
@@ -341,4 +375,80 @@ public class TokenDialog {
         if (!TextUtils.isEmpty(e.mode)) sb.append(" | ").append(e.mode);
         return sb.toString();
     }
+    private static void showAddDialog(final Context c, final Dialog parent) {
+        final Dialog d = new Dialog(c);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackground(glass(c, 20, true));
+        int p = dp(c, 16);
+        root.setPadding(p, p, p, p);
+        TextView t = new TextView(c);
+        t.setText("手动添加 Token");
+        t.setTextColor(0xFFF5F7FA);
+        t.setTextSize(16);
+        t.setGravity(Gravity.CENTER);
+        root.addView(t);
+        final String[] games = TokenStore.listGameFolders().toArray(new String[0]);
+        final int[] pick = {0};
+        final TextView gameBtn = new TextView(c);
+        gameBtn.setText("游戏: " + games[0]);
+        gameBtn.setTextColor(0xFF22D3EE);
+        gameBtn.setTextSize(13);
+        gameBtn.setGravity(Gravity.CENTER);
+        gameBtn.setPadding(0, dp(c, 12), 0, dp(c, 12));
+        gameBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                new android.app.AlertDialog.Builder(c).setTitle("选择游戏")
+                    .setItems(games, new android.content.DialogInterface.OnClickListener() {
+                        public void onClick(android.content.DialogInterface dd, int w) {
+                            pick[0] = w;
+                            gameBtn.setText("游戏: " + games[w]);
+                        }
+                    }).show();
+            }
+        });
+        root.addView(gameBtn);
+        final android.widget.EditText et = new android.widget.EditText(c);
+        et.setHint("粘贴 access_token 或完整 auth:// 链接");
+        et.setTextColor(0xFFE6EEF8);
+        et.setHintTextColor(0xFF8A9BB8);
+        et.setTextSize(12);
+        et.setMinLines(3);
+        et.setPadding(dp(c, 10), dp(c, 10), dp(c, 10), dp(c, 10));
+        et.setBackground(glass(c, 12, false));
+        root.addView(et);
+        TextView ok = new TextView(c);
+        ok.setText("保 存");
+        ok.setTextColor(0xFF34D399);
+        ok.setTextSize(14);
+        ok.setGravity(Gravity.CENTER);
+        ok.setPadding(0, dp(c, 16), 0, dp(c, 8));
+        ok.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String txt = et.getText().toString().trim();
+                if (txt.isEmpty()) { android.widget.Toast.makeText(c, "内容为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
+                String raw = txt;
+                if (!raw.contains("access_token=")) raw = "access_token=" + raw;
+                String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
+                String line = time + " | " + games[pick[0]] + " | " + raw + " | 手动";
+                boolean done = TokenStore.saveGameEntry(games[pick[0]], line);
+                android.widget.Toast.makeText(c, done ? "已保存到 " + games[pick[0]] : ("保存失败: " + TokenStore.lastError), android.widget.Toast.LENGTH_LONG).show();
+                if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }
+            }
+        });
+        root.addView(ok);
+        TextView cancel = new TextView(c);
+        cancel.setText("取消");
+        cancel.setTextColor(0xFF8A9BB8);
+        cancel.setTextSize(12);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { d.dismiss(); } });
+        root.addView(cancel);
+        d.setContentView(root);
+        Window w = d.getWindow();
+        if (w != null) { w.setBackgroundDrawableResource(android.R.color.transparent); WindowManager.LayoutParams wp = w.getAttributes(); wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.86f); w.setAttributes(wp); }
+        d.show();
+    }
+
 }

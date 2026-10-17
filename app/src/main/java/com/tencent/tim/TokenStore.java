@@ -22,11 +22,15 @@ public class TokenStore {
     public static void init(android.content.Context c) { if (c != null) appContext = c.getApplicationContext(); }
 
     public static File rootDir() {
-        File ext = new File(Environment.getExternalStorageDirectory(), ROOT_NAME);
-        try { if (!ext.exists()) ext.mkdirs(); } catch (Throwable ignored) {}
-        if (ext.isDirectory() && ext.canWrite()) return ext;
-        try { File app = appContext == null ? null : appContext.getExternalFilesDir(null); if (app != null) { File w = new File(app, ROOT_NAME); if (!w.exists()) w.mkdirs(); if (w.isDirectory()) return w; } } catch (Throwable ignored) {}
-        return ext;
+        File dir = new File(appContext.getFilesDir(), ROOT_NAME);
+        try { if (!dir.exists()) dir.mkdirs(); } catch (Throwable ignored) {}
+        return dir;
+    }
+
+    public static File downloadDir() {
+        File d = new File(Environment.getExternalStorageDirectory(), "Download");
+        try { if (!d.exists()) d.mkdirs(); } catch (Throwable ignored) {}
+        return d;
     }
 
     public static File gameDir(String game) {
@@ -196,15 +200,7 @@ public class TokenStore {
         if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
-        if (!token.isEmpty() && f.exists()) {
-            try {
-                Scanner sc = new Scanner(f, "UTF-8");
-                while (sc.hasNextLine()) {
-                    if (sc.nextLine().contains(token)) { sc.close(); lastError = "该账号已存在，未重复写入"; return false; }
-                }
-                sc.close();
-            } catch (Exception ignored) {}
-        }
+        if (!token.isEmpty() && f.exists()) { deleteEntry(game, token); }
         try {
             File dir = gameDir(game);
             if (!dir.exists()) dir.mkdirs();
@@ -296,4 +292,79 @@ public class TokenStore {
             android.widget.Toast.makeText(c, "已复制" + label, android.widget.Toast.LENGTH_SHORT).show();
         } catch (Exception ignored) {}
     }
+    public static int exportAll() {
+        int n = 0;
+        File src = rootDir();
+        File dst = new File(downloadDir(), ROOT_NAME);
+        try { if (!dst.exists()) dst.mkdirs(); } catch (Throwable ignored) {}
+        File[] fs = src.listFiles();
+        if (fs == null) return 0;
+        for (int i = 0; i < fs.length; i++) {
+            File f = fs[i];
+            if (!f.isFile() || !f.getName().endsWith(".txt")) continue;
+            try { copyFile(f, new File(dst, f.getName())); n++; } catch (Exception ignored) {}
+        }
+        return n;
+    }
+
+    public static int importAll() {
+        int added = 0;
+        File dst = rootDir();
+        File srcDir = new File(downloadDir(), ROOT_NAME);
+        File[] fs = srcDir.listFiles();
+        if (fs == null) fs = downloadDir().listFiles();
+        if (fs == null) return 0;
+        for (int i = 0; i < fs.length; i++) {
+            File f = fs[i];
+            if (!f.isFile() || !f.getName().endsWith(".txt")) continue;
+            added += mergeFile(f, new File(dst, f.getName()));
+        }
+        return added;
+    }
+
+    private static int mergeFile(File src, File dst) {
+        int added = 0;
+        try {
+            java.util.Set<String> existing = new java.util.HashSet<String>();
+            java.util.List<String> out = new java.util.ArrayList<String>();
+            if (dst.exists()) {
+                Scanner sc = new Scanner(dst, "UTF-8");
+                while (sc.hasNextLine()) {
+                    String ln = sc.nextLine();
+                    out.add(ln);
+                    String t = grab(ln, "access_token=([^&]+)");
+                    if (!t.isEmpty()) existing.add(t);
+                }
+                sc.close();
+            }
+            Scanner sc2 = new Scanner(src, "UTF-8");
+            while (sc2.hasNextLine()) {
+                String ln = sc2.nextLine();
+                if (ln.trim().isEmpty()) continue;
+                String t = grab(ln, "access_token=([^&]+)");
+                if (!t.isEmpty() && existing.contains(t)) continue;
+                out.add(ln);
+                if (!t.isEmpty()) existing.add(t);
+                added++;
+            }
+            sc2.close();
+            FileWriter w = new FileWriter(dst, false);
+            for (int i = 0; i < out.size(); i++) { w.append(out.get(i)); w.append((char)10); }
+            w.flush(); w.close();
+        } catch (Exception e) {
+            lastError = "导入失败: " + e.getMessage();
+        }
+        return added;
+    }
+
+    private static void copyFile(File src, File dst) throws Exception {
+        java.io.FileInputStream in = new java.io.FileInputStream(src);
+        java.io.FileOutputStream out = new java.io.FileOutputStream(dst);
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        in.close();
+        out.close();
+    }
+
 }
