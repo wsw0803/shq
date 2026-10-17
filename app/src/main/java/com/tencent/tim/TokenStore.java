@@ -135,11 +135,16 @@ public class TokenStore {
         return list;
     }
 
-    public static java.util.List<String> listGameFolders() {
+    public static java.util.List<String> allGames() {
         java.util.List<String> names = new ArrayList<String>();
         for (String g : GAMES) names.add(g);
         if (!names.contains("其他")) names.add("其他");
         return names;
+    }
+    public static java.util.List<String> listGameFolders() {
+        java.util.List<String> out = new ArrayList<String>();
+        for (String g : allGames()) { if (!loadGame(g).isEmpty()) out.add(g); }
+        return out;
     }
 
     public static String nextGameWithAccounts(String current) {
@@ -328,6 +333,7 @@ public class TokenStore {
             while ((line = br.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
+                String[] sp = line.split(String.valueOf((char)124)); if (sp.length >= 5) { StringBuilder b = new StringBuilder(); for (int i = 0; i < 4; i++) { if (i > 0) b.append((char)124); b.append(sp[i]); } line = b.toString(); }
                 String game = gameOfUrl(line);
                 if (game == null || game.isEmpty()) {
                     Entry e = parseLine(line, "");

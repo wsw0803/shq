@@ -42,7 +42,7 @@ public class TokenDialog {
 
 
     public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
-        final String[] games = TokenStore.GAMES;
+        final String[] games = TokenStore.allGames().toArray(new String[0]);
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(glass(c, 22, true));
@@ -70,31 +70,40 @@ public class TokenDialog {
             dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
         }
 
+        LinearLayout cols = new LinearLayout(c);
+        cols.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout colA = new LinearLayout(c);
+        colA.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout colB = new LinearLayout(c);
+        colB.setOrientation(LinearLayout.VERTICAL);
+        cols.addView(colA, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        cols.addView(colB, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         for (int i = 0; i < games.length; i++) {
             final String g = games[i];
             TextView btn = new TextView(c);
             btn.setText(g);
             btn.setTextColor(0xFF22D3EE);
-            btn.setTextSize(14);
+            btn.setTextSize(15);
             btn.setGravity(Gravity.CENTER);
-            btn.setPadding(0, dp(c, 12), 0, dp(c, 12));
+            btn.setPadding(0, dp(c, 16), 0, dp(c, 16));
             btn.setBackground(glass(c, 12, false));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = dp(c, 4);
+            lp.rightMargin = dp(c, 4);
             lp.bottomMargin = dp(c, 8);
             btn.setLayoutParams(lp);
             btn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     int count = 0;
-                    for (String line : tokens) {
-                        if (TokenStore.saveGameEntry(g, line)) count++;
-                    }
+                    for (String line : tokens) { if (TokenStore.saveGameEntry(g, line)) count++; }
                     android.widget.Toast.makeText(c, "已保存 " + count + " 条到 " + g, android.widget.Toast.LENGTH_SHORT).show();
                     dlg.dismiss();
                     show(c, g, null);
                 }
             });
-            root.addView(btn);
+            if (i % 2 == 0) colA.addView(btn); else colB.addView(btn);
         }
+        root.addView(cols);
 
         TextView cancel = new TextView(c);
         cancel.setText("放弃保存");
@@ -115,7 +124,8 @@ public class TokenDialog {
         if (w != null) {
             w.setBackgroundDrawableResource(android.R.color.transparent);
             WindowManager.LayoutParams wp = w.getAttributes();
-            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.86f);
+            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.94f);
+            wp.height = (int) (c.getResources().getDisplayMetrics().heightPixels * 0.80f);
             w.setAttributes(wp);
         }
         dlg.show();
@@ -147,8 +157,8 @@ public class TokenDialog {
         root.addView(tip);
 
         final List<String> tabs = new ArrayList<String>();
-        for (String g : TokenStore.listGameFolders()) {
-            tabs.add(g);
+        for (String g : TokenStore.allGames()) {
+            if (!TokenStore.loadGame(g).isEmpty()) tabs.add(g);
         }
 
         HorizontalScrollView hs = new HorizontalScrollView(c);
@@ -491,7 +501,7 @@ public class TokenDialog {
         t.setTextSize(16);
         t.setGravity(Gravity.CENTER);
         root.addView(t);
-        final String[] games = TokenStore.listGameFolders().toArray(new String[0]);
+        final String[] games = TokenStore.allGames().toArray(new String[0]);
         final int[] pick = {0};
         final TextView gameBtn = new TextView(c);
         gameBtn.setText("游戏: " + games[0]);
