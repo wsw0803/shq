@@ -89,27 +89,7 @@ public class TokenStore {
         return m.find() ? m.group(1) : "";
     }
 
-    public static Entry parseLine(String line, String game) {
-        if (line == null) return null;
-        line = line.trim();
-        if (line.isEmpty()) return null;
-        Entry e = new Entry();
-        e.game = game == null ? "" : game;
-        String[] parts; int _p4 = line.lastIndexOf(" | "); int _p3 = _p4 > 0 ? line.lastIndexOf(" | ", _p4 - 1) : -1; int _p2 = _p3 > 0 ? line.lastIndexOf(" | ", _p3 - 1) : -1; if (_p2 >= 0) { parts = new String[]{ line.substring(0, _p2), line.substring(_p2 + 3, _p3), line.substring(_p3 + 3, _p4), line.substring(_p4 + 3) }; } else { parts = line.split("\\|", 4); }
-        if (parts.length >= 4) {
-            e.time = parts[0].trim();
-            e.raw = parts[2].trim();
-            if (e.game.isEmpty()) e.game = parts[1].trim();
-            String modeRaw = parts[3].trim(); int hp = modeRaw.indexOf((char)35); if (hp >= 0) { e.mode = modeRaw.substring(0, hp).trim(); e.note = modeRaw.substring(hp + 1).trim(); } else { e.mode = modeRaw; }
-            if (e.note.isEmpty() && parts.length >= 5) { StringBuilder nb = new StringBuilder(); for (int k = 4; k < parts.length; k++) { if (k > 4) nb.append((char)124); nb.append(parts[k]); } e.note = nb.toString().trim(); }
-            e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);
-        } else if (parts.length >= 2) {
-            e.time = parts[0].trim();
-            e.raw = parts[1].trim();
-        } else {
-            e.raw = line;
-        }
-        e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
+    private static boolean strong(String t) { if (t == null) return false; String s = t.trim(); if (s.length() < 12) return false; if (s.indexOf("access_token=") >= 0) return true; if (s.indexOf("auth://") >= 0) return true; if (s.indexOf("http") >= 0) return true; if (s.indexOf("token=") >= 0) return true; if (s.indexOf("=") >= 0 && s.length() >= 24) return true; return false; } private static boolean meta(String t) { if (t == null) return false; String s = t.trim(); if (s.length() == 0 || s.length() > 24) return false; for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); if (c == (char)61 || c == (char)38 || c == (char)47 || c == (char)63 || c == (char)58 || c == (char)37 || c == (char)43 || c == (char)35 || c == (char)124) return false; } return true; } private static boolean tok(String t) { if (t == null) return false; String s = t.trim(); if (s.length() >= 16) return true; for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); if (c == (char)61 || c == (char)38 || c == (char)47 || c == (char)63 || c == (char)58 || c == (char)37) return true; } return false; } private static String[] splitLine(String line) { String e0 = new String(); String[] r = new String[]{ e0, e0, e0, e0, e0 }; if (line == null) return r; String s = line.trim(); if (s.length() == 0) return r; int p1 = s.indexOf((char)124); if (p1 < 0) { r[0] = s; r[2] = s; return r; } int p2 = s.indexOf((char)124, p1 + 1); if (p2 < 0) { r[0] = s.substring(0, p1).trim(); r[2] = s.substring(p1 + 1).trim(); return r; } r[0] = s.substring(0, p1).trim(); r[1] = s.substring(p1 + 1, p2).trim(); String body = s.substring(p2 + 1); int c1 = body.lastIndexOf((char)124); if (c1 > 0) { String last = body.substring(c1 + 1).trim(); String head = body.substring(0, c1); if (meta(last)) { int c2 = head.lastIndexOf((char)124); if (c2 > 0) { String prev = head.substring(c2 + 1).trim(); String before = head.substring(0, c2); if (meta(prev) && prev.indexOf((char)32) < 0 && strong(before)) { r[3] = prev; r[4] = last; body = before; } else if (tok(head)) { r[3] = last; body = head; } } else if (tok(head)) { r[3] = last; body = head; } } } r[2] = body.trim(); if (r[2].length() == 0) r[2] = s.substring(p2 + 1).trim(); return r; } public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String[] p = splitLine(s); e.time = p[0]; e.game = (game == null || game.length() == 0) ? p[1] : game; e.raw = p[2]; e.mode = p[3]; e.note = p[4]; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47); e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
         if (e.accessToken.isEmpty() && !e.raw.isEmpty() && !e.raw.contains("=")) e.accessToken = e.raw;
         e.openid = grab(e.raw, "openid=([^&\\s]+)");
         e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
@@ -296,38 +276,7 @@ public class TokenStore {
         return true;
     }
 
-    public static boolean updateNote(String game, String token, String note) {
-        File f = gameFile(game);
-        if (!f.exists()) return false;
-        java.util.List<String> lines = new java.util.ArrayList<String>();
-        boolean found = false;
-        try {
-            Scanner sc = new Scanner(f, "UTF-8");
-            while (sc.hasNextLine()) {
-                String line = sc.nextLine();
-                if (!found && lineHasToken(line, token)) {
-                    String[] parts; int _p4 = line.lastIndexOf(" | "); int _p3 = _p4 > 0 ? line.lastIndexOf(" | ", _p4 - 1) : -1; int _p2 = _p3 > 0 ? line.lastIndexOf(" | ", _p3 - 1) : -1; if (_p2 >= 0) { parts = new String[]{ line.substring(0, _p2), line.substring(_p2 + 3, _p3), line.substring(_p3 + 3, _p4), line.substring(_p4 + 3) }; } else { parts = line.split("\\|", 4); }
-                    StringBuilder sb = new StringBuilder();
-                    parts[3] = parts[3].trim(); int hp2 = parts[3].indexOf((char)35); if (hp2 >= 0) parts[3] = parts[3].substring(0, hp2).trim();
-                    if (parts.length >= 4) {
-                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()); if (note.length() > 0) sb.append(" #").append(note.replace(String.valueOf((char)124), "/"));
-                    } else {
-                        sb.append(line).append(" | ").append(note);
-                    }
-                    lines.add(sb.toString());
-                    found = true;
-                } else {
-                    lines.add(line);
-                }
-            }
-            sc.close();
-        } catch (Exception e) { lastError = "note fail: " + e.getMessage(); return false; }
-        if (!found) return false;
-        if (!writeLinesAtomic(f, lines)) { lastError = "note fail"; return false; }
-        return true;
-    }
-
-    public static void copy(String label, String text, android.content.Context c) {
+    public static boolean updateNote(String game, String token, String note) { File f = gameFile(game); if (!f.exists()) return false; java.util.List<String> lines = new java.util.ArrayList<String>(); boolean found = false; try { Scanner sc = new Scanner(f, java.nio.charset.StandardCharsets.UTF_8.name()); while (sc.hasNextLine()) { String line = sc.nextLine(); if (!found && lineHasToken(line, token)) { String[] p = splitLine(line); StringBuilder sb = new StringBuilder(); sb.append(p[0]).append((char)124).append(p[1]).append((char)124).append(p[2]).append((char)124).append(p[3]); String nt = note == null ? new String() : note.trim(); if (nt.length() > 0) sb.append((char)124).append(nt.replace(String.valueOf((char)124), String.valueOf((char)47)).replace((char)10, (char)32).replace((char)13, (char)32)); lines.add(sb.toString()); found = true; } else { lines.add(line); } } sc.close(); } catch (Exception ex) { lastError = String.valueOf(ex); return false; } if (!found) return false; if (!writeLinesAtomic(f, lines)) return false; return true; } public static void copy(String label, String text, android.content.Context c) {
         if (c == null) return;
         try {
             android.content.ClipboardManager cm =
@@ -354,8 +303,8 @@ public class TokenStore {
                     Entry e = parseLine(ln, g);
                     if (e == null || e.accessToken.isEmpty()) continue;
                     if (!seen.add(e.accessToken)) continue;
-                    w.append(e.time).append(" | ").append(e.game).append(" | ").append(e.raw).append(" | ").append(e.mode);
-                    if (e.note.length() > 0) w.append(" #").append(e.note);
+                    w.append(e.time).append("|").append(e.game).append("|").append(e.raw).append("|").append(e.mode);
+                    if (e.note.length() > 0) w.append("|").append(e.note);
                     w.append((char)10);
                     n++;
                 }
@@ -383,7 +332,7 @@ public class TokenStore {
                 Entry pe = parseLine(line, "");
                 String game = gameOfUrl(line); if ((game == null || game.isEmpty()) && pe != null && pe.game != null && !pe.game.isEmpty() && allGames().contains(pe.game)) game = pe.game;
                 if (game != null && !game.isEmpty()) {
-                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode + (pe.note.isEmpty() ? "" : " #" + pe.note));
+                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode + (pe.note.isEmpty() ? "" : "|" + pe.note));
                     if (saveGameEntry(game, keep)) res.added++;
                 } else if (pe != null && !pe.accessToken.isEmpty()) {
                     res.unknownLines.add(line);
