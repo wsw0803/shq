@@ -135,7 +135,6 @@ public class TokenStore {
 
     public static java.util.List<String> listGameFolders() {
         java.util.List<String> names = new ArrayList<String>();
-        for (String g : GAMES) names.add(g);
         File dir = rootDir();
         File[] fs = dir.listFiles();
         if (fs != null) {
@@ -144,7 +143,7 @@ public class TokenStore {
                 String n = f.getName();
                 if (!n.endsWith(".txt")) continue;
                 String g = n.substring(0, n.length() - 4);
-                if (g.length() > 0 && !names.contains(g)) names.add(g);
+                if (g.length() > 0 && !names.contains(g) && !loadGame(g).isEmpty()) names.add(g);
             }
         }
         return names;
