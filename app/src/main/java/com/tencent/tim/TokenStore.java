@@ -103,6 +103,7 @@ public class TokenStore {
         if (parts.length >= 4) {
             e.time = parts[0].trim();
             e.raw = parts[2].trim();
+            if (e.game.isEmpty()) e.game = parts[1].trim();
             e.mode = parts[3].trim();
             if (parts.length >= 5) { StringBuilder nb = new StringBuilder(); for (int k = 4; k < parts.length; k++) { if (k > 4) nb.append((char)124); nb.append(parts[k]); } e.note = nb.toString().trim(); }
         } else if (parts.length >= 2) {
