@@ -312,7 +312,6 @@ public class TokenStore {
         File dst = rootDir();
         File srcDir = new File(downloadDir(), ROOT_NAME);
         File[] fs = srcDir.listFiles();
-        if (fs == null) fs = downloadDir().listFiles();
         if (fs == null) return 0;
         for (int i = 0; i < fs.length; i++) {
             File f = fs[i];
