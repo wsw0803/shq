@@ -136,10 +136,10 @@ public class TokenStore {
     public static String gameOfPackage(String t) {
         if (t == null) return "";
         String s = t.toLowerCase();
-        if (s.contains("pubgmhd")) return "和平";
+        if (s.contains("pubg")) return "和平";
         if (s.contains("sgame")) return "王者";
-        if (s.contains("tmgp.dfm") || s.contains("deltaforce")) return "三角洲";
-        if (s.contains("tmgp.codev") || s.contains("valorant")) return "无畏契约";
+        if (s.contains("dfm") || s.contains("deltaforce")) return "三角洲";
+        if (s.contains("codev") || s.contains("valorant")) return "无畏契约";
         return "";
     }
 
@@ -147,7 +147,7 @@ public class TokenStore {
         try {
             Process p = Runtime.getRuntime().exec("su");
             java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
-            os.writeBytes("dumpsys activity recents | grep cmp= | head -30\n");
+            os.writeBytes("dumpsys activity recents | grep cmp= | head -20; dumpsys activity activities | grep cmp= | head -20; dumpsys window | grep mCurrentFocus | head -2\n");
             os.writeBytes("exit\n");
             os.flush();
             os.close();
