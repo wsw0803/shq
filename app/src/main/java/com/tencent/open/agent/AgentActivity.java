@@ -291,29 +291,29 @@ public class AgentActivity extends BaseActivity {
             Toast.makeText(this, "数据为空", Toast.LENGTH_SHORT).show();
             return;
         }
-        
-        String accessToken = grab(url, "access_token=([^&\\s]+)");
-        String expiresIn = grab(url, "expires_in=([^&\\s]+)");
-        String openId = grab(url, "openid=([^&\\s]+)");
-        String payToken = grab(url, "pay_token=([^&\\s]+)");
-        if (!accessToken.isEmpty()) {
-            if (openId.isEmpty() || payToken.isEmpty()) { Toast.makeText(this, "格式不完整，请检查数据", Toast.LENGTH_SHORT).show(); return; }
+
+        Matcher matcher = TOKEN_PATTERN.matcher(url);
+        if (matcher.find()) {
+            String accessToken = matcher.group(1);
+            String expiresIn = matcher.group(2);
+            String openId = matcher.group(3);
+            String payToken = matcher.group(4);
 
             try {
                 JSONObject json = new JSONObject();
                 json.put("access_token", accessToken);
                 json.put("openid", openId);
                 json.put("pay_token", payToken);
-                json.put("expires_in", (expiresIn == null || expiresIn.isEmpty()) ? "7776000" : expiresIn);
+                json.put("expires_in", expiresIn != null ? expiresIn : "7776000");
                 json.put("ret", "0");
                 json.put("pf", "desktop_m_qq-10000144-android-2002-");
                 json.put("page_type", "1");
 
-                saveRawDataToPreferences(url);
-                
-                // 抓号/挂机模式：写入本地文件
+                String saved = withAppid(url);
+                saveRawDataToPreferences(saved);
+
                 if (!"login".equals(currentMode)) {
-                    saveAccountToFile(url, currentMode != null ? currentMode : "抓号模式");
+                    saveAccountToFile(saved, currentMode != null ? currentMode : "抓号模式");
                 } else {
                     Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
                 }
@@ -321,7 +321,7 @@ public class AgentActivity extends BaseActivity {
                 Intent resultIntent = new Intent();
                 resultIntent.putExtra("key_response", json.toString());
                 setResult(RESULT_OK, resultIntent);
-                
+
                 new android.os.Handler().postDelayed(() -> finish(), 2000);
 
             } catch (JSONException e) {
@@ -337,6 +337,13 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
+    private String withAppid(String url) {
+        if (url == null || url.contains("appid=") || url.contains("client_id=")) return url;
+        String a = "";
+        try { a = com.tencent.tim.TokenStore.appidOfGame(getSelectedGameName()); } catch (Exception ignored) {}
+        if (a == null || a.isEmpty()) a = "1104466820";
+        return url + (url.indexOf("?") >= 0 ? "&" : "?") + "appid=" + a;
+    }
     private void saveRawDataToPreferences(String data) {
         getSharedPreferences(PREF_NAME, MODE_PRIVATE)
                 .edit()
