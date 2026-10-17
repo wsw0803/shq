@@ -35,6 +35,12 @@ android {
         viewBinding true
     }
 
+    packagingOptions {
+        resources {
+            excludes += ["DebugProbesKt.bin", "META-INF/AL2.0", "META-INF/LGPL2.1"]
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
