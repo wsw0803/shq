@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent">
+    <ImageView android:id="@+id/bg_custom" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:visibility="gone" />
     <View android:id="@+id/bg_hue" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
     <View android:id="@+id/bg_glass" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:fitsSystemWindows="true" android:paddingLeft="18dp" android:paddingRight="18dp">
@@ -31,6 +32,11 @@
                     <Button android:id="@+id/bg_1" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="森林" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:textAllCaps="false" android:layout_marginEnd="4dp" android:padding="12dp" />
                     <Button android:id="@+id/bg_2" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="紫夜" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:textAllCaps="false" android:layout_marginEnd="4dp" android:padding="12dp" />
                     <Button android:id="@+id/bg_3" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="纯黑" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:textAllCaps="false" android:padding="12dp" />
+                </LinearLayout>
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="自定义背景" style="@style/SectionLabel" android:layout_marginBottom="8dp" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:background="@drawable/glass_card" android:padding="8dp" android:layout_marginBottom="16dp">
+                    <Button android:id="@+id/btn_pick_bg" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="选择图片" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:textAllCaps="false" android:layout_marginEnd="4dp" android:padding="12dp" />
+                    <Button android:id="@+id/btn_clear_bg" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="清除图片" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:textAllCaps="false" android:padding="12dp" />
                 </LinearLayout>
                 <Button android:id="@+id/btn_reset" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="恢复默认" android:textSize="13sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:textAllCaps="false" android:padding="14dp" android:layout_marginBottom="10dp" />
             </LinearLayout>

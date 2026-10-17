@@ -5,8 +5,13 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
+
+import java.io.InputStream;
 
 public class Ui {
     public static final String PREF = "myPrefs";
@@ -14,6 +19,8 @@ public class Ui {
     public static final String KEY_GLASS = "ui_glass";
     public static final String KEY_BRIGHT = "ui_bright";
     public static final String KEY_BG = "ui_bg";
+    public static final String KEY_BG_URI = "ui_bg_uri";
+    public static final String KEY_BASE_DPI = "ui_base_dpi";
 
     public static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
@@ -45,6 +52,27 @@ public class Ui {
             int ba = (int) ((100 - b) * 2.55f);
             bright.setBackgroundColor(Color.argb(ba, 0, 0, 0));
         }
+        ImageView custom = a.findViewById(R.id.bg_custom);
+        if (custom != null) {
+            String uriStr = p.getString(KEY_BG_URI, "");
+            if (!uriStr.isEmpty()) {
+                try {
+                    InputStream in = a.getContentResolver().openInputStream(Uri.parse(uriStr));
+                    Drawable d = Drawable.createFromStream(in, "bg");
+                    if (in != null) in.close();
+                    if (d != null) {
+                        custom.setImageDrawable(d);
+                        custom.setVisibility(View.VISIBLE);
+                    } else {
+                        custom.setVisibility(View.GONE);
+                    }
+                } catch (Exception e) {
+                    custom.setVisibility(View.GONE);
+                }
+            } else {
+                custom.setVisibility(View.GONE);
+            }
+        }
         View content = a.findViewById(android.R.id.content);
         if (content instanceof ViewGroup) {
             View root = ((ViewGroup) content).getChildAt(0);
@@ -58,6 +86,22 @@ public class Ui {
             case 2: return R.drawable.bg_style_2;
             case 3: return R.drawable.bg_style_3;
             default: return R.drawable.bg_window;
+        }
+    }
+
+    public static void applyDpi(Activity a) {
+        int pct = prefs(a).getInt(KEY_DPI, 100);
+        int base = prefs(a).getInt(KEY_BASE_DPI, 0);
+        if (base <= 0) {
+            base = a.getResources().getDisplayMetrics().densityDpi;
+            prefs(a).edit().putInt(KEY_BASE_DPI, base).apply();
+        }
+        int target = (int) (base * pct / 100f);
+        android.content.res.Resources res = a.getResources();
+        android.content.res.Configuration cfg = new android.content.res.Configuration(res.getConfiguration());
+        if (cfg.densityDpi != target) {
+            cfg.densityDpi = target;
+            res.updateConfiguration(cfg, res.getDisplayMetrics());
         }
     }
 }

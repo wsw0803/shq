@@ -31,11 +31,21 @@ public class SettingsActivity extends BaseActivity {
         seekGlass.setProgress(p.getInt(Ui.KEY_GLASS, 40));
         seekBright.setProgress(p.getInt(Ui.KEY_BRIGHT, 70));
         labels();
+Button pickBg = findViewById(R.id.btn_pick_bg);
+        Button clearBg = findViewById(R.id.btn_clear_bg);
+        pickBg.setOnClickListener(v -> {
+            android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+            it.setType("image/*");
+            startActivityForResult(it, 1001);
+        });
+        clearBg.setOnClickListener(v -> {
+            Ui.prefs(this).edit().remove(Ui.KEY_BG_URI).apply();
+            Ui.apply(this);
+        });
 
         seekDpi.setOnSeekBarChangeListener(new L() {
             @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
-                Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_DPI, v + 50).apply();
-                labels();
+                tvDpi.setText("DPI: " + (v + 50) + "%");
             }
         });
         seekGlass.setOnSeekBarChangeListener(new L() {
@@ -74,6 +84,19 @@ public class SettingsActivity extends BaseActivity {
         });
     }
 
+    @Override
+    protected void onActivityResult(int req, int res, android.content.Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == 1001 && res == RESULT_OK && data != null && data.getData() != null) {
+            android.net.Uri uri = data.getData();
+            try {
+                getContentResolver().takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            Ui.prefs(this).edit().putString(Ui.KEY_BG_URI, uri.toString()).apply();
+            Ui.apply(this);
+        }
+    }
+
     private void labels() {
         SharedPreferences p = Ui.prefs(this);
         tvDpi.setText("DPI: " + p.getInt(Ui.KEY_DPI, 100) + "%");
@@ -83,6 +106,11 @@ public class SettingsActivity extends BaseActivity {
 
     private static abstract class L implements SeekBar.OnSeekBarChangeListener {
         @Override public void onStartTrackingTouch(SeekBar sb) {}
-        @Override public void onStopTrackingTouch(SeekBar sb) {}
+        @Override public void onStopTrackingTouch(SeekBar sb) {
+            if (sb.getId() == R.id.seek_dpi) {
+                Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_DPI, sb.getProgress() + 50).apply();
+                Ui.applyDpi(SettingsActivity.this);
+            }
+        }
     }
 }

@@ -3,6 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_window">
+    <ImageView android:id="@+id/bg_custom" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:visibility="gone" />
     <View android:id="@+id/bg_hue" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
     <View android:id="@+id/bg_glass" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:fitsSystemWindows="true" android:paddingLeft="18dp" android:paddingRight="18dp">
