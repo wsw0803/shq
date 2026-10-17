@@ -251,7 +251,7 @@ public class AgentActivity extends BaseActivity {
     }
 
     private void showPickToken() {
-        String __g = com.tencent.tim.TokenStore.detectGameByRoot(); if (__g.isEmpty()) __g = com.tencent.tim.TokenStore.gameOfUrl(getLoginUrl()); com.tencent.tim.TokenDialog.show(this, __g, e -> {
+        String __g = ""; com.tencent.tim.TokenDialog.show(this, __g, e -> {
             String url2 = com.tencent.tim.TokenStore.rebuildUrl(e);
             plainText.setText(url2);
             updateAutoGameHint(url2);
@@ -363,7 +363,7 @@ public class AgentActivity extends BaseActivity {
             try {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
                 String game = com.tencent.tim.TokenStore.gameOfUrl(url);
-                if (game == null || game.isEmpty()) game = com.tencent.tim.TokenStore.detectGameByRoot();
+
                 
                 if (game == null || game.isEmpty()) game = "其他";
                 String line = time + " | " + game + " | " + url + " | " + mode;

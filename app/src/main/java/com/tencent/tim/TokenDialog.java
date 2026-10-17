@@ -570,26 +570,7 @@ public class TokenDialog {
         et.setBackground(glass(c, 12, false));
         root.addView(et);
         
-        et.addTextChangedListener(new android.text.TextWatcher() {
-            public void afterTextChanged(android.text.Editable s) {
-                String input = s.toString().trim();
-                if (!input.isEmpty()) {
-                    String detected = TokenStore.gameOfUrl(input);
-                    if (detected != null && !detected.isEmpty()) {
-                        for (int i = 0; i < games.length; i++) {
-                            if (games[i].equals(detected)) {
-                                pick[0] = i;
-                                gameBtn.setText("游戏: " + games[i] + " (已自动识别)");
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-        });
-        final android.widget.EditText noteEt = new android.widget.EditText(c);
+                final android.widget.EditText noteEt = new android.widget.EditText(c);
         noteEt.setHint("备注（可留空）");
         noteEt.setTextColor(0xFFE6EEF8);
         noteEt.setHintTextColor(0xFF8A9BB8);
@@ -611,7 +592,7 @@ public class TokenDialog {
             public void onClick(View v) {
                 String txt = et.getText().toString().trim();
                 if (txt.isEmpty()) { android.widget.Toast.makeText(c, "内容为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
-                String raw = txt;
+                String raw = txt; if (raw.indexOf((char)124) >= 0) { String[] seg = raw.split(String.valueOf((char)124)); for (String sg : seg) { String tg = sg.trim(); if (tg.contains("access_token=") || tg.startsWith("auth://")) { raw = tg; break; } } }
                 if (!raw.contains("access_token=")) raw = "access_token=" + raw;
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();

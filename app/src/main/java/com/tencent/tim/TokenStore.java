@@ -308,7 +308,7 @@ public class TokenStore {
                     String[] parts = line.split(String.valueOf((char)124));
                     StringBuilder sb = new StringBuilder();
                     if (parts.length >= 4) {
-                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()).append(" | ").append(note.replace(String.valueOf((char)124), "/"));
+                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()); if (note.length() > 0) sb.append(" | ").append(note.replace(String.valueOf((char)124), "/"));
                     } else {
                         sb.append(line).append(" | ").append(note);
                     }
