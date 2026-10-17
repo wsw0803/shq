@@ -162,7 +162,7 @@ public class Updater {
         for (int i = 0; i < urls.size(); i++) {
             HttpURLConnection c = null;
             try {
-                c = open(urls.get(i), 0, 0, 6000, 10000);
+                c = open(urls.get(i), 0, 0, 2000, 3000);
                 int code = c.getResponseCode();
                 long t = parseTotal(c);
                 if (code == 206 && t > 0) {
