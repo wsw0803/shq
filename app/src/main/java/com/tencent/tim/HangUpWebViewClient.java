@@ -1,5 +1,6 @@
 package com.tencent.tim;
 
+import android.graphics.Bitmap;
 import android.os.Handler;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -9,23 +10,40 @@ import com.tencent.open.agent.AgentActivity;
 
 public class HangUpWebViewClient extends WebViewClient {
 
-    private AgentActivity activity;
-    private Handler handler = new Handler();
+    private final AgentActivity activity;
+    private final Handler handler = new Handler();
     private Runnable refreshRunnable;
 
     public HangUpWebViewClient(AgentActivity activity) {
         this.activity = activity;
     }
 
-    @Override
-    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-        String url = request.getUrl().toString();
-        if (url.startsWith("auth:")) {
+    private boolean handle(WebView view, String url) {
+        if (url == null) return false;
+        String low = url.toLowerCase();
+        if (low.startsWith("auth:") || low.contains("access_token=")) {
             activity.performLogin(url);
             refreshPage(view);
             return true;
         }
-        return url.startsWith("https://xui.ptlogin2.qq.com/") ? false : true;
+        return !(low.startsWith("http://") || low.startsWith("https://"));
+    }
+
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        return handle(view, request.getUrl() == null ? null : request.getUrl().toString());
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        return handle(view, url);
+    }
+
+    @Override
+    public void onPageStarted(WebView view, String url, Bitmap favicon) {
+        super.onPageStarted(view, url, favicon);
+        if (url != null && url.toLowerCase().contains("access_token=")) handle(view, url);
     }
 
     private void refreshPage(WebView webView) {
