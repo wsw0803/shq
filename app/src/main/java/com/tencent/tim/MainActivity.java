@@ -141,10 +141,36 @@ private void setupImmersiveMode() {
     private void addLog(final String log) {
         runOnUiThread(() -> {
             String time = new SimpleDateFormat("HH:mm:ss").format(new Date());
-            String newLog = "[" + time + "] " + LogScrubber.scrub(log) + "\n";
+            String msg = log;
+            if (msg != null) {
+                msg = replaceToken(msg, "\"access_token\":\"");
+                msg = replaceToken(msg, "\"openid\":\"");
+                msg = replaceToken(msg, "\"pay_token\":\"");
+                msg = replaceToken(msg, "\"openkey\":\"");
+                msg = replaceToken(msg, "access_token=");
+                msg = replaceToken(msg, "openid=");
+            }
+            String newLog = "[" + time + "] " + msg + "\n";
             tvLog.append(newLog);
             scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
         });
+    }
+
+    private String replaceToken(String s, String prefix) {
+        int start = 0;
+        while ((start = s.indexOf(prefix, start)) != -1) {
+            int valStart = start + prefix.length();
+            int valEnd = s.indexOf("\"", valStart);
+            if (valEnd == -1) valEnd = s.indexOf("&", valStart);
+            if (valEnd == -1) valEnd = s.indexOf(" ", valStart);
+            if (valEnd != -1) {
+                s = s.substring(0, valStart) + "****" + s.substring(valEnd);
+                start = valStart + 4;
+            } else {
+                break;
+            }
+        }
+        return s;
     }
     
     private void initViews() {
