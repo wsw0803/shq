@@ -1,5 +1,7 @@
 package com.tencent.tim;
 
+import android.net.Uri;
+import android.os.Handler;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -7,20 +9,40 @@ import android.webkit.WebViewClient;
 import com.tencent.open.agent.AgentActivity;
 
 public class NormalWebViewClient extends WebViewClient {
-
     private AgentActivity activity;
+    private Handler handler = new Handler();
 
-    public NormalWebViewClient(AgentActivity activity) {
-        this.activity = activity;
-    }
+    public NormalWebViewClient(AgentActivity activity) { this.activity = activity; }
 
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-        String url = request.getUrl().toString();
-        if (url.startsWith("auth:")) {
+        return handle(view, request.getUrl().toString());
+    }
+
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        return handle(view, url);
+    }
+
+    @Override
+    public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+        super.onPageStarted(view, url, favicon);
+        if (url != null && (url.startsWith("auth:") || url.contains("access_token="))) {
+            handle(view, url);
+        }
+    }
+
+    private boolean handle(WebView view, String url) {
+        if (url == null) return false;
+        if (url.startsWith("auth:") || url.contains("access_token=")) {
             activity.performLogin(url);
+            
             return true;
         }
-        return url.startsWith("https://xui.ptlogin2.qq.com/") ? false : true;
+        String host = "";
+        try { host = Uri.parse(url).getHost(); } catch (Throwable ignored) {}
+        if (host == null) host = "";
+        if (host.endsWith("qq.com") || host.endsWith("qq.com.cn")) return false;
+        return true;
     }
 }
