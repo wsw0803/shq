@@ -81,6 +81,14 @@ public class TokenStore {
         }
     }
 
+    private static String[] readLines(File f) throws java.io.IOException {
+        java.util.ArrayList out = new java.util.ArrayList();
+        if (f == null || !f.exists()) return new String[0];
+        Scanner sc = new Scanner(f, "UTF-8");
+        try { while (sc.hasNextLine()) out.add(sc.nextLine()); } finally { sc.close(); }
+        return (String[]) out.toArray(new String[0]);
+    }
+
     private static String grab(String s, String regex) {
         if (s == null) return "";
         Matcher m = Pattern.compile(regex).matcher(s);
@@ -117,12 +125,10 @@ public class TokenStore {
         File f = gameFile(game);
         if (!f.exists()) return list;
         try {
-            Scanner sc = new Scanner(f, "UTF-8");
-            while (sc.hasNextLine()) {
-                Entry e = parseLine(sc.nextLine(), game);
+            for (String ln : readLines(f)) {
+                Entry e = parseLine(ln, game);
                 if (e != null && !e.accessToken.isEmpty()) list.add(e);
             }
-            sc.close();
         } catch (Exception ignored) {}
         return list;
     }
@@ -185,13 +191,10 @@ public class TokenStore {
         java.util.List<String> out = new java.util.ArrayList<String>();
         if (f.exists()) {
             try {
-                Scanner sc = new Scanner(f, "UTF-8");
-                while (sc.hasNextLine()) {
-                    String ln = sc.nextLine();
+                for (String ln : readLines(f)) {
                     if (!token.isEmpty() && lineHasToken(ln, token)) continue;
                     out.add(ln);
                 }
-                sc.close();
             } catch (Exception ignored) {}
         }
         out.add(line);
@@ -213,13 +216,10 @@ public class TokenStore {
         if (!f.exists()) return false;
         java.util.List<String> keep = new java.util.ArrayList<String>();
         try {
-            Scanner sc = new Scanner(f, "UTF-8");
-            while (sc.hasNextLine()) {
-                String ln = sc.nextLine();
+            for (String ln : readLines(f)) {
                 if (lineHasToken(ln, token)) continue;
                 keep.add(ln);
             }
-            sc.close();
         } catch (Exception e) {
             lastError = "read fail: " + e.getMessage();
             return false;
@@ -234,9 +234,7 @@ public class TokenStore {
         java.util.List<String> lines = new java.util.ArrayList<String>();
         boolean found = false;
         try {
-            Scanner sc = new Scanner(f, "UTF-8");
-            while (sc.hasNextLine()) {
-                String line = sc.nextLine();
+            for (String line : readLines(f)) {
                 if (!found && lineHasToken(line, token)) {
                     String[] parts = line.split(String.valueOf((char)124));
                     StringBuilder sb = new StringBuilder();
@@ -251,7 +249,6 @@ public class TokenStore {
                     lines.add(line);
                 }
             }
-            sc.close();
         } catch (Exception e) { lastError = "note fail: " + e.getMessage(); return false; }
         if (!found) return false;
         if (!writeLinesAtomic(f, lines)) { lastError = "note fail"; return false; }
@@ -308,18 +305,13 @@ public class TokenStore {
             java.util.Set<String> existing = new java.util.HashSet<String>();
             java.util.List<String> out = new java.util.ArrayList<String>();
             if (dst.exists()) {
-                Scanner sc = new Scanner(dst, "UTF-8");
-                while (sc.hasNextLine()) {
-                    String ln = sc.nextLine();
+                for (String ln : readLines(dst)) {
                     out.add(ln);
                     String t = tokenOf(ln);
                     if (!t.isEmpty()) existing.add(t);
                 }
-                sc.close();
             }
-            Scanner sc2 = new Scanner(src, "UTF-8");
-            while (sc2.hasNextLine()) {
-                String ln = sc2.nextLine();
+            for (String ln : readLines(src)) {
                 if (ln.trim().isEmpty()) continue;
                 String t = tokenOf(ln);
                 if (!t.isEmpty() && existing.contains(t)) continue;
@@ -327,7 +319,6 @@ public class TokenStore {
                 if (!t.isEmpty()) existing.add(t);
                 added++;
             }
-            sc2.close();
             java.io.File tmp = new java.io.File(dst.getAbsolutePath() + ".tmp");
             java.io.FileWriter w = new java.io.FileWriter(tmp, false);
             for (int i = 0; i < out.size(); i++) { w.append(out.get(i)); w.append((char)10); }
