@@ -385,8 +385,9 @@ public class AgentActivity extends BaseActivity {
     }
 
     private boolean isKnownGame(String g) {
-        for (String k : com.tencent.tim.TokenStore.GAMES) {
-            if (k.equals(g)) return true;
+        if (g == null || g.isEmpty()) return false;
+        for (String[] cg : com.tencent.tim.TokenStore.cloudGames()) {
+            if (cg[0].equals(g)) return true;
         }
         return false;
     }
