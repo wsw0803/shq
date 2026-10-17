@@ -249,7 +249,6 @@ private void setupImmersiveMode() {
     public void startImportFilePicker() {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("*/*");
-        intent.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[]{"text/plain", "text/*"});
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
         startActivityForResult(intent, 1002);
     }
@@ -449,17 +448,12 @@ private void setupImmersiveMode() {
         if (requestCode == 1002 && resultCode == RESULT_OK && data != null) {
             android.net.Uri uri = data.getData();
             if (uri != null) {
-                String fileName = getFileNameFromUri(uri);
-                if (fileName == null || fileName.toLowerCase().endsWith(".txt") || !fileName.contains(".")) {
-                    TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
-                    if (!res.unknownLines.isEmpty()) {
-                        TokenDialog.showChooseGameForTokens(this, res.unknownLines, res.added);
-                    } else {
-                        Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录") : "未发现新记录", Toast.LENGTH_LONG).show();
-                        TokenDialog.show(this, "", null);
-                    }
+                TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
+                if (!res.unknownLines.isEmpty()) {
+                    TokenDialog.showChooseGameForTokens(this, res.unknownLines, res.added);
                 } else {
-                    Toast.makeText(this, "只能选择 .txt 文件", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录") : "未发现新记录", Toast.LENGTH_LONG).show();
+                    TokenDialog.show(this, "", null);
                 }
             }
         }
