@@ -99,7 +99,12 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
         loadGameList();
-        loadGameListFromServer();
+        if (gameList.isEmpty()) {
+            addLog("[游戏] 无本地缓存，联网拉取云端列表");
+            loadGameListFromServer();
+        } else {
+            addLog("[游戏] 使用本地缓存，跳过云端: " + gameList.size());
+        }
         checkForUpdates();
     }
     
