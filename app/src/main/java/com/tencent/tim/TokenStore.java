@@ -75,6 +75,7 @@ public class TokenStore {
         public String openid = "";
         public String payToken = "";
         public String expiresIn = "";
+        public String note = "";
 
         public String shortToken() {
             if (accessToken.length() <= 12) return accessToken;
@@ -99,6 +100,7 @@ public class TokenStore {
             e.time = parts[0].trim();
             e.raw = parts[2].trim();
             e.mode = parts[3].trim();
+            if (parts.length >= 5) e.note = parts[4].trim();
         } else if (parts.length >= 2) {
             e.time = parts[0].trim();
             e.raw = parts[1].trim();
