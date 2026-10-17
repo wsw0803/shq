@@ -171,10 +171,6 @@ private void setupImmersiveMode() {
         if (viewToken != null) {
             viewToken.setOnClickListener(v -> TokenDialog.show(this, selectedGameName, null));
         }
-        android.widget.Button copyToken = findViewById(R.id.btn_copy_token);
-        if (copyToken != null) {
-            copyToken.setOnClickListener(v -> showCopyTokenMenu());
-        }
         android.widget.Button sb = findViewById(R.id.btn_settings);
         sb.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));
     }

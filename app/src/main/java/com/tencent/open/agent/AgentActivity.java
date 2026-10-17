@@ -82,11 +82,6 @@ public class AgentActivity extends BaseActivity {
             com.tencent.tim.Ui.apply(this);
         } catch (Throwable ignored) {}
 
-        android.widget.Button viewTokens = findViewById(R.id.btn_view_tokens);
-        if (viewTokens != null) {
-            viewTokens.setOnClickListener(v ->
-                    showPickToken());
-        }
         android.widget.Button pickToken = findViewById(R.id.btn_pick_token);
         if (pickToken != null) {
             pickToken.setOnClickListener(v -> showPickToken());

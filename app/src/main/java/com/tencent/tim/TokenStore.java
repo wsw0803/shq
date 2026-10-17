@@ -90,7 +90,6 @@ public class TokenStore {
         String[] parts = line.split("\\|");
         if (parts.length >= 4) {
             e.time = parts[0].trim();
-            e.game = parts[1].trim();
             e.raw = parts[2].trim();
             e.mode = parts[3].trim();
         } else if (parts.length >= 2) {
