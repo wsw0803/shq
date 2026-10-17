@@ -124,12 +124,7 @@ public class TokenStore {
     public static java.util.List<String> listGameFolders() {
         java.util.List<String> names = new ArrayList<String>();
         for (String g : GAMES) names.add(g);
-        File[] dirs = null;
-        if (dirs != null) {
-            for (File d : dirs) {
-                if (d.isDirectory() && !names.contains(d.getName())) names.add(d.getName());
-            }
-        }
+        if (!names.contains("其他")) names.add("其他");
         return names;
     }
 
