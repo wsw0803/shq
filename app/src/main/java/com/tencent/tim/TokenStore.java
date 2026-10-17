@@ -101,6 +101,8 @@ public class TokenStore {
             e.raw = parts[2].trim();
             if (e.game.isEmpty()) e.game = parts[1].trim();
             String modeRaw = parts[3].trim(); int hp = modeRaw.indexOf((char)35); if (hp >= 0) { e.mode = modeRaw.substring(0, hp).trim(); e.note = modeRaw.substring(hp + 1).trim(); } else { e.mode = modeRaw; }
+            if (e.note.isEmpty() && parts.length >= 5) { StringBuilder nb = new StringBuilder(); for (int k = 4; k < parts.length; k++) { if (k > 4) nb.append((char)124); nb.append(parts[k]); } e.note = nb.toString().trim(); }
+            e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);
         } else if (parts.length >= 2) {
             e.time = parts[0].trim();
             e.raw = parts[1].trim();
@@ -337,19 +339,33 @@ public class TokenStore {
     }
     public static int exportAll() {
         int n = 0;
-        File src = rootDir();
         File dst = new File(downloadDir(), ROOT_NAME);
         try { if (!dst.exists()) dst.mkdirs(); } catch (Throwable ignored) {}
-        File tar = new File(dst, FILE_NAME); if (tar.exists()) tar.delete(); File[] fs = src.listFiles();
-        if (fs == null) return 0;
-        for (int i = 0; i < fs.length; i++) {
-            File f = fs[i];
-            if (!f.isFile() || !f.getName().toLowerCase().endsWith(".txt")) continue;
-            try { copyFile(f, tar); java.io.BufferedReader br2 = new java.io.BufferedReader(new java.io.FileReader(f)); while (br2.readLine() != null) n++; br2.close(); } catch (Exception ignored) {}
-        }
+        java.util.Set<String> seen = new java.util.HashSet<String>();
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(new File(dst, FILE_NAME), false);
+            for (String g : allGames()) {
+                File f = gameFile(g);
+                if (!f.exists()) continue;
+                Scanner sc = new Scanner(f, "UTF-8");
+                while (sc.hasNextLine()) {
+                    String ln = sc.nextLine().trim();
+                    if (ln.isEmpty()) continue;
+                    Entry e = parseLine(ln, g);
+                    if (e == null || e.accessToken.isEmpty()) continue;
+                    if (!seen.add(e.accessToken)) continue;
+                    w.append(e.time).append(" | ").append(e.game).append(" | ").append(e.raw).append(" | ").append(e.mode);
+                    if (e.note.length() > 0) w.append(" #").append(e.note);
+                    w.append((char)10);
+                    n++;
+                }
+                sc.close();
+            }
+            w.flush();
+            w.close();
+        } catch (Exception ex) { lastError = String.valueOf(ex); return 0; }
         return n;
     }
-
     public static class ImportResult {
         public int added = 0;
         public java.util.List<String> unknownLines = new java.util.ArrayList<>();
