@@ -367,6 +367,17 @@ public class AgentActivity extends BaseActivity {
 
                 
                 if (game == null || game.isEmpty()) game = "其他";
+                if (url != null && url.indexOf("appid=") < 0 && url.indexOf("client_id=") < 0) {
+                    String aid = com.tencent.tim.TokenStore.appidOfGame(game);
+                    if (aid == null || aid.isEmpty()) {
+                        String su = getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", "");
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?:client_id|pt_3rd_aid|appid|aid)=([0-9]+)").matcher(su);
+                        if (m.find()) aid = m.group(1);
+                    }
+                    if (aid != null && !aid.isEmpty()) {
+                        url = url + (url.indexOf("?") >= 0 ? "&" : "?") + "appid=" + aid;
+                    }
+                }
                 String line = time + " | " + game + " | " + url + " | " + mode;
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(game, line);
                 final String g = game;
