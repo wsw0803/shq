@@ -679,7 +679,6 @@ private void setupImmersiveMode() {
         SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
         boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
-        if (localOn && !cloudOn) { p.edit().remove(KEY_SYNCED_DATA).apply(); }
         if (!localOn && !cloudOn) {
             p.edit().remove(SELECTED_GAME_NAME_KEY).remove(SELECTED_GAME_URL_KEY).apply();
             selectedGameName = "";
@@ -959,15 +958,7 @@ private void setupImmersiveMode() {
         btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
         btnOk.setOnClickListener(v -> {
             dlg.dismiss();
-            String cdnUrl = "https://ghfast.top/" + url;
-            try {
-                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(cdnUrl));
-                startActivity(intent);
-            } catch (Exception e) {
-                try {
-                    startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)));
-                } catch (Exception ex) {}
-            }
+            Updater.start(MainActivity.this, url);
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp2.leftMargin = (int)(6 * getResources().getDisplayMetrics().density);
