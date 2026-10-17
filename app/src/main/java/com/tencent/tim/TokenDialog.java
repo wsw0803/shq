@@ -595,7 +595,7 @@ public class TokenDialog {
                 if (!raw.contains("access_token=")) raw = "access_token=" + raw;
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
-                String line = time + "|" + games[pick[0]] + "|" + raw + "|capture"; if (!note.isEmpty()) line += "|" + note;
+                String line = TokenStore.joinLine(note, time, games[pick[0]], raw, "capture");
                 boolean done = TokenStore.saveGameEntry(games[pick[0]], line);
                 android.widget.Toast.makeText(c, done ? "已保存到 " + games[pick[0]] : ("保存失败: " + TokenStore.lastError), android.widget.Toast.LENGTH_LONG).show();
                 if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }
