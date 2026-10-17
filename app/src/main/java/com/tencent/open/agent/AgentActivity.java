@@ -376,7 +376,7 @@ public class AgentActivity extends BaseActivity {
                 runOnUiThread(() -> {
                     if (ok) {
                         Toast.makeText(AgentActivity.this,
-                                "已识别 " + g + "，保存到 " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
+                                "已抓取",
                                 Toast.LENGTH_LONG).show();
                     } else {
                         Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError + " → " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
