@@ -300,6 +300,31 @@ public class TokenStore {
         return n;
     }
 
+    public static int importFromUri(android.content.Context ctx, android.net.Uri uri) {
+        int added = 0;
+        try {
+            java.io.InputStream is = ctx.getContentResolver().openInputStream(uri);
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "UTF-8"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+                String game = gameOfUrl(line);
+                if (game == null || game.isEmpty()) {
+                    Entry e = parseLine(line, "");
+                    if (e != null) game = e.game;
+                }
+                if (game != null && !game.isEmpty()) {
+                    if (saveGameEntry(game, line)) added++;
+                }
+            }
+            br.close();
+        } catch (Exception e) {
+            lastError = e.toString();
+        }
+        return added;
+    }
+
     public static int importAll() {
         int added = 0;
         File dst = rootDir();

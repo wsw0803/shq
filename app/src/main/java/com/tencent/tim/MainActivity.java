@@ -252,6 +252,34 @@ private void setupImmersiveMode() {
         return sb.toString().trim();
     }
 
+
+    public void startImportFilePicker() {
+        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*");
+        intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, 1002);
+    }
+
+    private String getFileNameFromUri(android.net.Uri uri) {
+        String result = null;
+        if ("content".equals(uri.getScheme())) {
+            try (android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                    if (idx != -1) result = cursor.getString(idx);
+                }
+            } catch (Exception ignored) {}
+        }
+        if (result == null) {
+            result = uri.getPath();
+            if (result != null) {
+                int cut = result.lastIndexOf('/');
+                if (cut != -1) result = result.substring(cut + 1);
+            }
+        }
+        return result;
+    }
+
     private void loadStorageMethod() {
         SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         String uriString = prefs.getString(KEY_STORAGE_URI, "");
@@ -424,6 +452,19 @@ private void setupImmersiveMode() {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 1002 && resultCode == RESULT_OK && data != null) {
+            android.net.Uri uri = data.getData();
+            if (uri != null) {
+                String fileName = getFileNameFromUri(uri);
+                if (fileName != null && fileName.toLowerCase().endsWith(".txt")) {
+                    int n = TokenStore.importFromUri(this, uri);
+                    Toast.makeText(this, n > 0 ? ("已导入 " + n + " 条新记录") : "未发现新记录", Toast.LENGTH_LONG).show();
+                    TokenDialog.show(this, "", null);
+                } else {
+                    Toast.makeText(this, "只能选择 .txt 文件", Toast.LENGTH_SHORT).show();
+                }
+            }
+        }
         
         if (requestCode == REQUEST_CODE_OPEN_DIRECTORY && resultCode == RESULT_OK && data != null) {
             Uri treeUri = data.getData();

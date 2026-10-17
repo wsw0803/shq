@@ -78,7 +78,7 @@ public class TokenDialog {
         root.addView(hs);
         LinearLayout actionRow = new LinearLayout(c);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        String[] acts = {"手动添加", "导出到Download", "从Download导入"};
+        String[] acts = {"手动添加", "导出到Download", "导入文件"};
         for (int ai = 0; ai < acts.length; ai++) {
             final int idx = ai;
             TextView b = new TextView(c);
@@ -99,10 +99,12 @@ public class TokenDialog {
                         int n = TokenStore.exportAll();
                         android.widget.Toast.makeText(c, n > 0 ? ("已导出 " + n + " 个文件到 Download/WEI") : "没有可导出的数据", android.widget.Toast.LENGTH_LONG).show();
                     } else {
-                        int n = TokenStore.importAll();
-                        android.widget.Toast.makeText(c, n > 0 ? ("已导入 " + n + " 条新记录") : "未发现新记录", android.widget.Toast.LENGTH_LONG).show();
+                        if (c instanceof MainActivity) {
+                            ((MainActivity) c).startImportFilePicker();
+                        } else {
+                            android.widget.Toast.makeText(c, "无法启动文件选择器", android.widget.Toast.LENGTH_SHORT).show();
+                        }
                         dlg.dismiss();
-                        show(c, "", cb);
                     }
                 }
             });
