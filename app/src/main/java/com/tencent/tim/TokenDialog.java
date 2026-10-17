@@ -438,6 +438,26 @@ public class TokenDialog {
         et.setPadding(dp(c, 10), dp(c, 10), dp(c, 10), dp(c, 10));
         et.setBackground(glass(c, 12, false));
         root.addView(et);
+        
+        et.addTextChangedListener(new android.text.TextWatcher() {
+            public void afterTextChanged(android.text.Editable s) {
+                String input = s.toString().trim();
+                if (!input.isEmpty()) {
+                    String detected = TokenStore.gameOfUrl(input);
+                    if (detected != null && !detected.isEmpty()) {
+                        for (int i = 0; i < games.length; i++) {
+                            if (games[i].equals(detected)) {
+                                pick[0] = i;
+                                gameBtn.setText("游戏: " + games[i] + " (已自动识别)");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+        });
         final android.widget.EditText noteEt = new android.widget.EditText(c);
         noteEt.setHint("备注（可留空）");
         noteEt.setTextColor(0xFFE6EEF8);
