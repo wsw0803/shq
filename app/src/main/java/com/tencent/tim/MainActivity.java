@@ -323,11 +323,7 @@ private void setupImmersiveMode() {
             } else {
                 addLog("[文件] 目录已存在: " + dir.getAbsolutePath());
             }
-            for (String g : TokenStore.GAMES) {
-                File gd = TokenStore.gameDir(g);
-                if (!gd.exists()) gd.mkdirs();
-            }
-            addLog("[文件] 已按游戏分目录: 和平 / 王者 / 三角洲 / 无畏契约");
+            addLog("[文件] 采用平铺保存：维/保存数据/游戏名.txt");
         } catch (Exception e) {
             addLog("[错误] 创建目录失败: " + e.getMessage());
         }
