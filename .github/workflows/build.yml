@@ -47,3 +47,13 @@ jobs:
           tag_name: v${{ steps.version.outputs.vName }}
           name: shq v${{ steps.version.outputs.vName }}
           files: out/*.apk
+      - name: Update raw files
+        run: |
+          mkdir -p release
+          cp out/shq-${{ steps.version.outputs.vName }}.apk release/latest.apk
+          echo '{"version":"${{ steps.version.outputs.vName }}"}' > release/version.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add release/latest.apk release/version.json
+          git commit -m "chore: update latest apk and version [skip ci]" || true
+          git push || true
