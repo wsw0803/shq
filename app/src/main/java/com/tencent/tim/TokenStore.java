@@ -347,11 +347,21 @@ public class TokenStore {
                 added++;
             }
             sc2.close();
-            FileWriter w = new FileWriter(dst, false);
+            File tmp = new File(dst.getParentFile(), dst.getName() + ".tmp");
+            FileWriter w = new FileWriter(tmp, false);
             for (int i = 0; i < out.size(); i++) { w.append(out.get(i)); w.append((char)10); }
             w.flush(); w.close();
+            File bak = new File(dst.getParentFile(), dst.getName() + ".bak");
+            if (dst.exists()) {
+                try { if (bak.exists()) bak.delete(); dst.renameTo(bak); } catch (Throwable ignored) {}
+            }
+            if (!tmp.renameTo(dst)) {
+                if (bak.exists()) bak.renameTo(dst);
+                throw new java.io.IOException("rename failed");
+            }
         } catch (Exception e) {
             lastError = "导入失败: " + e.getMessage();
+            added = 0;
         }
         return added;
     }
