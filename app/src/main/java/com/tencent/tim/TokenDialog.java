@@ -200,10 +200,10 @@ public class TokenDialog {
             box.addView(empty);
             return;
         }
-        for (TokenStore.Entry e : list) box.addView(card(c, e, cb, dlg));
+        for (TokenStore.Entry e : list) box.addView(card(c, e, cb, dlg, box, tip));
     }
 
-    private static View card(final Context c, final TokenStore.Entry e, final OnPick cb, final Dialog dlg) {
+    private static View card(final Context c, final TokenStore.Entry e, final OnPick cb, final Dialog dlg, final LinearLayout box, final TextView tip) {
         LinearLayout card = new LinearLayout(c);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(glass(c, 14, false));
@@ -276,7 +276,7 @@ public class TokenDialog {
         del.setTextSize(12);
         del.setPadding(dp(c, 20), dp(c, 10), dp(c, 8), dp(c, 10));
         del.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { confirmDelete(c, e, dlg); }
+            public void onClick(View v) { confirmDelete(c, e, dlg, card, box, tip); }
         });
         row.addView(del);
 
@@ -295,7 +295,7 @@ public class TokenDialog {
         return card;
     }
 
-    private static void confirmDelete(final Context c, final TokenStore.Entry e, final Dialog parent) {
+    private static void confirmDelete(final Context c, final TokenStore.Entry e, final Dialog parent, final View cardView, final LinearLayout box, final TextView tip) {
         final Dialog d = new Dialog(c);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout root = new LinearLayout(c);
@@ -338,7 +338,10 @@ public class TokenDialog {
                 boolean done = TokenStore.deleteEntry(e.game, e.accessToken);
                 d.dismiss();
                 android.widget.Toast.makeText(c, done ? "已删除" : "删除失败", android.widget.Toast.LENGTH_SHORT).show();
-                if (done && parent != null) parent.dismiss();
+                if (done) {
+                    if (cardView != null && box != null) box.removeView(cardView);
+                    if (tip != null) tip.setText(e.game + " · " + TokenStore.loadGame(e.game).size() + " 个账号");
+                }
             }
         });
         btns.addView(cancel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
