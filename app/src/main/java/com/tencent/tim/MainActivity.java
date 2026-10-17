@@ -105,6 +105,7 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
         loadGameList();
+        checkForUpdates();
     }
     
     /**
@@ -843,5 +844,102 @@ private void setupImmersiveMode() {
             addLog("[错误] 启动失败 " + e.getMessage());
             Toast.makeText(this, "启动失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+    private void checkForUpdates() {
+        new Thread(() -> {
+            try {
+                java.net.URL url = new java.net.URL("https://api.github.com/repos/wsw0803/shq/releases/latest");
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                if (conn.getResponseCode() == 200) {
+                    java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                    reader.close();
+                    org.json.JSONObject json = new org.json.JSONObject(sb.toString());
+                    String latestTag = json.optString("tag_name", "");
+                    String cleanLatest = latestTag.startsWith("v") ? latestTag.substring(1) : latestTag;
+                    String currentVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                    if (!cleanLatest.isEmpty() && !cleanLatest.equals(currentVersion)) {
+                        org.json.JSONArray assets = json.optJSONArray("assets");
+                        if (assets != null && assets.length() > 0) {
+                            String apkUrl = assets.getJSONObject(0).optString("browser_download_url", "");
+                            if (!apkUrl.isEmpty()) {
+                                runOnUiThread(() -> showUpdateDialog(cleanLatest, apkUrl));
+                            }
+                        }
+                    }
+                }
+                conn.disconnect();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+    private void showUpdateDialog(String newVersion, String url) {
+        final android.app.Dialog dlg = new android.app.Dialog(this);
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.8f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
+        int p = (int)(16 * getResources().getDisplayMetrics().density);
+        root.setPadding(p, p, p, p);
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("发现新版本 " + newVersion);
+        title.setTextColor(0xFFF5F7FA);
+        title.setTextSize(17);
+        title.setGravity(android.view.Gravity.CENTER);
+        root.addView(title);
+        android.widget.TextView tip = new android.widget.TextView(this);
+        tip.setText("是否立即下载更新？");
+        tip.setTextColor(0xFF9CA3AF);
+        tip.setTextSize(13);
+        tip.setGravity(android.view.Gravity.CENTER);
+        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int)(10 * getResources().getDisplayMetrics().density);
+        lp.bottomMargin = (int)(16 * getResources().getDisplayMetrics().density);
+        tip.setLayoutParams(lp);
+        root.addView(tip);
+        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
+        btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.Button btnCancel = new android.widget.Button(this);
+        btnCancel.setText("暂不更新");
+        btnCancel.setTextColor(0xFFF5F7FA);
+        btnCancel.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+        btnCancel.setOnClickListener(v -> dlg.dismiss());
+        android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        lp1.rightMargin = (int)(6 * getResources().getDisplayMetrics().density);
+        btnRow.addView(btnCancel, lp1);
+        android.widget.Button btnOk = new android.widget.Button(this);
+        btnOk.setText("立即更新");
+        btnOk.setTextColor(0xFF000000);
+        btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
+        btnOk.setOnClickListener(v -> {
+            dlg.dismiss();
+            String cdnUrl = "https://ghfast.top/" + url;
+            try {
+                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(cdnUrl));
+                startActivity(intent);
+            } catch (Exception e) {
+                try {
+                    startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+                } catch (Exception ex) {}
+            }
+        });
+        android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        lp2.leftMargin = (int)(6 * getResources().getDisplayMetrics().density);
+        btnRow.addView(btnOk, lp2);
+        root.addView(btnRow);
+        dlg.setContentView(root);
+        dlg.show();
     }
 }
