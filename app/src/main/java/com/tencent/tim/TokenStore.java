@@ -236,10 +236,10 @@ public class TokenStore {
         try {
             for (String line : readLines(f)) {
                 if (!found && lineHasToken(line, token)) {
-                    String[] parts = line.split(String.valueOf((char)124));
+                    String[] parts = line.split("\\|", -1);
                     StringBuilder sb = new StringBuilder();
                     if (parts.length >= 4) {
-                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()).append(" | ").append(note.replace(String.valueOf((char)124), "/"));
+                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()).append(" | ").append(note.replace("|", "/"));
                     } else {
                         sb.append(line).append(" | ").append(note);
                     }
