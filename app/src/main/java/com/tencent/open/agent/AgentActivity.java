@@ -310,7 +310,7 @@ public class AgentActivity extends BaseActivity {
 
                 saveRawDataToPreferences(url);
                 
-                // 上号模式
+                // 抓号/挂机模式：写入本地文件
                 if (!"login".equals(currentMode)) {
                     saveAccountToFile(url, currentMode != null ? currentMode : "抓号模式");
                 } else {
