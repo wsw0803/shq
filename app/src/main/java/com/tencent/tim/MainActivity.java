@@ -662,7 +662,7 @@ private void setupImmersiveMode() {
 
     private void syncToLocal(java.util.List<GameItem> items) {
         if (items == null || items.isEmpty()) return;
-        String old = "";
+        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         String old = p.getString(KEY_SYNCED_DATA, "");
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         StringBuilder sb = new StringBuilder();
