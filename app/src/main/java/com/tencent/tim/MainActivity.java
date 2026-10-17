@@ -552,11 +552,19 @@ private void setupImmersiveMode() {
         cbLocalSource.setChecked(p.getBoolean(KEY_LOCAL_ON, true));
         cbCloudSource.setChecked(p.getBoolean(KEY_CLOUD_ON, false));
         cbLocalSource.setOnCheckedChangeListener((v, c) -> {
-            getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_LOCAL_ON, c).apply();
+            if (c && cbCloudSource.isChecked()) cbCloudSource.setChecked(false);
+            SharedPreferences.Editor ed = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
+            ed.putBoolean(KEY_LOCAL_ON, c);
+            if (c) { ed.remove(KEY_SYNCED_DATA); ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
+            ed.apply();
             onSourceToggled();
         });
         cbCloudSource.setOnCheckedChangeListener((v, c) -> {
-            getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_CLOUD_ON, c).apply();
+            if (c && cbLocalSource.isChecked()) cbLocalSource.setChecked(false);
+            SharedPreferences.Editor ed = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
+            ed.putBoolean(KEY_CLOUD_ON, c);
+            if (c) { ed.remove(KEY_SYNCED_DATA); ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
+            ed.apply();
             onSourceToggled();
         });
     }

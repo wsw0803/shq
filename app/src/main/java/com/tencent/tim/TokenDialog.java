@@ -48,7 +48,7 @@ public class TokenDialog {
             List<TokenStore.Entry> one = TokenStore.loadGame(game);
             if (!one.isEmpty()) groups.put(game, one);
         } else {
-            for (String g : TokenStore.GAMES) {
+            for (String g : java.util.Arrays.asList("和平","王者","三角洲","无畏契约","其他")) {
                 List<TokenStore.Entry> l = TokenStore.loadGame(g);
                 if (!l.isEmpty()) groups.put(g, l);
             }
