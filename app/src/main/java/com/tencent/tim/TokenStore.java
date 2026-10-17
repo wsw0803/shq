@@ -52,7 +52,7 @@ public class TokenStore {
 
     public static String appidOfUrl(String url) {
         if (url == null) return null;
-        Matcher m = Pattern.compile("(?:client_id|pt_3rd_aid|appid|aid)=([0-9]+)").matcher(url);
+        Matcher m = Pattern.compile("client_id=([0-9]+)").matcher(url);
         if (m.find()) return m.group(1);
         m = Pattern.compile("pt_3rd_aid=([0-9]+)").matcher(url);
         if (m.find()) return m.group(1);
@@ -299,7 +299,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
     }
 
     static String withAppid(String u, String g) { if (u == null) return u; if (u.contains("appid=") || u.contains("client_id=")) return u; String a = appidOfGame(g);
-        if (a == null || a.isEmpty()) { try { String su = appContext.getSharedPreferences("myPrefs", 0).getString("selected_game_url", ""); java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?:client_id|pt_3rd_aid|appid|aid)=([0-9]+)").matcher(su == null ? "" : su); if (m.find()) a = m.group(1); } catch (Exception ex) {} } if (a == null || a.isEmpty()) return u; return u + (u.contains("?") ? "&" : "?") + "appid=" + a; }
+        if (a == null || a.isEmpty()) { try { String su = appContext.getSharedPreferences("myPrefs", 0).getString("selected_game_url", ""); java.util.regex.Matcher m = java.util.regex.Pattern.compile("client_id=([0-9]+)").matcher(su == null ? "" : su); if (m.find()) a = m.group(1); } catch (Exception ex) {} } if (a == null || a.isEmpty()) return u; return u + (u.contains("?") ? "&" : "?") + "appid=" + a; }
 
     public static String rebuildUrl(Entry e) {
         if (e.raw != null && e.raw.contains("access_token=")) return withAppid(e.raw, e.game);
