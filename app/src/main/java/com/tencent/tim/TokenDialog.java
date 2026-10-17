@@ -352,7 +352,7 @@ public class TokenDialog {
         del.setTextSize(12);
         del.setPadding(dp(c, 20), dp(c, 10), dp(c, 8), dp(c, 10));
         del.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { confirmDelete(c, e, dlg); }
+            public void onClick(View v) { confirmDelete(c, e, dlg, cb); }
         });
         row.addView(del);
 
@@ -371,7 +371,7 @@ public class TokenDialog {
         return card;
     }
 
-    private static void confirmDelete(final Context c, final TokenStore.Entry e, final Dialog parent) {
+    private static void confirmDelete(final Context c, final TokenStore.Entry e, final Dialog parent, final OnPick cb) {
         final Dialog d = new Dialog(c);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout root = new LinearLayout(c);
@@ -454,7 +454,6 @@ public class TokenDialog {
                     if (parent != null && parent.isShowing()) parent.dismiss();
                     show(c, e.game, cb);
                 }
-                if (done && parent != null) parent.dismiss();
             }
         });
         b.setNegativeButton("取消", null);
