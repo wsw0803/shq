@@ -87,6 +87,7 @@ public class MainActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        loadGameListFromServer();
         
         // 设置沉浸式效果（保留状态栏）
         setupImmersiveMode();
