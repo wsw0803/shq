@@ -626,6 +626,7 @@ private void setupImmersiveMode() {
                 int i = line.indexOf("|");
                 if (i <= 0) continue;
                 String name = line.substring(0, i);
+                    if (!java.util.Arrays.asList(TokenStore.GAMES).contains(name)) continue;
                 String appid = line.substring(i + 1);
                 if (!seen.add(appid)) continue;
                 gameList.add(new GameItem("", name, buildLocalUrl(appid)));
