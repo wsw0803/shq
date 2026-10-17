@@ -52,7 +52,7 @@ public class Ui {
         View bright = a.findViewById(R.id.bg_hue);
         if (bright != null) {
             int b = p.getInt(KEY_BRIGHT, 70);
-            int ba = (int) ((100 - b) * 2.55f);
+            int ba = (int) ((100 - b) * 1.55f);
             bright.setBackgroundColor(Color.argb(ba, 0, 0, 0));
         }
         ImageView custom = a.findViewById(R.id.bg_custom);
@@ -132,6 +132,6 @@ public class Ui {
         int target = (int) (base * pct / 100f);
         a.getResources().getDisplayMetrics().densityDpi = target;
         a.getResources().getConfiguration().densityDpi = target;
-        a.recreate();
+        android.content.Intent i=new android.content.Intent(a,MainActivity.class);i.setFlags(0x10000000|0x04000000);a.startActivity(i);a.finish();
     }
 }
