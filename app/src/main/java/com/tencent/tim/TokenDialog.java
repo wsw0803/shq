@@ -23,18 +23,34 @@ public class TokenDialog {
         void onPick(TokenStore.Entry e);
     }
 
-    public static GradientDrawable glass(Context c, int radiusDp, boolean accent) {
+    public static android.graphics.drawable.Drawable glass(Context c, int radiusDp, boolean accent) {
         int g = Ui.prefs(c).getInt(Ui.KEY_GLASS, 40);
         int a = (int) (g * 1.6f);
-        if (a > 170) a = 170;
+        if (a > 150) a = 150;
         if (a < 60) a = 60;
-        GradientDrawable d = new GradientDrawable();
-        d.setShape(GradientDrawable.RECTANGLE);
-        d.setCornerRadius(radiusDp * c.getResources().getDisplayMetrics().density);
-        d.setColor(Color.argb(a, 14, 22, 36));
-        d.setStroke((int) c.getResources().getDisplayMetrics().density, accent ? 0x9922D3EE : 0x40FFFFFF);
-        return d;
+        float r = radiusDp * c.getResources().getDisplayMetrics().density;
+        int sw = (int) c.getResources().getDisplayMetrics().density;
+
+        GradientDrawable base = new GradientDrawable();
+        base.setShape(GradientDrawable.RECTANGLE);
+        base.setCornerRadius(r);
+        base.setColor(Color.argb(a, 255, 255, 255));
+
+        GradientDrawable highlight = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x50FFFFFF, 0x00FFFFFF});
+        highlight.setShape(GradientDrawable.RECTANGLE);
+        highlight.setCornerRadius(r);
+
+        GradientDrawable stroke = new GradientDrawable();
+        stroke.setShape(GradientDrawable.RECTANGLE);
+        stroke.setCornerRadius(r);
+        stroke.setStroke(sw, accent ? 0x9922D3EE : 0x80FFFFFF);
+
+        return new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{base, highlight, stroke});
     }
+
 
     private static int dp(Context c, int v) {
         return (int) (v * c.getResources().getDisplayMetrics().density);
