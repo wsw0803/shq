@@ -19,7 +19,7 @@ public class Ui {
     public static final String KEY_GLASS = "ui_glass";
     public static final String KEY_BRIGHT = "ui_bright";
     public static final String KEY_BG = "ui_bg";
-    public static final String KEY_BG_URI = "ui_bg_uri";
+    public static final String KEY_BG_URI = "ui_bg_uri"; public static final String KEY_THEME = "ui_theme";
     public static final String KEY_BASE_DPI = "ui_base_dpi";
 
     public static SharedPreferences prefs(Context c) {
@@ -76,13 +76,43 @@ public class Ui {
                 custom.setVisibility(View.GONE);
             }
         }
+        applyTheme(a);
         View content = a.findViewById(android.R.id.content);
         if (content instanceof ViewGroup) {
             View root = ((ViewGroup) content).getChildAt(0);
-            if (root != null) root.setBackgroundResource(bgRes(p.getInt(KEY_BG, 0)));
+            int th = p.getInt(KEY_THEME, 0); boolean lt = th == 1 || (th == 0 && (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES); if (root != null) root.setBackgroundResource(lt ? R.drawable.bg_light : bgRes(p.getInt(KEY_BG, 0)));
         }
     }
 
+
+    public static boolean isLightMode(Activity a) {
+        int th = prefs(a).getInt(KEY_THEME, 0);
+        if (th == 1) return true;
+        if (th == 2) return false;
+        return (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    public static void tint(View v, boolean light) {
+        if (v instanceof android.widget.TextView) {
+            android.widget.TextView t = (android.widget.TextView) v;
+            int c = t.getCurrentTextColor();
+            int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
+            if (light) {
+                if (r + g + b > 480) t.setTextColor(0xFF14202E);
+                else if (r + g + b > 300) t.setTextColor(0xFF51637A);
+            }
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup gp = (android.view.ViewGroup) v;
+            for (int i = 0; i < gp.getChildCount(); i++) tint(gp.getChildAt(i), light);
+        }
+    }
+
+    public static void applyTheme(Activity a) {
+        boolean light = isLightMode(a);
+        View content = a.findViewById(android.R.id.content);
+        if (content != null) tint(content, light);
+    }
     public static int bgRes(int idx) {
         switch (idx) {
             case 1: return R.drawable.bg_style_1;

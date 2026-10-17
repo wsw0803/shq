@@ -63,13 +63,14 @@ Button pickBg = findViewById(R.id.btn_pick_bg);
             }
         });
 
-        int[] bgIds = {R.id.bg_0, R.id.bg_1, R.id.bg_2, R.id.bg_3};
-        for (int i = 0; i < bgIds.length; i++) {
-            final int idx = i;
-            Button b = findViewById(bgIds[i]);
-            b.setOnClickListener(v -> {
-                Ui.prefs(this).edit().putInt(Ui.KEY_BG, idx).apply();
-                Ui.apply(this);
+
+        int[] thIds = {R.id.th_dark, R.id.th_light, R.id.th_auto};
+        for (int i = 0; i < thIds.length; i++) {
+            final int v = i;
+            Button b = findViewById(thIds[i]);
+            b.setOnClickListener(x -> {
+                Ui.prefs(this).edit().putInt(Ui.KEY_THEME, v).apply();
+                recreate();
             });
         }
 
