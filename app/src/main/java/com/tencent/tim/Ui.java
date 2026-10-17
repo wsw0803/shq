@@ -33,6 +33,9 @@ public class Ui {
         if (pct == 100) return base;
         Configuration cfg = new Configuration(base.getResources().getConfiguration());
         int baseDpi = base.getResources().getDisplayMetrics().densityDpi;
+        if (prefs(base).getInt(KEY_BASE_DPI, 0) <= 0) {
+            prefs(base).edit().putInt(KEY_BASE_DPI, baseDpi).apply();
+        }
         cfg.densityDpi = (int) (baseDpi * (pct / 100f));
         return base.createConfigurationContext(cfg);
     }
@@ -97,11 +100,8 @@ public class Ui {
             prefs(a).edit().putInt(KEY_BASE_DPI, base).apply();
         }
         int target = (int) (base * pct / 100f);
-        android.content.res.Resources res = a.getResources();
-        android.content.res.Configuration cfg = new android.content.res.Configuration(res.getConfiguration());
-        if (cfg.densityDpi != target) {
-            cfg.densityDpi = target;
-            res.updateConfiguration(cfg, res.getDisplayMetrics());
-        }
+        a.getResources().getDisplayMetrics().densityDpi = target;
+        a.getResources().getConfiguration().densityDpi = target;
+        a.recreate();
     }
 }

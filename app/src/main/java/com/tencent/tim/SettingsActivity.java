@@ -104,7 +104,7 @@ Button pickBg = findViewById(R.id.btn_pick_bg);
         tvBright.setText("亮度: " + p.getInt(Ui.KEY_BRIGHT, 70) + "%");
     }
 
-    private static abstract class L implements SeekBar.OnSeekBarChangeListener {
+    private abstract class L implements SeekBar.OnSeekBarChangeListener {
         @Override public void onStartTrackingTouch(SeekBar sb) {}
         @Override public void onStopTrackingTouch(SeekBar sb) {
             if (sb.getId() == R.id.seek_dpi) {
