@@ -78,6 +78,34 @@ public class AgentActivity extends BaseActivity {
         pasteLoginButton = findViewById(R.id.btn_paste);
         manualLoginButton = findViewById(R.id.btn_manual_login);
 
+        try {
+            com.tencent.tim.Ui.apply(this);
+        } catch (Throwable ignored) {}
+
+        android.widget.Button viewTokens = findViewById(R.id.btn_view_tokens);
+        if (viewTokens != null) {
+            viewTokens.setOnClickListener(v ->
+                    com.tencent.tim.TokenDialog.show(this, getSelectedGameName(), null));
+        }
+        android.widget.Button pickToken = findViewById(R.id.btn_pick_token);
+        if (pickToken != null) {
+            pickToken.setOnClickListener(v ->
+                    com.tencent.tim.TokenDialog.show(this, getSelectedGameName(), e -> {
+                        String url2 = com.tencent.tim.TokenStore.rebuildUrl(e);
+                        plainText.setText(url2);
+                        updateAutoGameHint(url2);
+                        performLogin(url2);
+                    }));
+        }
+        plainText.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            public void afterTextChanged(android.text.Editable ed) {
+                updateAutoGameHint(ed == null ? "" : ed.toString());
+            }
+        });
+
+
         Intent intent = getIntent();
         String modeFromIntent = null;
         if (intent != null) {
@@ -233,6 +261,20 @@ public class AgentActivity extends BaseActivity {
         return "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=1104466820&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=1104466820&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
     }
 
+    private void updateAutoGameHint(String url) {
+        android.widget.TextView tv = findViewById(R.id.tv_auto_game);
+        if (tv == null) return;
+        String g = com.tencent.tim.TokenStore.gameOfUrl(url);
+        String appid = com.tencent.tim.TokenStore.appidOfUrl(url);
+        if (g != null && !g.isEmpty()) {
+            tv.setText("自动识别: " + g + "  ·  appid " + appid + "  ·  保存到 维/保存数据/" + g);
+            tv.setTextColor(0xFF34D399);
+        } else {
+            tv.setText("自动识别: 未识别到游戏（将默认按和平处理）");
+            tv.setTextColor(0xFFFBBF24);
+        }
+    }
+
     public void pasteAndLogin() {
         try {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -328,36 +370,34 @@ public class AgentActivity extends BaseActivity {
         new Thread(() -> {
             try {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-                String gameName = getSelectedGameName();
-                String line = time + " | " + gameName + " | " + url + " | " + mode + "\n";
-                
-                String dirPath = Environment.getExternalStorageDirectory().getPath() + "/维/保存数据";
-                String filePath = dirPath + "/数据.txt";
-                
-                File dir = new File(dirPath);
-                if (!dir.exists()) {
-                    dir.mkdirs();
-                }
-                
-                File file = new File(filePath);
-                FileWriter writer = new FileWriter(file, true);
-                
-                String token = getAccessTokenFromUrl(line);
-                if (token != null && isTokenExists(file, token)) {
-                    writer.close();
-                    return;
-                }
-                
-                writer.append(line);
-                writer.flush();
-                writer.close();
-                
-            } catch (IOException e) {
+                String game = com.tencent.tim.TokenStore.gameOfUrl(url);
+                if (game == null || game.isEmpty()) game = getSelectedGameName();
+                if (game == null || game.isEmpty() || !isKnownGame(game)) game = "和平";
+                String line = time + " | " + game + " | " + url + " | " + mode;
+                final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(game, line);
+                final String g = game;
+                runOnUiThread(() -> {
+                    if (ok) {
+                        Toast.makeText(AgentActivity.this,
+                                "已识别 " + g + "，保存到 " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(AgentActivity.this, "Token 已存在或保存失败（" + g + "）", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception e) {
                 e.printStackTrace();
             }
         }).start();
     }
-    
+
+    private boolean isKnownGame(String g) {
+        for (String k : com.tencent.tim.TokenStore.GAMES) {
+            if (k.equals(g)) return true;
+        }
+        return false;
+    }
+
     private boolean isTokenExists(File file, String token) {
         try {
             Scanner scanner = new Scanner(file);

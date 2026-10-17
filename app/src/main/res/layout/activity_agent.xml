@@ -4,6 +4,29 @@
     android:layout_height="match_parent"
     android:background="@color/bg_primary">
 
+    <ImageView
+        android:id="@+id/bg_custom"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <View
+        android:id="@+id/bg_glass"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#00000000"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <View
+        android:id="@+id/bg_hue"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#00000000"
+        android:clickable="false"
+        android:focusable="false" />
+
     <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"
@@ -88,6 +111,57 @@
                     android:layout_marginStart="6dp"
                     android:padding="14dp" />
 
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="14dp">
+
+                <Button
+                    android:id="@+id/btn_view_tokens"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="查看 Token"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/glass_btn_secondary"
+                    android:textAllCaps="false"
+                    android:layout_marginEnd="6dp"
+                    android:padding="12dp" />
+
+                <Button
+                    android:id="@+id/btn_pick_token"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="选择 Token 登录"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_primary"
+                    android:background="@drawable/glass_btn_secondary"
+                    android:textAllCaps="false"
+                    android:layout_marginStart="6dp"
+                    android:padding="12dp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/glass_card"
+                android:padding="12dp"
+                android:layout_marginTop="16dp">
+                <TextView
+                    android:id="@+id/tv_auto_game"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="自动识别: 等待 Token"
+                    android:textSize="11sp"
+                    android:textColor="@color/accent_cyan"
+                    android:fontFamily="monospace" />
             </LinearLayout>
 
         </LinearLayout>

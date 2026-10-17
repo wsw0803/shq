@@ -52,7 +52,7 @@ public class MainActivity extends BaseActivity {
     private static final String KEY_SYNCED_DATA = "synced_data";
     private static final String KEY_LOCAL_ON = "local_on";
     private static final String KEY_CLOUD_ON = "cloud_on";
-    private static final String LOCAL_GAME_DATA = "和平|1106467070;王者|1104466820;火影|1104307008;使命|1106838536;PUBG|1106545419;CF|1104512706;三角洲|1110543085;暗区突围|1110196838;永劫无间|102150659;无畏契约|1111677210;极品飞车|1108169089;香肠派对|1107970117;QQ飞车|1104922185;LOL手游|1106040804;斗地主|363;金铲铲|1109811436;DNF起源|1104294055;天天酷跑|100692648;洛克王国|1110613799;部落冲突|1105771533;高能英雄|1110329808;妄想山海|1109838467";
+    private static final String LOCAL_GAME_DATA = "和平|1106467070;王者|1104466820;三角洲|1110543085;无畏契约|1111677210";
     private static final String KEY_STORAGE_URI = "storage_uri";
     
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
@@ -167,10 +167,72 @@ private void setupImmersiveMode() {
 
         updateSelectGameButtonText();
         updateStorageStatus();
+        android.widget.Button viewToken = findViewById(R.id.btn_view_token);
+        if (viewToken != null) {
+            viewToken.setOnClickListener(v -> TokenDialog.show(this, selectedGameName, null));
+        }
+        android.widget.Button copyToken = findViewById(R.id.btn_copy_token);
+        if (copyToken != null) {
+            copyToken.setOnClickListener(v -> showCopyTokenMenu());
+        }
         android.widget.Button sb = findViewById(R.id.btn_settings);
         sb.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));
     }
     
+    private void showCopyTokenMenu() {
+        final java.util.List<TokenStore.Entry> list = selectedGameName.isEmpty()
+                ? TokenStore.loadAll() : TokenStore.loadGame(selectedGameName);
+        if (list.isEmpty()) {
+            addLog("[Token] 当前游戏没有已保存的 Token");
+            Toast.makeText(this, "没有已保存的 Token，目录: " + TokenStore.rootDir().getAbsolutePath(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        TokenStore.Entry e = list.get(list.size() - 1);
+        final String[] items = new String[]{
+                "复制 access_token",
+                "复制 openid",
+                "复制 pay_token",
+                "复制 expires_in",
+                "复制完整链接",
+                "复制全部 token（全部分段逐行）"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("复制 Token · " + (selectedGameName.isEmpty() ? e.game : selectedGameName))
+                .setItems(items, (d, which) -> {
+                    switch (which) {
+                        case 0: TokenStore.copy("access_token", e.accessToken, this); break;
+                        case 1: TokenStore.copy("openid", e.openid, this); break;
+                        case 2: TokenStore.copy("pay_token", e.payToken, this); break;
+                        case 3: TokenStore.copy("expires_in", e.expiresIn, this); break;
+                        case 4: TokenStore.copy("完整链接", TokenStore.rebuildUrl(e), this); break;
+                        default:
+                            TokenStore.copy("全部 token", allSegments(list), this);
+                            break;
+                    }
+                    addLog("[Token] 已复制: " + items[which]);
+                })
+                .show();
+    }
+
+    private String allSegments(java.util.List<TokenStore.Entry> list) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            TokenStore.Entry e = list.get(i);
+            sb.append("[").append(e.game).append("] ").append(e.time).append("
+");
+            sb.append("access_token=").append(e.accessToken).append("
+");
+            sb.append("openid=").append(e.openid).append("
+");
+            sb.append("pay_token=").append(e.payToken).append("
+");
+            sb.append("expires_in=").append(e.expiresIn).append("
+
+");
+        }
+        return sb.toString().trim();
+    }
+
     private void loadStorageMethod() {
         SharedPreferences prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         String uriString = prefs.getString(KEY_STORAGE_URI, "");
@@ -264,14 +326,18 @@ private void setupImmersiveMode() {
     
     private void createDataDirectory() {
         try {
-            String dirPath = Environment.getExternalStorageDirectory().getPath() + "/维/保存数据";
-            File dir = new File(dirPath);
+            File dir = TokenStore.rootDir();
             if (!dir.exists()) {
                 dir.mkdirs();
-                addLog("[文件] 创建目录: " + dirPath);
+                addLog("[文件] 创建目录: " + dir.getAbsolutePath());
             } else {
-                addLog("[文件] 目录已存在: " + dirPath);
+                addLog("[文件] 目录已存在: " + dir.getAbsolutePath());
             }
+            for (String g : TokenStore.GAMES) {
+                File gd = TokenStore.gameDir(g);
+                if (!gd.exists()) gd.mkdirs();
+            }
+            addLog("[文件] 已按游戏分目录: 和平 / 王者 / 三角洲 / 无畏契约");
         } catch (Exception e) {
             addLog("[错误] 创建目录失败: " + e.getMessage());
         }
