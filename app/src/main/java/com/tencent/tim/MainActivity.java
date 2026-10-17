@@ -52,7 +52,7 @@ public class MainActivity extends BaseActivity {
     private static final String KEY_SYNCED_DATA = "synced_data";
     private static final String KEY_LOCAL_ON = "local_on";
     private static final String KEY_CLOUD_ON = "cloud_on";
-    private static final String LOCAL_GAME_DATA = "和平|1106467070;王者|1104466820;三角洲|1110543085;无畏契约|1111677210";
+    private static final String LOCAL_GAME_DATA = "和平|1106467070";
     private static final String KEY_STORAGE_URI = "storage_uri";
     
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
