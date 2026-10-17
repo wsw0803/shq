@@ -254,6 +254,38 @@ public class TokenStore {
         }
     }
 
+    public static boolean updateNote(String game, String token, String note) {
+        File f = gameFile(game);
+        if (!f.exists()) return false;
+        try {
+            java.util.List<String> lines = new java.util.ArrayList<String>();
+            Scanner sc = new Scanner(f, "UTF-8");
+            boolean found = false;
+            while (sc.hasNextLine()) {
+                String line = sc.nextLine();
+                if (!found && line.contains(token)) {
+                    String[] parts = line.split(String.valueOf((char)124));
+                    StringBuilder sb = new StringBuilder();
+                    if (parts.length >= 4) {
+                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()).append(" | ").append(note);
+                    } else {
+                        sb.append(line).append(" | ").append(note);
+                    }
+                    lines.add(sb.toString());
+                    found = true;
+                } else {
+                    lines.add(line);
+                }
+            }
+            sc.close();
+            if (!found) return false;
+            java.io.FileWriter fw = new java.io.FileWriter(f, false);
+            for (int i = 0; i < lines.size(); i++) fw.append(lines.get(i)).append(String.valueOf((char)10));
+            fw.flush(); fw.close();
+            return true;
+        } catch (Exception e) { lastError = "note fail: " + e.getMessage(); return false; }
+    }
+
     public static void copy(String label, String text, android.content.Context c) {
         if (c == null) return;
         try {

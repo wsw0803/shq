@@ -193,6 +193,15 @@ public class TokenDialog {
         tk.setPadding(0, dp(c, 4), 0, dp(c, 6));
         card.addView(tk);
 
+        if (!TextUtils.isEmpty(e.note)) {
+            TextView nt = new TextView(c);
+            nt.setText("备注: " + e.note);
+            nt.setTextColor(0xFFFBBF24);
+            nt.setTextSize(11);
+            nt.setPadding(0, 0, 0, dp(c, 6));
+            card.addView(nt);
+        }
+
         LinearLayout row = new LinearLayout(c);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -206,6 +215,16 @@ public class TokenDialog {
             public void onClick(View v) { TokenStore.copy(e.game + "账号", segment(e), c); }
         });
         row.addView(copy);
+
+        TextView noteBtn = new TextView(c);
+        noteBtn.setText("备注");
+        noteBtn.setTextColor(0xFFFBBF24);
+        noteBtn.setTextSize(12);
+        noteBtn.setPadding(dp(c, 20), dp(c, 10), dp(c, 8), dp(c, 10));
+        noteBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showNoteDialog(c, e, dlg); }
+        });
+        row.addView(noteBtn);
 
         TextView del = new TextView(c);
         del.setText("删除");
@@ -290,6 +309,28 @@ public class TokenDialog {
             w.setAttributes(wp);
         }
         d.show();
+    }
+
+
+    private static void showNoteDialog(final Context c, final TokenStore.Entry e, final Dialog parent) {
+        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(c);
+        b.setTitle("设置备注");
+        final android.widget.EditText et = new android.widget.EditText(c);
+        et.setText(e.note);
+        et.setHint("输入备注...");
+        et.setTextColor(0xFFE6EEF8);
+        et.setHintTextColor(0xFF8A9BB8);
+        b.setView(et);
+        b.setPositiveButton("保存", new android.content.DialogInterface.OnClickListener() {
+            public void onClick(android.content.DialogInterface dialog, int which) {
+                String newNote = et.getText().toString().trim();
+                boolean done = TokenStore.updateNote(e.game, e.accessToken, newNote);
+                android.widget.Toast.makeText(c, done ? "备注已保存" : "保存失败", android.widget.Toast.LENGTH_SHORT).show();
+                if (done && parent != null) parent.dismiss();
+            }
+        });
+        b.setNegativeButton("取消", null);
+        b.show();
     }
 
     public static String segment(TokenStore.Entry e) {
