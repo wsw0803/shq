@@ -340,9 +340,6 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                     String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, game, pe.raw.replace("|", "%7C"), pe.mode));
                     if (saveGameEntry(game, keep)) res.added++;
                 } else if (pe != null && !pe.accessToken.isEmpty()) {
-                    String keep2 = pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, "其他", pe.raw.replace("|", "%7C"), pe.mode);
-                    if (saveGameEntry("其他", keep2)) res.added++;
-                } else {
                     res.unknownLines.add(line);
                 }
             }
