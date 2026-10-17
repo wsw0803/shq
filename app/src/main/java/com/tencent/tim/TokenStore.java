@@ -62,7 +62,7 @@ public class TokenStore {
     }
 
     public static String gameOfUrl(String url) {
-        String g = gameOfAppid(appidOfUrl(url));
+        String g = gameOfAppid(appidOfUrl(url)); if (g == null && url != null) { for (String[] cg : cloudGames()) { if (url.indexOf(cg[1]) >= 0) return cg[0]; } }
         return g == null ? "" : g;
     }
 
