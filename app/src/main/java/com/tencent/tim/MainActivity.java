@@ -626,7 +626,7 @@ private void setupImmersiveMode() {
             if (c && cbCloudSource.isChecked()) cbCloudSource.setChecked(false);
             SharedPreferences.Editor ed = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
             ed.putBoolean(KEY_LOCAL_ON, c);
-            if (c) { ed; ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
+            if (c) { ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
             ed.apply();
             onSourceToggled();
         });
@@ -634,7 +634,7 @@ private void setupImmersiveMode() {
             if (c && cbLocalSource.isChecked()) cbLocalSource.setChecked(false);
             SharedPreferences.Editor ed = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
             ed.putBoolean(KEY_CLOUD_ON, c);
-            if (c) { ed; ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
+            if (c) { ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
             ed.apply();
             onSourceToggled();
         });
