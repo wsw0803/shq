@@ -595,28 +595,62 @@ private void setupImmersiveMode() {
             loadGameList();
             return;
         }
-
-        String[] gameNames = new String[gameList.size()];
-        for (int i = 0; i < gameList.size(); i++) {
-            gameNames[i] = gameList.get(i).name;
+        final android.app.Dialog dlg = new android.app.Dialog(this);
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.8f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
-
-        new AlertDialog.Builder(this)
-                .setTitle("选择游戏")
-                .setItems(gameNames, (dialog, which) -> {
-                    try {
-                        GameItem selected = gameList.get(which);
-                        if (selected != null && selected.name != null && selected.url != null) {
-                            saveSelectedGame(selected.name, selected.url);
-                        } else {
-                            addLog("[错误] 游戏数据错误");
-                            Toast.makeText(this, "游戏数据错误", Toast.LENGTH_SHORT).show();
-                        }
-                    } catch (Exception e) {
-                        addLog("[错误] 选择游戏失败: " + e.getMessage());
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
+        int p = (int)(16 * getResources().getDisplayMetrics().density);
+        root.setPadding(p, p, p, p);
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("选择游戏");
+        title.setTextColor(0xFFF5F7FA);
+        title.setTextSize(17);
+        title.setGravity(android.view.Gravity.CENTER);
+        title.setPadding(0, 0, 0, (int)(10 * getResources().getDisplayMetrics().density));
+        root.addView(title);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        android.widget.LinearLayout list = new android.widget.LinearLayout(this);
+        list.setOrientation(android.widget.LinearLayout.VERTICAL);
+        scroll.addView(list);
+        root.addView(scroll, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        for (int i = 0; i < gameList.size(); i++) {
+            final int index = i;
+            GameItem item = gameList.get(i);
+            android.widget.TextView tv = new android.widget.TextView(this);
+            tv.setText(item.name);
+            tv.setTextColor(0xFF22D3EE);
+            tv.setTextSize(14);
+            tv.setGravity(android.view.Gravity.CENTER);
+            tv.setPadding(0, (int)(12 * getResources().getDisplayMetrics().density), 0, (int)(12 * getResources().getDisplayMetrics().density));
+            tv.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = (int)(8 * getResources().getDisplayMetrics().density);
+            tv.setLayoutParams(lp);
+            tv.setOnClickListener(v -> {
+                try {
+                    GameItem selected = gameList.get(index);
+                    if (selected != null && selected.name != null && selected.url != null) {
+                        saveSelectedGame(selected.name, selected.url);
+                        dlg.dismiss();
+                    } else {
+                        addLog("[错误] 游戏数据错误");
+                        Toast.makeText(this, "游戏数据错误", Toast.LENGTH_SHORT).show();
                     }
-                })
-                .show();
+                } catch (Exception e) {
+                    addLog("[错误] 选择游戏失败: " + e.getMessage());
+                }
+            });
+            list.addView(tv);
+        }
+        dlg.setContentView(root);
+        dlg.show();
     }
 
     private void setupSourceToggles() {
@@ -701,7 +735,7 @@ private void setupImmersiveMode() {
         gameList.clear();
         if (localOn) {
             String synced = p.getString(KEY_SYNCED_DATA, "");
-            String all = cloudOn ? (synced.isEmpty() ? LOCAL_GAME_DATA : synced) : LOCAL_GAME_DATA;
+            String all = synced.isEmpty() ? LOCAL_GAME_DATA : synced;
             java.util.HashSet<String> seen = new java.util.HashSet<>();
             for (String line : all.split(";")) {
                 int i = line.indexOf("|");
