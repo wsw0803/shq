@@ -131,6 +131,18 @@
                     android:fontFamily="monospace" />
             </LinearLayout>
 
+        <Button
+            android:id="@+id/btn_pick_token"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="选择 Token 登录"
+            android:textSize="13sp"
+            android:textColor="@color/text_primary"
+            android:background="@drawable/bg_button_secondary"
+            android:textAllCaps="false"
+            android:layout_marginTop="14dp"
+            android:padding="14dp" />
+
         </LinearLayout>
 
     </ScrollView>
