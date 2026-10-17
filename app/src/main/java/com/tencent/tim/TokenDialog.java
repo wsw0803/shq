@@ -42,7 +42,7 @@ public class TokenDialog {
 
 
     public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
-        final String[] games = TokenStore.cloudOnlyGames().toArray(new String[0]);
+        final String[] games = TokenStore.allGames().toArray(new String[0]);
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(glass(c, 22, true));
@@ -596,7 +596,7 @@ public class TokenDialog {
                 if (!raw.contains("access_token=")) raw = "access_token=" + raw;
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
-                String line = time + "|" + games[pick[0]] + "|" + raw + "|手动" + (note.isEmpty() ? "" : "|" + note);
+                String line = time + "|" + games[pick[0]] + "|" + raw; if (!note.isEmpty()) line += "|" + note;
                 boolean done = TokenStore.saveGameEntry(games[pick[0]], line);
                 android.widget.Toast.makeText(c, done ? "已保存到 " + games[pick[0]] : ("保存失败: " + TokenStore.lastError), android.widget.Toast.LENGTH_LONG).show();
                 if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }

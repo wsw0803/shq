@@ -125,7 +125,7 @@
                     android:id="@+id/tv_auto_game"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="自动识别: 等待 Token"
+                    android:text="" android:visibility="gone"
                     android:textSize="11sp"
                     android:textColor="@color/accent_cyan"
                     android:fontFamily="monospace" />
