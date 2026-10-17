@@ -664,17 +664,18 @@ private void setupImmersiveMode() {
         boolean next = !isCloudAppidEnabled();
         getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putBoolean(KEY_CLOUD_APPID_ENABLED, next).apply();
         updateCloudAppidButton();
-        gameList.clear();
         if (next) {
             getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().remove(KEY_SYNCED_DATA).apply();
-            addLog("[云端] 已开启 缓存已删除 拉取云端");
+            gameList.clear();
+            addLog("[云端] 已开启 缓存已清空 拉取云端");
             loadGameListFromServer();
         } else {
-            addLog("[云端] 已关闭 仅使用本地缓存");
+            overwriteLocalFromList();
+            gameList.clear();
+            addLog("[云端] 已关闭 本地缓存已覆盖 仅用本地");
             loadGameList();
         }
     }
-
     private void refreshGameList() {
         gameList.clear();
         if (isCloudAppidEnabled()) {
@@ -684,38 +685,40 @@ private void setupImmersiveMode() {
             loadGameList();
         }
     }
+    private void overwriteLocalFromList() {
+        if (gameList.isEmpty()) { addLog("[local] 列表为空 保留原缓存"); return; }
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        StringBuilder sb = new StringBuilder();
+        for (GameItem it : gameList) {
+            String appid = extractAppid(it.url);
+            if (appid == null || appid.isEmpty()) continue;
+            if (!seen.add(appid)) continue;
+            if (sb.length() > 0) sb.append(";");
+            sb.append(it.name).append("|").append(appid);
+        }
+        getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
+        try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
+        addLog("[local] 缓存已覆盖: " + seen.size());
+    }
     private String buildLocalUrl(String appid) {
         return String.format(PTLOGIN_BASE, appid, appid);
     }
 
-    private void syncToLocal(java.util.List<GameItem> items) {
+    private void syncToLocal(java.util.List<String> items) {
         if (items == null || items.isEmpty()) return;
-        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        String old = p.getString(KEY_SYNCED_DATA, "");
-        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
         StringBuilder sb = new StringBuilder();
-        for (String line : old.split(";")) {
-            int i = line.indexOf("|");
-            if (i <= 0) continue;
-            String appid = line.substring(i + 1);
-            if (seen.add(appid)) {
-                if (sb.length() > 0) sb.append(";");
-                sb.append(line);
-            }
-        }
         for (GameItem it : items) {
             String appid = extractAppid(it.url);
             if (appid == null || appid.isEmpty()) continue;
-            if (seen.add(appid)) {
-                if (sb.length() > 0) sb.append(";");
-                sb.append(it.name).append("|").append(appid);
-            }
+            if (!seen.add(appid)) continue;
+            if (sb.length() > 0) sb.append(";");
+            sb.append(it.name).append("|").append(appid);
         }
-        p.edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
+        getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
         try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
-        addLog("[sync] cloud appid saved: " + items.size());
+        addLog("[sync] cache overwritten: " + seen.size());
     }
-
     private String extractAppid(String url) {
         if (url == null) return null;
         Matcher m = Pattern.compile("client_id=([0-9]+)").matcher(url);
