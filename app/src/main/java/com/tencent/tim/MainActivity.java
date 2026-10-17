@@ -450,7 +450,7 @@ private void setupImmersiveMode() {
             android.net.Uri uri = data.getData();
             if (uri != null) {
                 String fileName = getFileNameFromUri(uri);
-                if (fileName != null && fileName.toLowerCase().endsWith(".txt")) {
+                if (fileName == null || fileName.toLowerCase().endsWith(".txt") || !fileName.contains(".")) {
                     TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
                     if (!res.unknownLines.isEmpty()) {
                         TokenDialog.showChooseGameForTokens(this, res.unknownLines, res.added);
