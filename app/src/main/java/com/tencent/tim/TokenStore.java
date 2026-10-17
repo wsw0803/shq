@@ -308,7 +308,7 @@ public class TokenStore {
         if (fs == null) return 0;
         for (int i = 0; i < fs.length; i++) {
             File f = fs[i];
-            if (!f.isFile() || !f.getName().endsWith(".txt")) continue;
+            if (!f.isFile() || !f.getName().toLowerCase().endsWith(".txt")) continue;
             try { copyFile(f, new File(dst, f.getName())); n++; } catch (Exception ignored) {}
         }
         return n;
@@ -348,19 +348,6 @@ public class TokenStore {
         return res;
     }
 
-    public static int importAll() {
-        int added = 0;
-        File dst = rootDir();
-        File srcDir = new File(downloadDir(), ROOT_NAME);
-        File[] fs = srcDir.listFiles();
-        if (fs == null) return 0;
-        for (int i = 0; i < fs.length; i++) {
-            File f = fs[i];
-            if (!f.isFile() || !f.getName().endsWith(".txt")) continue;
-            added += mergeFile(f, new File(dst, f.getName()));
-        }
-        return added;
-    }
 
     private static String tokenOf(String line) {
         if (line == null) return "";
