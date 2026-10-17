@@ -874,7 +874,7 @@ private void setupImmersiveMode() {
         title.setGravity(android.view.Gravity.CENTER);
         root.addView(title);
         android.widget.TextView tip = new android.widget.TextView(this);
-        tip.setText("是否立即下载更新？");
+        tip.setText("此版本为强制更新，必须更新后才能继续使用");
         tip.setTextColor(0xFF9CA3AF);
         tip.setTextSize(13);
         tip.setGravity(android.view.Gravity.CENTER);
@@ -886,27 +886,21 @@ private void setupImmersiveMode() {
         root.addView(tip);
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        android.widget.Button btnCancel = new android.widget.Button(this);
-        btnCancel.setText("暂不更新");
-        btnCancel.setTextColor(0xFFF5F7FA);
-        btnCancel.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
-        btnCancel.setOnClickListener(v -> dlg.dismiss());
-        android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        lp1.rightMargin = (int)(6 * getResources().getDisplayMetrics().density);
-        btnRow.addView(btnCancel, lp1);
         android.widget.Button btnOk = new android.widget.Button(this);
         btnOk.setText("立即更新");
         btnOk.setTextColor(0xFF000000);
         btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
         btnOk.setOnClickListener(v -> {
             dlg.dismiss();
-            Updater.start(MainActivity.this, url);
+            Updater.start(MainActivity.this, url, () -> runOnUiThread(() -> showUpdateDialog(newVersion, url)));
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp2.leftMargin = (int)(6 * getResources().getDisplayMetrics().density);
         btnRow.addView(btnOk, lp2);
         root.addView(btnRow);
         dlg.setContentView(root);
+        dlg.setCancelable(false);
+        dlg.setCanceledOnTouchOutside(false);
         dlg.show();
     }
 }
