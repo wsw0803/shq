@@ -226,6 +226,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
     }
 
     public static boolean saveGameEntry(String game, String line) {
+        if (line != null && line.indexOf("proxy.htm") >= 0) return false;
         if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
