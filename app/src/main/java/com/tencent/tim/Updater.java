@@ -49,12 +49,17 @@ public class Updater {
     private static volatile String curHost = "mirror";
     private static volatile boolean rangeOk = false;
     private static volatile boolean aborted = false;
+    private static volatile Runnable failHook = null;
     private static final long[] segStart = new long[THREADS];
     private static final long[] segEnd = new long[THREADS];
     private static final long[] segDone = new long[THREADS];
     private static final Object lock = new Object();
 
     public static void start(final Activity act, final String fallback) {
+        start(act, fallback, null);
+    }
+
+    public static void start(final Activity act, final String fallback, final Runnable onFail) {
         final Dialog dlg = new Dialog(act);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
         Window w = dlg.getWindow();
@@ -97,6 +102,7 @@ public class Updater {
                 final File out = new File(dir, "update.apk");
                 final File part = new File(dir, "update.apk.part");
                 final File state = new File(dir, "update.apk.state");
+                failHook = onFail;
                 boolean ok = fetch(act, buildUrls(fallback), part, state, out);
                 final boolean done = ok;
                 act.runOnUiThread(new Runnable() {
@@ -106,6 +112,7 @@ public class Updater {
                             install(act, out);
                         } else {
                             android.widget.Toast.makeText(act, "下载失败，请稍后重试", android.widget.Toast.LENGTH_SHORT).show();
+                            if (failHook != null) failHook.run();
                         }
                     }
                 });
