@@ -230,7 +230,6 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
-if (line != null && line.indexOf("access_token=") > 0 && !line.contains("appid=") && !line.contains("client_id=")) { int b1 = line.indexOf(" | "); if (b1 > 0) { int b2 = line.indexOf(" | ", b1 + 3); int ue = b2 < 0 ? line.length() : b2; String u0 = line.substring(b1 + 3, ue); String aid = appidOfGame(game); if (aid == null || aid.isEmpty()) aid = "1104466820"; line = line.substring(0, ue) + (u0.indexOf("?") >= 0 ? "&" : "?") + "appid=" + aid + line.substring(ue); } } // ZZ_APPID_FIX
         java.util.List<String> out = new java.util.ArrayList<String>();
         if (f.exists()) {
             try {
