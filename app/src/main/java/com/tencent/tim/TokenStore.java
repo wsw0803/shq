@@ -148,7 +148,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         
         return names;
     }
-    public static java.util.List<String> importGames() { java.util.List<String> names = new java.util.ArrayList<String>(); try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE); String synced = sp.getString("synced_data", ""); for (String line : synced.split(";")) { int k = line.indexOf("|"); if (k <= 0) continue; String name = line.substring(0, k).trim(); if (name.isEmpty()) continue; if (!names.contains(name)) names.add(name); } } catch (Throwable ignored) {} if (names.isEmpty()) return allGames(); return names; }
+    public static java.util.List<String> importGames() { java.util.List<String> names = new java.util.ArrayList<String>(); try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE); String synced = sp.getString("synced_data", ""); for (String line : synced.split(";")) { int k = line.indexOf("|"); if (k <= 0) continue; String name = line.substring(0, k).trim(); if (name.isEmpty()) continue; if (!names.contains(name)) names.add(name); } } catch (Throwable ignored) {} if (names.isEmpty()) { names = allGames(); if (names.isEmpty()) names.add("其他"); } return names; }
     public static java.util.List<String> allGames() {
         java.util.List<String> names = new java.util.ArrayList<String>();
         try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", 0); String sy = sp.getString("synced_data", ""); for (String ln : sy.split(";")) { int k = ln.indexOf((char)124); if (k <= 0) continue; String nm = ln.substring(0, k).trim(); if (nm.length() > 0 && !names.contains(nm)) names.add(nm); } } catch (Throwable ignored) {} 
@@ -340,6 +340,9 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                     String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, game, pe.raw.replace("|", "%7C"), pe.mode));
                     if (saveGameEntry(game, keep)) res.added++;
                 } else if (pe != null && !pe.accessToken.isEmpty()) {
+                    String keep2 = pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, "其他", pe.raw.replace("|", "%7C"), pe.mode);
+                    if (saveGameEntry("其他", keep2)) res.added++;
+                } else {
                     res.unknownLines.add(line);
                 }
             }
