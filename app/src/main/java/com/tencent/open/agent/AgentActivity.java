@@ -362,7 +362,8 @@ public class AgentActivity extends BaseActivity {
         new Thread(() -> {
             try {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-                String game = com.tencent.tim.TokenStore.gameOfUrl(url);
+                String game = getSelectedGameName();
+                if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = com.tencent.tim.TokenStore.gameOfUrl(url);
 
                 
                 if (game == null || game.isEmpty()) game = "其他";
