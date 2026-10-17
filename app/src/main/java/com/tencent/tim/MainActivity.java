@@ -614,6 +614,7 @@ private void setupImmersiveMode() {
         colB.setOrientation(android.widget.LinearLayout.VERTICAL);
         list.addView(colA, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         list.addView(colB, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        scroll.addView(list);
         root.addView(scroll, new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         for (int i = 0; i < gameList.size(); i++) {
@@ -754,7 +755,7 @@ private void setupImmersiveMode() {
             cloudParsed.add(item);
         }
 
-        syncToLocal(cloudParsed); gameList.addAll(cloudParsed);
+        syncToLocal(cloudParsed); java.util.HashSet<String> _ex = new java.util.HashSet<String>(); for (GameItem _g0 : gameList) if (_g0.url != null) _ex.add(_g0.url); for (GameItem _g1 : cloudParsed) if (_g1.url != null && _ex.add(_g1.url)) gameList.add(_g1);
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
