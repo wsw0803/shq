@@ -88,7 +88,7 @@ public class TokenDialog {
             btn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     int count = 0;
-                    for (String line : tokens) { if (TokenStore.saveGameEntry(g, line)) count++; }
+                    for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String aid2 = TokenStore.appidOfGame(g); if (aid2 == null || aid2.isEmpty()) aid2 = TokenStore.appidOfUrl(pe.raw); if (aid2 == null || aid2.isEmpty()) aid2 = "未知"; String keep = (pe == null || pe.raw.isEmpty()) ? line : TokenStore.joinLine(pe.note, pe.time.isEmpty() ? new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date()) : pe.time, aid2, pe.raw.replace("|", "%7C"), pe.mode); if (TokenStore.saveGameEntry(g, keep)) count++; }
                     android.widget.Toast.makeText(c, "已保存 " + count + " 条到 " + g, android.widget.Toast.LENGTH_SHORT).show();
                     dlg.dismiss();
                     show(c, g, null);
@@ -598,7 +598,16 @@ public class TokenDialog {
                 if (!raw.contains("access_token=")) raw = "access_token=" + raw;
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
-                String line = TokenStore.joinLine(note, time, games[pick[0]], raw, "capture");
+                String aid = TokenStore.appidOfUrl(raw);
+                if (aid == null || aid.isEmpty()) {
+                    d.dismiss();
+                    if (parent != null) parent.dismiss();
+                    java.util.List<String> one = new java.util.ArrayList<String>();
+                    one.add(TokenStore.joinLine(note, time, "", raw, "capture"));
+                    showChooseGameForTokens(c, one, 0);
+                    return;
+                }
+                String line = TokenStore.joinLine(note, time, aid, raw, "capture");
                 boolean done = TokenStore.saveGameEntry(games[pick[0]], line);
                 android.widget.Toast.makeText(c, done ? "已保存到 " + games[pick[0]] : ("保存失败: " + TokenStore.lastError), android.widget.Toast.LENGTH_LONG).show();
                 if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }
