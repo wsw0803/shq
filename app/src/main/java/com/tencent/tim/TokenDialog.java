@@ -40,6 +40,85 @@ public class TokenDialog {
         return (int) (v * c.getResources().getDisplayMetrics().density);
     }
 
+
+    public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
+        final Dialog dlg = new Dialog(c);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackground(glass(c, 22, true));
+        int p = dp(c, 16);
+        root.setPadding(p, p, p, p);
+
+        TextView title = new TextView(c);
+        title.setText("选择游戏标签");
+        title.setTextColor(0xFFF5F7FA);
+        title.setTextSize(17);
+        title.setGravity(Gravity.CENTER);
+        root.addView(title);
+
+        TextView tip = new TextView(c);
+        tip.setText("成功导入 " + added + " 条。
+有 " + tokens.size() + " 条 Token 无法自动识别游戏。
+请选择要将它们保存到哪个标签：");
+        tip.setTextColor(0xFF8A9BB8);
+        tip.setTextSize(12);
+        tip.setGravity(Gravity.CENTER);
+        tip.setPadding(0, dp(c, 8), 0, dp(c, 16));
+        root.addView(tip);
+
+        String[] games = TokenStore.GAMES;
+        for (int i = 0; i < games.length; i++) {
+            final String g = games[i];
+            TextView btn = new TextView(c);
+            btn.setText(g);
+            btn.setTextColor(0xFF22D3EE);
+            btn.setTextSize(14);
+            btn.setGravity(Gravity.CENTER);
+            btn.setPadding(0, dp(c, 12), 0, dp(c, 12));
+            btn.setBackground(glass(c, 12, false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = dp(c, 8);
+            btn.setLayoutParams(lp);
+            btn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    int count = 0;
+                    for (String line : tokens) {
+                        if (TokenStore.saveGameEntry(g, line)) count++;
+                    }
+                    android.widget.Toast.makeText(c, "已保存 " + count + " 条到 " + g, android.widget.Toast.LENGTH_SHORT).show();
+                    dlg.dismiss();
+                    show(c, g, null);
+                }
+            });
+            root.addView(btn);
+        }
+
+        TextView cancel = new TextView(c);
+        cancel.setText("放弃保存");
+        cancel.setTextColor(0xFFF87171);
+        cancel.setTextSize(12);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setPadding(0, dp(c, 12), 0, 0);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                dlg.dismiss();
+                show(c, "", null);
+            }
+        });
+        root.addView(cancel);
+
+        dlg.setContentView(root);
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.85);
+            w.setAttributes(lp);
+        }
+        dlg.show();
+    }
+
     public static void show(final Context c, String game, final OnPick pick) {
         if (c == null) return;
         final OnPick cb = pick;

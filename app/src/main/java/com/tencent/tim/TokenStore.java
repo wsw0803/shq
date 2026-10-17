@@ -300,8 +300,13 @@ public class TokenStore {
         return n;
     }
 
-    public static int importFromUri(android.content.Context ctx, android.net.Uri uri) {
-        int added = 0;
+    public static class ImportResult {
+        public int added = 0;
+        public java.util.List<String> unknownLines = new java.util.ArrayList<>();
+    }
+
+    public static ImportResult importFromUri(android.content.Context ctx, android.net.Uri uri) {
+        ImportResult res = new ImportResult();
         try {
             java.io.InputStream is = ctx.getContentResolver().openInputStream(uri);
             java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "UTF-8"));
@@ -315,14 +320,18 @@ public class TokenStore {
                     if (e != null) game = e.game;
                 }
                 if (game != null && !game.isEmpty()) {
-                    if (saveGameEntry(game, line)) added++;
+                    if (saveGameEntry(game, line)) res.added++;
+                } else {
+                    if (line.contains("access_token=") || line.contains("openid=")) {
+                        res.unknownLines.add(line);
+                    }
                 }
             }
             br.close();
         } catch (Exception e) {
             lastError = e.toString();
         }
-        return added;
+        return res;
     }
 
     public static int importAll() {

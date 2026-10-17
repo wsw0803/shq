@@ -457,9 +457,13 @@ private void setupImmersiveMode() {
             if (uri != null) {
                 String fileName = getFileNameFromUri(uri);
                 if (fileName != null && fileName.toLowerCase().endsWith(".txt")) {
-                    int n = TokenStore.importFromUri(this, uri);
-                    Toast.makeText(this, n > 0 ? ("已导入 " + n + " 条新记录") : "未发现新记录", Toast.LENGTH_LONG).show();
-                    TokenDialog.show(this, "", null);
+                    TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
+                    if (!res.unknownLines.isEmpty()) {
+                        TokenDialog.showChooseGameForTokens(this, res.unknownLines, res.added);
+                    } else {
+                        Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录") : "未发现新记录", Toast.LENGTH_LONG).show();
+                        TokenDialog.show(this, "", null);
+                    }
                 } else {
                     Toast.makeText(this, "只能选择 .txt 文件", Toast.LENGTH_SHORT).show();
                 }
