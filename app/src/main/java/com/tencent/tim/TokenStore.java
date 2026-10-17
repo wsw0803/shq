@@ -314,6 +314,11 @@ public class TokenStore {
         return added;
     }
 
+    private static String tokenOf(String line) {
+        if (line == null) return "";
+        Entry e = parseLine(line, "");
+        return e == null || e.accessToken == null ? "" : e.accessToken;
+    }
     private static int mergeFile(File src, File dst) {
         int added = 0;
         try {
@@ -324,7 +329,7 @@ public class TokenStore {
                 while (sc.hasNextLine()) {
                     String ln = sc.nextLine();
                     out.add(ln);
-                    String t = grab(ln, "access_token=([^&]+)");
+                    String t = tokenOf(ln);
                     if (!t.isEmpty()) existing.add(t);
                 }
                 sc.close();
@@ -333,7 +338,7 @@ public class TokenStore {
             while (sc2.hasNextLine()) {
                 String ln = sc2.nextLine();
                 if (ln.trim().isEmpty()) continue;
-                String t = grab(ln, "access_token=([^&]+)");
+                String t = tokenOf(ln);
                 if (!t.isEmpty() && existing.contains(t)) continue;
                 out.add(ln);
                 if (!t.isEmpty()) existing.add(t);
