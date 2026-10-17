@@ -179,7 +179,7 @@ public class TokenStore {
             int code = p.waitFor();
             if (code != 0) lastError = "root 退出码 " + code; return code == 0;
         } catch (Exception e) {
-            return false;
+            return RootUtil.append(f, line);
         }
     }
 
@@ -200,7 +200,7 @@ public class TokenStore {
                     if (sc.nextLine().contains(token)) { sc.close(); lastError = "该账号已存在，未重复写入"; return false; }
                 }
                 sc.close();
-            } catch (Exception e) { lastError = String.valueOf(e.getMessage()); if (RootUtil.append(f, line)) return true; }
+            } catch (Exception ignored) {}
         }
         try {
             File dir = gameDir(game);
@@ -211,8 +211,8 @@ public class TokenStore {
             w.flush();
             w.close();
             if (f.exists()) return true;
-        } catch (Exception e) { lastError = String.valueOf(e.getMessage()); if (RootUtil.append(f, line)) return true; }
-        return false;
+        } catch (Exception ignored) {}
+        return RootUtil.append(f, line);
     }
 
     public static String rebuildUrl(Entry e) {
@@ -246,7 +246,7 @@ public class TokenStore {
             w.close();
             return true;
         } catch (Exception e) {
-            return false;
+            return RootUtil.append(f, line);
         }
     }
 
