@@ -87,7 +87,6 @@ public class MainActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        loadGameListFromServer();
         
         // 设置沉浸式效果（保留状态栏）
         setupImmersiveMode();
@@ -106,6 +105,7 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
         loadGameList();
+        if (!getSharedPreferences(PREF_NAME, MODE_PRIVATE).getBoolean(KEY_CLOUD_ON, false)) loadGameListFromServer();
     }
     
     /**
@@ -152,7 +152,7 @@ private void setupImmersiveMode() {
                 msg = replaceToken(msg, "openid=");
             }
             String newLog = "[" + time + "] " + msg + "\n";
-            tvLog.append(newLog);
+            if (tvLog != null) tvLog.append(newLog);
             scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
         });
     }
@@ -662,7 +662,7 @@ private void setupImmersiveMode() {
 
     private void syncToLocal(java.util.List<GameItem> items) {
         if (items == null || items.isEmpty()) return;
-        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        String old = "";
         String old = p.getString(KEY_SYNCED_DATA, "");
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         StringBuilder sb = new StringBuilder();
@@ -762,7 +762,7 @@ private void setupImmersiveMode() {
         }
 
         Pattern pattern = Pattern.compile("图标：(.*?)；名称：(.*?)；链接：〖链接(.*?)〗；");
-        Matcher matcher = pattern.matcher(data);
+        Matcher matcher = pattern.matcher(data); java.util.List<GameItem> cloudParsed = new java.util.ArrayList<GameItem>();
 
         while (matcher.find()) {
             if (!matcher.group(3).trim().startsWith("https://xui.ptlogin2.qq.com/")) continue;
@@ -771,10 +771,10 @@ private void setupImmersiveMode() {
                     matcher.group(2).trim(),
                     matcher.group(3).trim()
             );
-            gameList.add(item);
+            cloudParsed.add(item);
         }
 
-        syncToLocal(gameList);
+        syncToLocal(cloudParsed); gameList.addAll(cloudParsed);
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {

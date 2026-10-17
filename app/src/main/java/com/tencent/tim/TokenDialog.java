@@ -157,7 +157,7 @@ public class TokenDialog {
         root.addView(tip);
 
         final List<String> tabs = new ArrayList<String>();
-        for (String g : TokenStore.importGames()) {
+        for (String g : TokenStore.allGames()) {
             if (!TokenStore.loadGame(g).isEmpty()) tabs.add(g);
         }
 
