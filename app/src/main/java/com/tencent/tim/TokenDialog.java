@@ -42,8 +42,7 @@ public class TokenDialog {
 
 
     public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
-        final Dialog dlg = new Dialog(c);
-        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        final String[] games = TokenStore.GAMES;
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(glass(c, 22, true));
@@ -65,7 +64,11 @@ public class TokenDialog {
         tip.setPadding(0, dp(c, 8), 0, dp(c, 16));
         root.addView(tip);
 
-        String[] games = TokenStore.GAMES;
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(c).setView(root).create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        }
+
         for (int i = 0; i < games.length; i++) {
             final String g = games[i];
             TextView btn = new TextView(c);
@@ -106,14 +109,6 @@ public class TokenDialog {
         });
         root.addView(cancel);
 
-        dlg.setContentView(root);
-        Window w = dlg.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawableResource(android.R.color.transparent);
-            WindowManager.LayoutParams lp = w.getAttributes();
-            lp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.85);
-            w.setAttributes(lp);
-        }
         dlg.show();
     }
 
