@@ -64,7 +64,8 @@ public class TokenDialog {
         tip.setPadding(0, dp(c, 8), 0, dp(c, 16));
         root.addView(tip);
 
-        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(c).setView(root).create();
+        final Dialog dlg = new Dialog(c);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
         if (dlg.getWindow() != null) {
             dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
         }
@@ -109,6 +110,14 @@ public class TokenDialog {
         });
         root.addView(cancel);
 
+        dlg.setContentView(root);
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            WindowManager.LayoutParams wp = w.getAttributes();
+            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.86f);
+            w.setAttributes(wp);
+        }
         dlg.show();
     }
 
@@ -492,13 +501,52 @@ public class TokenDialog {
         gameBtn.setPadding(0, dp(c, 12), 0, dp(c, 12));
         gameBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                new android.app.AlertDialog.Builder(c).setTitle("选择游戏")
-                    .setItems(games, new android.content.DialogInterface.OnClickListener() {
-                        public void onClick(android.content.DialogInterface dd, int w) {
+                final Dialog gd = new Dialog(c);
+                gd.requestWindowFeature(Window.FEATURE_NO_TITLE);
+                LinearLayout gl = new LinearLayout(c);
+                gl.setOrientation(LinearLayout.VERTICAL);
+                gl.setBackground(glass(c, 20, true));
+                int gp = dp(c, 16);
+                gl.setPadding(gp, gp, gp, gp);
+                TextView gt = new TextView(c);
+                gt.setText("选择游戏");
+                gt.setTextColor(0xFFF5F7FA);
+                gt.setTextSize(16);
+                gt.setGravity(Gravity.CENTER);
+                gt.setPadding(0, 0, 0, dp(c, 12));
+                gl.addView(gt);
+                int gi = 0;
+                while (gi != games.length) {
+                    final int w = gi;
+                    TextView gb = new TextView(c);
+                    gb.setText(games[w]);
+                    gb.setTextColor(0xFF22D3EE);
+                    gb.setTextSize(14);
+                    gb.setGravity(Gravity.CENTER);
+                    gb.setPadding(0, dp(c, 12), 0, dp(c, 12));
+                    gb.setBackground(glass(c, 12, false));
+                    LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    glp.bottomMargin = dp(c, 8);
+                    gb.setLayoutParams(glp);
+                    gb.setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
                             pick[0] = w;
                             gameBtn.setText("游戏: " + games[w]);
+                            gd.dismiss();
                         }
-                    }).show();
+                    });
+                    gl.addView(gb);
+                    gi++;
+                }
+                gd.setContentView(gl);
+                Window gw = gd.getWindow();
+                if (gw != null) {
+                    gw.setBackgroundDrawableResource(android.R.color.transparent);
+                    WindowManager.LayoutParams gwp = gw.getAttributes();
+                    gwp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.78f);
+                    gw.setAttributes(gwp);
+                }
+                gd.show();
             }
         });
         root.addView(gameBtn);

@@ -113,6 +113,7 @@ public class TokenStore {
             e.raw = line;
         }
         e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
+        if (e.accessToken.isEmpty() && !e.raw.isEmpty() && !e.raw.contains("=")) e.accessToken = e.raw;
         e.openid = grab(e.raw, "openid=([^&\\s]+)");
         e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
         e.expiresIn = grab(e.raw, "expires_in=([^&\\s]+)");
@@ -323,7 +324,7 @@ public class TokenStore {
                 if (game != null && !game.isEmpty()) {
                     if (saveGameEntry(game, line)) res.added++;
                 } else {
-                    if (line.contains("access_token=") || line.contains("openid=")) {
+                    if (line.contains("access_token=") || line.contains("openid=") || (line.length() >= 16 && !line.contains(" "))) {
                         res.unknownLines.add(line);
                     }
                 }
