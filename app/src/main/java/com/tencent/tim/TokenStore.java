@@ -347,17 +347,20 @@ public class TokenStore {
                 added++;
             }
             sc2.close();
-            File tmp = new File(dst.getParentFile(), dst.getName() + ".tmp");
-            FileWriter w = new FileWriter(tmp, false);
+            java.io.File tmp = new java.io.File(dst.getAbsolutePath() + ".tmp");
+            java.io.FileWriter w = new java.io.FileWriter(tmp, false);
             for (int i = 0; i < out.size(); i++) { w.append(out.get(i)); w.append((char)10); }
             w.flush(); w.close();
-            File bak = new File(dst.getParentFile(), dst.getName() + ".bak");
+            if (out.size() > 0 && tmp.length() == 0) { tmp.delete(); throw new java.io.IOException("tmp empty"); }
+            java.io.File bak = new java.io.File(dst.getAbsolutePath() + ".bak");
             if (dst.exists()) {
-                try { if (bak.exists()) bak.delete(); dst.renameTo(bak); } catch (Throwable ignored) {}
+                if (bak.exists()) bak.delete();
+                if (!dst.renameTo(bak)) { tmp.delete(); throw new java.io.IOException("backup failed"); }
             }
             if (!tmp.renameTo(dst)) {
                 if (bak.exists()) bak.renameTo(dst);
-                throw new java.io.IOException("rename failed");
+                tmp.delete();
+                throw new java.io.IOException("replace failed");
             }
         } catch (Exception e) {
             lastError = "导入失败: " + e.getMessage();
