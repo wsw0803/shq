@@ -212,7 +212,6 @@ public class TokenStore {
             w.close();
             if (f.exists()) return true;
         } catch (Exception e) { lastError = String.valueOf(e.getMessage()); if (RootUtil.append(f, line)) return true; }
-        if (rootAppend(f, line)) return true;
         return false;
     }
 
