@@ -292,19 +292,18 @@ public class AgentActivity extends BaseActivity {
             return;
         }
 
-        Matcher matcher = TOKEN_PATTERN.matcher(url);
-        if (matcher.find()) {
-            String accessToken = matcher.group(1);
-            String expiresIn = matcher.group(2);
-            String openId = matcher.group(3);
-            String payToken = matcher.group(4);
+        String accessToken = grab(url, "access_token=([^&\\s#]+)");
+        String expiresIn = grab(url, "expires_in=([^&\\s#]+)");
+        String openId = grab(url, "openid=([^&\\s#]+)");
+        String payToken = grab(url, "pay_token=([^&\\s#]+)");
+        if (!accessToken.isEmpty()) {
 
             try {
                 JSONObject json = new JSONObject();
                 json.put("access_token", accessToken);
                 json.put("openid", openId);
                 json.put("pay_token", payToken);
-                json.put("expires_in", expiresIn != null ? expiresIn : "7776000");
+                json.put("expires_in", expiresIn == null || expiresIn.isEmpty() ? "7776000" : expiresIn);
                 json.put("ret", "0");
                 json.put("pf", "desktop_m_qq-10000144-android-2002-");
                 json.put("page_type", "1");
@@ -329,11 +328,7 @@ public class AgentActivity extends BaseActivity {
                 Toast.makeText(this, "JSON处理错误", Toast.LENGTH_SHORT).show();
             }
         } else {
-            if (Pattern.compile("access_token=([^&]+)").matcher(url).find()) {
-                Toast.makeText(this, "格式不完整，请检查数据", Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
-            }
+            Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
         }
     }
 
