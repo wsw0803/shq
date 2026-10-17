@@ -241,7 +241,8 @@ public class TokenStore {
             w.close();
             return true;
         } catch (Exception e) {
-            return RootUtil.append(f, line);
+            lastError = "删除失败: " + e;
+            return false;
         }
     }
 
