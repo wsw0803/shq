@@ -149,9 +149,10 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         if (names.isEmpty()) { for (String g : GAMES) names.add(g); }
         return names;
     }
+    public static java.util.List<String> importGames() { java.util.List<String> names = new java.util.ArrayList<String>(); try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE); String synced = sp.getString("synced_data", ""); for (String line : synced.split(";")) { int k = line.indexOf("|"); if (k <= 0) continue; String name = line.substring(0, k).trim(); if (name.isEmpty()) continue; if (!names.contains(name)) names.add(name); } } catch (Throwable ignored) {} return names; }
     public static java.util.List<String> allGames() {
         java.util.List<String> names = new java.util.ArrayList<String>();
-        for (String[] g : cloudGames()) { if (!names.contains(g[0])) names.add(g[0]); }
+        try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", 0); String sy = sp.getString("synced_data", ""); for (String ln : sy.split(";")) { int k = ln.indexOf((char)124); if (k <= 0) continue; String nm = ln.substring(0, k).trim(); if (nm.length() > 0 && !names.contains(nm)) names.add(nm); } } catch (Throwable ignored) {} if (names.isEmpty()) { for (String g : GAMES) names.add(g); }
         return names;
     }
     public static java.util.List<String> listGameFolders() {
