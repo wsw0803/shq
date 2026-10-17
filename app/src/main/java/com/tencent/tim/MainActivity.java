@@ -673,6 +673,7 @@ private void setupImmersiveMode() {
             }
         }
         p.edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
+        try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
         addLog("[sync] cloud appid saved: " + items.size());
     }
 
