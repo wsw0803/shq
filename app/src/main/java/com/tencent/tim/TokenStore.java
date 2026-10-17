@@ -200,7 +200,7 @@ public class TokenStore {
                     if (sc.nextLine().contains(token)) { sc.close(); lastError = "该账号已存在，未重复写入"; return false; }
                 }
                 sc.close();
-            } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
+            } catch (Exception e) { lastError = String.valueOf(e.getMessage()); if (RootUtil.append(f, line)) return true; }
         }
         try {
             File dir = gameDir(game);
@@ -211,7 +211,8 @@ public class TokenStore {
             w.flush();
             w.close();
             if (f.exists()) return true;
-        } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
+        } catch (Exception e) { lastError = String.valueOf(e.getMessage()); if (RootUtil.append(f, line)) return true; }
+        if (rootAppend(f, line)) return true;
         return false;
     }
 
