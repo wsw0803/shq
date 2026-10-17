@@ -105,7 +105,6 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
         loadGameList();
-        if (!getSharedPreferences(PREF_NAME, MODE_PRIVATE).getBoolean(KEY_CLOUD_ON, false)) loadGameListFromServer();
     }
     
     /**
@@ -645,6 +644,7 @@ private void setupImmersiveMode() {
         SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
         boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
+        if (localOn && !cloudOn) { p.edit().remove(KEY_SYNCED_DATA).apply(); }
         if (!localOn && !cloudOn) {
             p.edit().remove(SELECTED_GAME_NAME_KEY).remove(SELECTED_GAME_URL_KEY).apply();
             selectedGameName = "";
@@ -774,7 +774,11 @@ private void setupImmersiveMode() {
             cloudParsed.add(item);
         }
 
-        syncToLocal(cloudParsed); gameList.addAll(cloudParsed);
+        if (getSharedPreferences(PREF_NAME, MODE_PRIVATE).getBoolean(KEY_CLOUD_ON, false)) {
+            syncToLocal(cloudParsed); gameList.addAll(cloudParsed);
+        } else {
+            addLog("[网络] 当前非云端模式，忽略云端数据");
+        }
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
