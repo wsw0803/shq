@@ -377,12 +377,13 @@ public class AgentActivity extends BaseActivity {
                     appid = com.tencent.tim.TokenStore.appidOfUrl(su);
                 }
                 if (appid == null || appid.isEmpty()) appid = "未知";
-                String line = time + " | " + appid + " | " + url + " | " + mode;
+                final String aidShown = appid;
+                String line = time + " | " + aidShown + " | " + url + " | " + mode;
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(gameName, line);
                 final String g = gameName;
                 runOnUiThread(() -> {
                     if (ok) {
-                        Toast.makeText(AgentActivity.this, "已保存 " + g + " appid=" + appid + " -> " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(AgentActivity.this, "已保存 " + g + " appid=" + aidShown + " -> " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
                     } else {
                         Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError, Toast.LENGTH_LONG).show();
                     }
