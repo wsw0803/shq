@@ -100,8 +100,7 @@ public class TokenStore {
             e.time = parts[0].trim();
             e.raw = parts[2].trim();
             if (e.game.isEmpty()) e.game = parts[1].trim();
-            e.mode = parts[3].trim();
-            if (parts.length >= 5) { StringBuilder nb = new StringBuilder(); for (int k = 4; k < parts.length; k++) { if (k > 4) nb.append((char)124); nb.append(parts[k]); } e.note = nb.toString().trim(); }
+            String modeRaw = parts[3].trim(); int hp = modeRaw.indexOf((char)35); if (hp >= 0) { e.mode = modeRaw.substring(0, hp).trim(); e.note = modeRaw.substring(hp + 1).trim(); } else { e.mode = modeRaw; }
         } else if (parts.length >= 2) {
             e.time = parts[0].trim();
             e.raw = parts[1].trim();
@@ -307,8 +306,9 @@ public class TokenStore {
                 if (!found && lineHasToken(line, token)) {
                     String[] parts = line.split(String.valueOf((char)124));
                     StringBuilder sb = new StringBuilder();
+                    parts[3] = parts[3].trim(); int hp2 = parts[3].indexOf((char)35); if (hp2 >= 0) parts[3] = parts[3].substring(0, hp2).trim();
                     if (parts.length >= 4) {
-                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()); if (note.length() > 0) sb.append(" | ").append(note.replace(String.valueOf((char)124), "/"));
+                        sb.append(parts[0].trim()).append(" | ").append(parts[1].trim()).append(" | ").append(parts[2].trim()).append(" | ").append(parts[3].trim()); if (note.length() > 0) sb.append(" #").append(note.replace(String.valueOf((char)124), "/"));
                     } else {
                         sb.append(line).append(" | ").append(note);
                     }
@@ -367,7 +367,7 @@ public class TokenStore {
                 Entry pe = parseLine(line, "");
                 String game = gameOfUrl(line); if ((game == null || game.isEmpty()) && pe != null && pe.game != null && !pe.game.isEmpty() && allGames().contains(pe.game)) game = pe.game;
                 if (game != null && !game.isEmpty()) {
-                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode);
+                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode + (pe.note.isEmpty() ? "" : " #" + pe.note));
                     if (saveGameEntry(game, keep)) res.added++;
                 } else if (pe != null && !pe.accessToken.isEmpty()) {
                     res.unknownLines.add(line);
