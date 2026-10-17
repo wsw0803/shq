@@ -260,6 +260,16 @@ public class TokenDialog {
         });
         row.addView(noteBtn);
 
+        TextView statusBtn = new TextView(c);
+        statusBtn.setText("在线检测");
+        statusBtn.setTextColor(0xFF22D3EE);
+        statusBtn.setTextSize(12);
+        statusBtn.setPadding(dp(c, 20), dp(c, 10), dp(c, 8), dp(c, 10));
+        statusBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { checkOnline(c, e, dlg); }
+        });
+        row.addView(statusBtn);
+
         TextView del = new TextView(c);
         del.setText("删除");
         del.setTextColor(0xFFF87171);
@@ -345,6 +355,93 @@ public class TokenDialog {
         d.show();
     }
 
+
+    private static void checkOnline(final Context c, final TokenStore.Entry e, final Dialog parent) {
+        final Dialog d = new Dialog(c);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackground(glass(c, 20, true));
+        int pad = dp(c, 18);
+        root.setPadding(pad, pad, pad, pad);
+        TextView t = new TextView(c);
+        t.setText("在线检测");
+        t.setTextColor(0xFFF5F7FA);
+        t.setTextSize(16);
+        t.setGravity(Gravity.CENTER);
+        root.addView(t);
+        TextView sub = new TextView(c);
+        sub.setText((e.game == null ? "" : e.game) + "  " + e.shortToken());
+        sub.setTextColor(0xFF8A9BB8);
+        sub.setTextSize(11);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(c, 8), 0, dp(c, 12));
+        root.addView(sub);
+        final TextView result = new TextView(c);
+        result.setText("正在检测...");
+        result.setTextColor(0xFF22D3EE);
+        result.setTextSize(13);
+        result.setGravity(Gravity.CENTER);
+        result.setPadding(dp(c, 8), dp(c, 10), dp(c, 8), dp(c, 16));
+        root.addView(result);
+        final String[] res = new String[]{""};
+        LinearLayout btns = new LinearLayout(c);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        TextView close = new TextView(c);
+        close.setText("关闭");
+        close.setTextColor(0xFF8A9BB8);
+        close.setTextSize(13);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(0, dp(c, 11), 0, dp(c, 11));
+        close.setBackground(glass(c, 12, false));
+        close.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { d.dismiss(); }
+        });
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        clp.rightMargin = dp(c, 6);
+        btns.addView(close, clp);
+        TextView save = new TextView(c);
+        save.setText("写入备注");
+        save.setTextColor(0xFF22D3EE);
+        save.setTextSize(13);
+        save.setGravity(Gravity.CENTER);
+        save.setPadding(0, dp(c, 11), 0, dp(c, 11));
+        save.setBackground(glass(c, 12, true));
+        save.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (res[0].length() == 0) return;
+                boolean done = TokenStore.updateNote(e.game, e.accessToken, res[0]);
+                d.dismiss();
+                android.widget.Toast.makeText(c, done ? "已写入备注" : "写入失败", android.widget.Toast.LENGTH_SHORT).show();
+                if (done && parent != null) parent.dismiss();
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        slp.leftMargin = dp(c, 6);
+        btns.addView(save, slp);
+        root.addView(btns);
+        d.setContentView(root);
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            WindowManager.LayoutParams wp = w.getAttributes();
+            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.82f);
+            w.setAttributes(wp);
+        }
+        d.show();
+        new Thread(new Runnable() {
+            public void run() {
+                final String r = QqCheck.checkSync(e.accessToken, e.openid);
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                    public void run() {
+                        res[0] = r;
+                        result.setText(r);
+                        result.setTextColor(r.startsWith("在线") ? 0xFF34D399 : 0xFFF87171);
+                    }
+                });
+            }
+        }).start();
+    }
 
     private static void showNoteDialog(final Context c, final TokenStore.Entry e, final Dialog parent) {
         final Dialog d = new Dialog(c);
