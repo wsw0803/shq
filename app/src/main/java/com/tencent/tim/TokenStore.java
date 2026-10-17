@@ -42,17 +42,13 @@ public class TokenStore {
     }
 
     public static String appidOfGame(String game) {
-        for (int i = 0; i < GAMES.length; i++) {
-            if (GAMES[i].equals(game)) return APPIDS[i];
-        }
+        for (String[] g : cloudGames()) { if (g[0].equals(game)) return g[1]; }
         return APPIDS[0];
     }
 
     public static String gameOfAppid(String appid) {
         if (appid == null) return null;
-        for (int i = 0; i < APPIDS.length; i++) {
-            if (APPIDS[i].equals(appid)) return GAMES[i];
-        }
+        for (String[] g : cloudGames()) { if (g[1].equals(appid)) return g[0]; }
         return null;
     }
 
@@ -135,10 +131,28 @@ public class TokenStore {
         return list;
     }
 
+    public static java.util.List<String[]> cloudGames() {
+        java.util.List<String[]> out = new java.util.ArrayList<String[]>();
+        java.util.Set<String> seen = new java.util.HashSet<String>();
+        for (int i = 0; i < GAMES.length; i++) { if (seen.add(APPIDS[i])) out.add(new String[]{GAMES[i], APPIDS[i]}); }
+        try {
+            android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE);
+            String synced = sp.getString("synced_data", "");
+            for (String line : synced.split(";")) {
+                int k = line.indexOf("|");
+                if (k <= 0) continue;
+                String name = line.substring(0, k).trim();
+                String appid = line.substring(k + 1).trim();
+                if (name.isEmpty() || appid.isEmpty()) continue;
+                if (seen.add(appid)) out.add(new String[]{name, appid});
+            }
+        } catch (Throwable ignored) {}
+        return out;
+    }
+
     public static java.util.List<String> allGames() {
-        java.util.List<String> names = new ArrayList<String>();
-        for (String g : GAMES) names.add(g);
-        if (!names.contains("其他")) names.add("其他");
+        java.util.List<String> names = new java.util.ArrayList<String>();
+        for (String[] g : cloudGames()) { if (!names.contains(g[0])) names.add(g[0]); }
         return names;
     }
     public static java.util.List<String> listGameFolders() {
@@ -335,7 +349,6 @@ public class TokenStore {
                 if (line.isEmpty()) continue;
                 Entry pe = parseLine(line, "");
                 String game = gameOfUrl(line);
-                if ((game == null || game.isEmpty()) && pe != null && java.util.Arrays.asList(GAMES).contains(pe.game)) game = pe.game;
                 if (game != null && !game.isEmpty()) {
                     String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode);
                     if (saveGameEntry(game, keep)) res.added++;
@@ -444,3 +457,4 @@ public class TokenStore {
         return e != null && token.equals(e.accessToken);
     }
 }
+

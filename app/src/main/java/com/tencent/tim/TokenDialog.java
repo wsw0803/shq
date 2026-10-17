@@ -42,7 +42,7 @@ public class TokenDialog {
 
 
     public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
-        final String[] games = TokenStore.GAMES;
+        final String[] games = TokenStore.allGames();
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(glass(c, 22, true));
@@ -157,7 +157,7 @@ public class TokenDialog {
         root.addView(tip);
 
         final List<String> tabs = new ArrayList<String>();
-        for (String g : TokenStore.GAMES) {
+        for (String g : TokenStore.allGames()) {
             if (!TokenStore.loadGame(g).isEmpty()) tabs.add(g);
         }
 
@@ -501,7 +501,7 @@ public class TokenDialog {
         t.setTextSize(16);
         t.setGravity(Gravity.CENTER);
         root.addView(t);
-        final String[] games = TokenStore.GAMES;
+        final String[] games = TokenStore.allGames();
         final int[] pick = {0};
         final TextView gameBtn = new TextView(c);
         gameBtn.setText("游戏: " + games[0]);
