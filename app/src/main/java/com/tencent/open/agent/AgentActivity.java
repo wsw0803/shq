@@ -79,7 +79,7 @@ public class AgentActivity extends BaseActivity {
         manualLoginButton = findViewById(R.id.btn_manual_login);
 
         try {
-            com.tencent.tim.Ui.apply(this);
+            com.tencent.tim.Ui.apply(this); try { android.view.View bgc = findViewById(R.id.bg_custom); if (bgc != null) bgc.setVisibility(android.view.View.GONE); } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
 
         android.widget.Button pickToken = findViewById(R.id.btn_pick_token);
