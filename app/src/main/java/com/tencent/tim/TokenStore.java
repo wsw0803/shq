@@ -95,7 +95,7 @@ public class TokenStore {
         if (line.isEmpty()) return null;
         Entry e = new Entry();
         e.game = game == null ? "" : game;
-        String[] parts = line.split("\\|");
+        String[] parts; int _p4 = line.lastIndexOf(" | "); int _p3 = _p4 > 0 ? line.lastIndexOf(" | ", _p4 - 1) : -1; int _p2 = _p3 > 0 ? line.lastIndexOf(" | ", _p3 - 1) : -1; if (_p2 >= 0) { parts = new String[]{ line.substring(0, _p2), line.substring(_p2 + 3, _p3), line.substring(_p3 + 3, _p4), line.substring(_p4 + 3) }; } else { parts = line.split("\\|", 4); }
         if (parts.length >= 4) {
             e.time = parts[0].trim();
             e.raw = parts[2].trim();
@@ -306,7 +306,7 @@ public class TokenStore {
             while (sc.hasNextLine()) {
                 String line = sc.nextLine();
                 if (!found && lineHasToken(line, token)) {
-                    String[] parts = line.split(String.valueOf((char)124));
+                    String[] parts; int _p4 = line.lastIndexOf(" | "); int _p3 = _p4 > 0 ? line.lastIndexOf(" | ", _p4 - 1) : -1; int _p2 = _p3 > 0 ? line.lastIndexOf(" | ", _p3 - 1) : -1; if (_p2 >= 0) { parts = new String[]{ line.substring(0, _p2), line.substring(_p2 + 3, _p3), line.substring(_p3 + 3, _p4), line.substring(_p4 + 3) }; } else { parts = line.split("\\|", 4); }
                     StringBuilder sb = new StringBuilder();
                     parts[3] = parts[3].trim(); int hp2 = parts[3].indexOf((char)35); if (hp2 >= 0) parts[3] = parts[3].substring(0, hp2).trim();
                     if (parts.length >= 4) {
