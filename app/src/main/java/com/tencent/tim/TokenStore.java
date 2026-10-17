@@ -150,6 +150,23 @@ public class TokenStore {
         return out;
     }
 
+    public static java.util.List<String> cloudOnlyGames() {
+        java.util.List<String> names = new java.util.ArrayList<String>();
+        try {
+            android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE);
+            String synced = sp.getString("synced_data", "");
+            for (String line : synced.split(";")) {
+                int k = line.indexOf("|");
+                if (k <= 0) continue;
+                String name = line.substring(0, k).trim();
+                String appid = line.substring(k + 1).trim();
+                if (name.isEmpty() || appid.isEmpty()) continue;
+                if (!names.contains(name)) names.add(name);
+            }
+        } catch (Throwable ignored) {}
+        if (names.isEmpty()) { for (String g : GAMES) names.add(g); }
+        return names;
+    }
     public static java.util.List<String> allGames() {
         java.util.List<String> names = new java.util.ArrayList<String>();
         for (String[] g : cloudGames()) { if (!names.contains(g[0])) names.add(g[0]); }
@@ -328,7 +345,7 @@ public class TokenStore {
         for (int i = 0; i < fs.length; i++) {
             File f = fs[i];
             if (!f.isFile() || !f.getName().toLowerCase().endsWith(".txt")) continue;
-            try { copyFile(f, tar); n++; } catch (Exception ignored) {}
+            try { copyFile(f, tar); java.io.BufferedReader br2 = new java.io.BufferedReader(new java.io.FileReader(f)); while (br2.readLine() != null) n++; br2.close(); } catch (Exception ignored) {}
         }
         return n;
     }
