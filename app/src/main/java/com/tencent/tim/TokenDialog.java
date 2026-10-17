@@ -120,7 +120,19 @@ public class TokenDialog {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         final TextView[] last = new TextView[1];
-        final String initial = TextUtils.isEmpty(game) ? (tabs.isEmpty() ? "" : tabs.get(0)) : game;
+        String tempInit = game;
+        if (TextUtils.isEmpty(tempInit) || TokenStore.loadGame(tempInit).isEmpty()) {
+            for (String tg : tabs) {
+                if (!TokenStore.loadGame(tg).isEmpty()) {
+                    tempInit = tg;
+                    break;
+                }
+            }
+        }
+        if (TextUtils.isEmpty(tempInit) && !tabs.isEmpty()) {
+            tempInit = tabs.get(0);
+        }
+        final String initial = tempInit;
 
         for (int i = 0; i < tabs.size(); i++) {
             final String g = tabs.get(i);
@@ -328,7 +340,10 @@ public class TokenDialog {
                 boolean done = TokenStore.deleteEntry(e.game, e.accessToken);
                 d.dismiss();
                 android.widget.Toast.makeText(c, done ? "已删除" : "删除失败", android.widget.Toast.LENGTH_SHORT).show();
-                if (done && parent != null) parent.dismiss();
+                if (done) {
+                    if (parent != null) parent.dismiss();
+                    show(c, "", cb);
+                }
             }
         });
         btns.addView(cancel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
