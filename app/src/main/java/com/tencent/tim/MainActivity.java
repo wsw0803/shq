@@ -169,7 +169,7 @@ private void setupImmersiveMode() {
         updateStorageStatus();
         android.widget.Button viewToken = findViewById(R.id.btn_view_token);
         if (viewToken != null) {
-            viewToken.setOnClickListener(v -> TokenDialog.show(this, selectedGameName, null));
+            viewToken.setOnClickListener(v -> TokenDialog.show(this, "", null));
         }
         android.widget.Button sb = findViewById(R.id.btn_settings);
         sb.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));

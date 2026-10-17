@@ -161,7 +161,7 @@ public class TokenDialog {
         copy.setText("复制本账号");
         copy.setTextColor(0xFF34D399);
         copy.setTextSize(12);
-        copy.setPadding(0, dp(c, 4), dp(c, 18), dp(c, 4));
+        copy.setPadding(0, dp(c, 12), dp(c, 40), dp(c, 12));
         copy.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { TokenStore.copy(e.game + "账号", segment(e), c); }
         });
@@ -170,7 +170,7 @@ public class TokenDialog {
         del.setText("删除");
         del.setTextColor(0xFFF87171);
         del.setTextSize(12);
-        del.setPadding(dp(c, 4), dp(c, 4), 0, dp(c, 4));
+        del.setPadding(dp(c, 40), dp(c, 12), dp(c, 8), dp(c, 12));
         del.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { confirmDelete(c, e, dlg); }
         });
@@ -181,7 +181,7 @@ public class TokenDialog {
             use.setText("用此账号登录 →");
             use.setTextColor(0xFF22D3EE);
             use.setTextSize(12);
-            use.setPadding(0, dp(c, 4), 0, dp(c, 4));
+            use.setPadding(0, dp(c, 12), 0, dp(c, 12));
             use.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { dlg.dismiss(); cb.onPick(e); }
             });

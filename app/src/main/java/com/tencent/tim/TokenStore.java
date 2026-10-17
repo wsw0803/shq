@@ -120,34 +120,98 @@ public class TokenStore {
         return list;
     }
 
+    public static java.util.List<String> listGameFolders() {
+        java.util.List<String> names = new ArrayList<String>();
+        for (String g : GAMES) names.add(g);
+        File[] dirs = rootDir().listFiles();
+        if (dirs != null) {
+            for (File d : dirs) {
+                if (d.isDirectory() && !names.contains(d.getName())) names.add(d.getName());
+            }
+        }
+        return names;
+    }
+
+    public static String gameOfPackage(String t) {
+        if (t == null) return "";
+        String s = t.toLowerCase();
+        if (s.contains("pubgm") || s.contains("tmgp")) return "和平";
+        if (s.contains("sgame")) return "王者";
+        if (s.contains("deltaforce") || s.contains("dfm")) return "三角洲";
+        if (s.contains("valorant") || s.contains("codev")) return "无畏契约";
+        return "";
+    }
+
+    public static String detectGameByRoot() {
+        try {
+            Process p = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
+            os.writeBytes("dumpsys activity activities | grep mResumedActivity | head -2\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            os.close();
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String ln;
+            while ((ln = br.readLine()) != null) sb.append(ln).append('\n');
+            br.close();
+            p.waitFor();
+            return gameOfPackage(sb.toString());
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static boolean rootAppend(File f, String line) {
+        try {
+            String txt = line.endsWith("\n") ? line : line + "\n";
+            String payload = android.util.Base64.encodeToString(txt.getBytes("UTF-8"), android.util.Base64.NO_WRAP);
+            String dir = f.getParentFile().getAbsolutePath();
+            String path = f.getAbsolutePath();
+            String cmd = "mkdir -p '" + dir + "'; echo " + payload + " | base64 -d >> '" + path + "'; chmod 666 '" + path + "'";
+            Process p = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
+            os.writeBytes(cmd + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            os.close();
+            int code = p.waitFor();
+            return code == 0 && f.exists();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static List<Entry> loadAll() {
         List<Entry> all = new ArrayList<>();
-        for (String g : GAMES) all.addAll(loadGame(g));
+        for (String g : listGameFolders()) all.addAll(loadGame(g));
         return all;
     }
 
     public static boolean saveGameEntry(String game, String line) {
-        try {
-            File dir = gameDir(game);
-            if (!dir.exists()) dir.mkdirs();
-            File f = gameFile(game);
-            String token = grab(line, "access_token=([^&\\s]+)");
-            if (!token.isEmpty() && f.exists()) {
+        if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
+        File f = gameFile(game);
+        String token = grab(line, "access_token=([^&\\s]+)");
+        if (!token.isEmpty() && f.exists()) {
+            try {
                 Scanner sc = new Scanner(f, "UTF-8");
                 while (sc.hasNextLine()) {
                     if (sc.nextLine().contains(token)) { sc.close(); return false; }
                 }
                 sc.close();
-            }
+            } catch (Exception ignored) {}
+        }
+        try {
+            File dir = gameDir(game);
+            if (!dir.exists()) dir.mkdirs();
             FileWriter w = new FileWriter(f, true);
             w.append(line);
             if (!line.endsWith("\n")) w.append("\n");
             w.flush();
             w.close();
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+            if (f.exists()) return true;
+        } catch (Exception ignored) {}
+        return rootAppend(f, line);
     }
 
     public static String rebuildUrl(Entry e) {
