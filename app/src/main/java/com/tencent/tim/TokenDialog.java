@@ -42,7 +42,7 @@ public class TokenDialog {
 
 
     public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
-        final String[] games = TokenStore.allGames();
+        final String[] games = TokenStore.allGames().toArray(new String[0]);
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(glass(c, 22, true));
@@ -188,7 +188,7 @@ public class TokenDialog {
                     if (idx == 0) showAddDialog(c, dlg);
                     else if (idx == 1) {
                         int n = TokenStore.exportAll();
-                        android.widget.Toast.makeText(c, n > 0 ? ("已导出 " + n + " 个文件到 Download/WEI") : "没有可导出的数据", android.widget.Toast.LENGTH_LONG).show();
+                        android.widget.Toast.makeText(c, n > 0 ? ("已导出 " + n + " 条汇总到 Download/WEI/数据.txt") : "没有可导出的数据", android.widget.Toast.LENGTH_LONG).show();
                     } else {
                         if (c instanceof MainActivity) {
                             ((MainActivity) c).startImportFilePicker();
@@ -501,7 +501,7 @@ public class TokenDialog {
         t.setTextSize(16);
         t.setGravity(Gravity.CENTER);
         root.addView(t);
-        final String[] games = TokenStore.allGames();
+        final String[] games = TokenStore.allGames().toArray(new String[0]);
         final int[] pick = {0};
         final TextView gameBtn = new TextView(c);
         gameBtn.setText("游戏: " + games[0]);

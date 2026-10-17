@@ -323,12 +323,12 @@ public class TokenStore {
         File src = rootDir();
         File dst = new File(downloadDir(), ROOT_NAME);
         try { if (!dst.exists()) dst.mkdirs(); } catch (Throwable ignored) {}
-        File[] fs = src.listFiles();
+        File tar = new File(dst, FILE_NAME); if (tar.exists()) tar.delete(); File[] fs = src.listFiles();
         if (fs == null) return 0;
         for (int i = 0; i < fs.length; i++) {
             File f = fs[i];
             if (!f.isFile() || !f.getName().toLowerCase().endsWith(".txt")) continue;
-            try { copyFile(f, new File(dst, f.getName())); n++; } catch (Exception ignored) {}
+            try { copyFile(f, tar); n++; } catch (Exception ignored) {}
         }
         return n;
     }
@@ -419,7 +419,7 @@ public class TokenStore {
 
     private static void copyFile(File src, File dst) throws Exception {
         java.io.FileInputStream in = new java.io.FileInputStream(src);
-        java.io.FileOutputStream out = new java.io.FileOutputStream(dst);
+        java.io.FileOutputStream out = new java.io.FileOutputStream(dst, true);
         byte[] buf = new byte[8192];
         int n;
         while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
