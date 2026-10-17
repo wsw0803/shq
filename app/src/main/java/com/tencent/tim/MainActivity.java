@@ -699,7 +699,7 @@ private void setupImmersiveMode() {
         gameList.clear();
         if (localOn) {
             String synced = p.getString(KEY_SYNCED_DATA, "");
-            String all = LOCAL_GAME_DATA + (synced.isEmpty() ? "" : ";" + synced);
+            String all = synced.isEmpty() ? LOCAL_GAME_DATA : synced;
             java.util.HashSet<String> seen = new java.util.HashSet<>();
             for (String line : all.split(";")) {
                 int i = line.indexOf("|");

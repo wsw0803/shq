@@ -476,7 +476,7 @@ public class TokenDialog {
             }
         });
         b.setNegativeButton("取消", null);
-        b.show();
+        android.app.AlertDialog ad = b.show(); if (ad.getWindow() != null) ad.getWindow().setBackgroundDrawable(glass(c, 22, true));
     }
 
     public static String segment(TokenStore.Entry e) {
