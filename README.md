@@ -21,6 +21,6 @@ push 到 main 或手动触发后，在 Actions 页面下载 release-apk 产物�
 本地构建: ./gradlew assembleRelease
 
 ## 风险提示
-本项目为账号登录工具源码，会将登录令牌明文写入 /sdcard/-极光/数据.txt，
+本项目为账号登录工具源码，会将登录令牌明文写入
 并使用 root 执行 pm hide/unhide 隐藏 QQ。
 请勿在主力设备或真实账号上运行，仅用于学习研究。
