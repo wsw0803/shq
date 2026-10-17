@@ -153,7 +153,7 @@ private void setupImmersiveMode() {
             }
             String newLog = "[" + time + "] " + msg + "\n";
             if (tvLog != null) tvLog.append(newLog);
-            scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
+            if (scrollLog != null) scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
         });
     }
 
