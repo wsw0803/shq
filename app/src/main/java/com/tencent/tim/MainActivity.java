@@ -141,7 +141,8 @@ private void setupImmersiveMode() {
     private void addLog(final String log) {
         runOnUiThread(() -> {
             String time = new SimpleDateFormat("HH:mm:ss").format(new Date());
-            String newLog = "[" + time + "] " + log + "\n";
+            String lg = log == null ? "" : log.replaceAll("access_token=[^&\\s]+", "access_token=***").replaceAll("pay_token=[^&\\s]+", "pay_token=***").replaceAll("openid=[^&\\s]+", "openid=***");
+            String newLog = "[" + time + "] " + lg + "\n";
             tvLog.append(newLog);
             scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
         });
@@ -428,7 +429,7 @@ private void setupImmersiveMode() {
             String response = data.getStringExtra("key_response");
             if (response != null) {
                 addLog("[抓取] Token获取成功");
-                addLog("[抓取] 响应: " + response.substring(0, Math.min(100, response.length())) + "...");
+                addLog("[抓取] 响应已接收（已脱敏），长度: " + response.length());
             }
         }
     }
