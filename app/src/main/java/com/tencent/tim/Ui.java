@@ -42,13 +42,11 @@ public class Ui {
 
     public static void apply(Activity a) {
         SharedPreferences p = prefs(a);
-        View glass = a.findViewById(R.id.bg_glass);
-        if (glass != null) {
-            int g = p.getInt(KEY_GLASS, 40);
-            int ga = (int) (g * 1.1f);
-            if (ga > 130) ga = 130;
-            glass.setBackgroundColor(Color.argb(ga, 255, 255, 255));
+        View glassLayer = a.findViewById(R.id.bg_glass);
+        if (glassLayer != null) {
+            glassLayer.setBackgroundColor(Color.argb(36, 255, 255, 255));
         }
+        applyGlass(a.findViewById(android.R.id.content), p.getInt(KEY_GLASS, 40));
         View bright = a.findViewById(R.id.bg_hue);
         if (bright != null) {
             int b = p.getInt(KEY_BRIGHT, 70);
@@ -84,6 +82,29 @@ public class Ui {
         }
     }
 
+
+    public static void applyGlass(View v, int glass) {
+        if (v == null) return;
+        if ("glass".equals(v.getTag()) && v.getBackground() instanceof android.graphics.drawable.GradientDrawable) {
+            try {
+                android.graphics.drawable.GradientDrawable gd =
+                        (android.graphics.drawable.GradientDrawable) v.getBackground().mutate();
+                int alpha = 25 + glass * 2;
+                if (alpha < 25) alpha = 25;
+                if (alpha > 235) alpha = 235;
+                int base = 0x33FFFFFF;
+                if (android.os.Build.VERSION.SDK_INT >= 24) {
+                    android.content.res.ColorStateList csl = gd.getColor();
+                    if (csl != null) base = csl.getDefaultColor();
+                }
+                gd.setColor(Color.argb(alpha, Color.red(base), Color.green(base), Color.blue(base)));
+            } catch (Throwable ignored) {}
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) applyGlass(g.getChildAt(i), glass);
+        }
+    }
 
     public static boolean isLightMode(Activity a) {
         int th = prefs(a).getInt(KEY_THEME, 0);

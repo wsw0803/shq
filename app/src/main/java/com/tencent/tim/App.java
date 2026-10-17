@@ -7,5 +7,12 @@ public class App extends Application {
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(Ui.wrap(base));
+        super.attachBaseContext(Ui.wrap(base));
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        TokenStore.init(this);
     }
 }

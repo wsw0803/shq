@@ -18,9 +18,15 @@ public class TokenStore {
     public static final String DATA_NAME = "";
     public static final String FILE_NAME = "数据.txt";
     public static String lastError = "";
+    public static android.content.Context appContext = null;
+    public static void init(android.content.Context c) { if (c != null) appContext = c.getApplicationContext(); }
 
     public static File rootDir() {
-        return new File(Environment.getExternalStorageDirectory(), ROOT_NAME);
+        File ext = new File(Environment.getExternalStorageDirectory(), ROOT_NAME);
+        try { if (!ext.exists()) ext.mkdirs(); } catch (Throwable ignored) {}
+        if (ext.isDirectory() && ext.canWrite()) return ext;
+        try { File app = appContext == null ? null : appContext.getExternalFilesDir(null); if (app != null) { File w = new File(app, ROOT_NAME); if (!w.exists()) w.mkdirs(); if (w.isDirectory()) return w; } } catch (Throwable ignored) {}
+        return ext;
     }
 
     public static File gameDir(String game) {
