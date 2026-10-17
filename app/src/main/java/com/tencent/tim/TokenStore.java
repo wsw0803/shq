@@ -17,6 +17,7 @@ public class TokenStore {
     public static final String ROOT_NAME = "维";
     public static final String DATA_NAME = "保存数据";
     public static final String FILE_NAME = "数据.txt";
+    public static String lastError = "";
 
     public static File rootDir() {
         return new File(Environment.getExternalStorageDirectory(), ROOT_NAME + "/" + DATA_NAME);
@@ -176,7 +177,7 @@ public class TokenStore {
             os.flush();
             os.close();
             int code = p.waitFor();
-            return code == 0 && f.exists();
+            if (code != 0) lastError = "root 退出码 " + code; return code == 0;
         } catch (Exception e) {
             return false;
         }
@@ -196,12 +197,13 @@ public class TokenStore {
             try {
                 Scanner sc = new Scanner(f, "UTF-8");
                 while (sc.hasNextLine()) {
-                    if (sc.nextLine().contains(token)) { sc.close(); return false; }
+                    if (sc.nextLine().contains(token)) { sc.close(); lastError = "该账号已存在，未重复写入"; return false; }
                 }
                 sc.close();
-            } catch (Exception ignored) {}
+            } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
         }
         try {
+        if (rootAppend(f, line)) return true;
             File dir = gameDir(game);
             if (!dir.exists()) dir.mkdirs();
             FileWriter w = new FileWriter(f, true);
@@ -210,8 +212,8 @@ public class TokenStore {
             w.flush();
             w.close();
             if (f.exists()) return true;
-        } catch (Exception ignored) {}
-        return rootAppend(f, line);
+        } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
+        return false;
     }
 
     public static String rebuildUrl(Entry e) {

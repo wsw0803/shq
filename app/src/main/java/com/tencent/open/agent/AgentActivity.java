@@ -385,7 +385,7 @@ public class AgentActivity extends BaseActivity {
                                 "已识别 " + g + "，保存到 " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
                                 Toast.LENGTH_LONG).show();
                     } else {
-                        Toast.makeText(AgentActivity.this, "Token 已存在或保存失败（" + g + "）", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError + " → " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
                     }
                 });
             } catch (Exception e) {
