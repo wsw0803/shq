@@ -218,17 +218,11 @@ private void setupImmersiveMode() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < list.size(); i++) {
             TokenStore.Entry e = list.get(i);
-            sb.append("[").append(e.game).append("] ").append(e.time).append("
-");
-            sb.append("access_token=").append(e.accessToken).append("
-");
-            sb.append("openid=").append(e.openid).append("
-");
-            sb.append("pay_token=").append(e.payToken).append("
-");
-            sb.append("expires_in=").append(e.expiresIn).append("
-
-");
+            sb.append("[").append(e.game).append("] ").append(e.time).append("\n");
+            sb.append("access_token=").append(e.accessToken).append("\n");
+            sb.append("openid=").append(e.openid).append("\n");
+            sb.append("pay_token=").append(e.payToken).append("\n");
+            sb.append("expires_in=").append(e.expiresIn).append("\n\n");
         }
         return sb.toString().trim();
     }

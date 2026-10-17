@@ -85,17 +85,11 @@ public class AgentActivity extends BaseActivity {
         android.widget.Button viewTokens = findViewById(R.id.btn_view_tokens);
         if (viewTokens != null) {
             viewTokens.setOnClickListener(v ->
-                    com.tencent.tim.TokenDialog.show(this, getSelectedGameName(), null));
+                    showPickToken());
         }
         android.widget.Button pickToken = findViewById(R.id.btn_pick_token);
         if (pickToken != null) {
-            pickToken.setOnClickListener(v ->
-                    com.tencent.tim.TokenDialog.show(this, getSelectedGameName(), e -> {
-                        String url2 = com.tencent.tim.TokenStore.rebuildUrl(e);
-                        plainText.setText(url2);
-                        updateAutoGameHint(url2);
-                        performLogin(url2);
-                    }));
+            pickToken.setOnClickListener(v -> showPickToken());
         }
         plainText.addTextChangedListener(new android.text.TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
@@ -259,6 +253,15 @@ public class AgentActivity extends BaseActivity {
             return savedUrl;
         }
         return "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=1104466820&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=1104466820&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
+    }
+
+    private void showPickToken() {
+        com.tencent.tim.TokenDialog.show(this, getSelectedGameName(), e -> {
+            String url2 = com.tencent.tim.TokenStore.rebuildUrl(e);
+            plainText.setText(url2);
+            updateAutoGameHint(url2);
+            performLogin(url2);
+        });
     }
 
     private void updateAutoGameHint(String url) {
