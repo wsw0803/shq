@@ -54,7 +54,7 @@ public class TokenStore {
 
     public static String appidOfUrl(String url) {
         if (url == null) return null;
-        Matcher m = Pattern.compile("client_id=([0-9]+)").matcher(url);
+        Matcher m = Pattern.compile("(?:client_id|pt_3rd_aid|appid|aid)=([0-9]+)").matcher(url);
         if (m.find()) return m.group(1);
         m = Pattern.compile("pt_3rd_aid=([0-9]+)").matcher(url);
         if (m.find()) return m.group(1);
@@ -365,7 +365,7 @@ public class TokenStore {
                 line = line.trim();
                 if (line.isEmpty()) continue;
                 Entry pe = parseLine(line, "");
-                String game = gameOfUrl(line);
+                String game = gameOfUrl(line); if ((game == null || game.isEmpty()) && pe != null && pe.game != null && !pe.game.isEmpty() && allGames().contains(pe.game)) game = pe.game;
                 if (game != null && !game.isEmpty()) {
                     String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : pe.time + "|" + game + "|" + pe.raw + "|" + pe.mode);
                     if (saveGameEntry(game, keep)) res.added++;
