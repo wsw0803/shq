@@ -67,7 +67,7 @@ public class TokenDialog {
 
         final List<String> tabs = new ArrayList<String>();
         for (String g : TokenStore.listGameFolders()) {
-            if (!TokenStore.loadGame(g).isEmpty()) tabs.add(g);
+            tabs.add(g);
         }
 
         HorizontalScrollView hs = new HorizontalScrollView(c);
@@ -418,6 +418,18 @@ public class TokenDialog {
         et.setPadding(dp(c, 10), dp(c, 10), dp(c, 10), dp(c, 10));
         et.setBackground(glass(c, 12, false));
         root.addView(et);
+        final android.widget.EditText noteEt = new android.widget.EditText(c);
+        noteEt.setHint("备注（可留空）");
+        noteEt.setTextColor(0xFFE6EEF8);
+        noteEt.setHintTextColor(0xFF8A9BB8);
+        noteEt.setTextSize(12);
+        noteEt.setSingleLine(true);
+        noteEt.setPadding(dp(c, 10), dp(c, 10), dp(c, 10), dp(c, 10));
+        noteEt.setBackground(glass(c, 12, false));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(c, 8);
+        noteEt.setLayoutParams(nlp);
+        root.addView(noteEt);
         TextView ok = new TextView(c);
         ok.setText("保 存");
         ok.setTextColor(0xFF34D399);
@@ -431,7 +443,8 @@ public class TokenDialog {
                 String raw = txt;
                 if (!raw.contains("access_token=")) raw = "access_token=" + raw;
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
-                String line = time + " | " + games[pick[0]] + " | " + raw + " | 手动";
+                String note = noteEt.getText().toString().trim();
+                String line = time + " | " + games[pick[0]] + " | " + raw + " | 手动" + (note.isEmpty() ? "" : " | " + note);
                 boolean done = TokenStore.saveGameEntry(games[pick[0]], line);
                 android.widget.Toast.makeText(c, done ? "已保存到 " + games[pick[0]] : ("保存失败: " + TokenStore.lastError), android.widget.Toast.LENGTH_LONG).show();
                 if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }
