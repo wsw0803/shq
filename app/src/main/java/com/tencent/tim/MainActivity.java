@@ -102,7 +102,7 @@ public class MainActivity extends BaseActivity {
         addLog("[系统] WEI终端已启动");
         addLog("[系统] Android 版本: " + Build.VERSION.SDK_INT);
         
-        checkAndRequestAllPermissions();
+        getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
         loadGameList();
     }
