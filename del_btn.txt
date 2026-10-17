@@ -1,0 +1,9 @@
+        TextView del = new TextView(c);
+        del.setText("删除");
+        del.setTextColor(0xFFF87171);
+        del.setTextSize(12);
+        del.setPadding(dp(c, 4), dp(c, 4), 0, dp(c, 4));
+        del.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { confirmDelete(c, e, dlg); }
+        });
+        row.addView(del);

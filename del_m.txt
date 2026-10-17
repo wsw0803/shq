@@ -1,0 +1,60 @@
+    private static void confirmDelete(final Context c, final TokenStore.Entry e, final Dialog parent) {
+        final Dialog d = new Dialog(c);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackground(glass(c, 20, true));
+        int p = dp(c, 18);
+        root.setPadding(p, p, p, p);
+        TextView t = new TextView(c);
+        t.setText("确认删除这个账号？");
+        t.setTextColor(0xFFF5F7FA);
+        t.setTextSize(15);
+        t.setGravity(Gravity.CENTER);
+        root.addView(t);
+        TextView sub = new TextView(c);
+        sub.setText((e.game == null ? "" : e.game) + "  " + e.shortToken() + "\n删除后不可恢复");
+        sub.setTextColor(0xFF8A9BB8);
+        sub.setTextSize(11);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(c, 8), 0, dp(c, 16));
+        root.addView(sub);
+        LinearLayout btns = new LinearLayout(c);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = new TextView(c);
+        cancel.setText("取消");
+        cancel.setTextColor(0xFF8A9BB8);
+        cancel.setTextSize(13);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setPadding(0, dp(c, 10), 0, dp(c, 10));
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { d.dismiss(); }
+        });
+        TextView ok = new TextView(c);
+        ok.setText("确认删除");
+        ok.setTextColor(0xFFF87171);
+        ok.setTextSize(13);
+        ok.setGravity(Gravity.CENTER);
+        ok.setPadding(0, dp(c, 10), 0, dp(c, 10));
+        ok.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                boolean done = TokenStore.deleteEntry(e.game, e.accessToken);
+                d.dismiss();
+                android.widget.Toast.makeText(c, done ? "已删除" : "删除失败", android.widget.Toast.LENGTH_SHORT).show();
+                if (done && parent != null) parent.dismiss();
+            }
+        });
+        btns.addView(cancel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        btns.addView(ok, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(btns);
+        d.setContentView(root);
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            WindowManager.LayoutParams wp = w.getAttributes();
+            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.78f);
+            w.setAttributes(wp);
+        }
+        d.show();
+    }
+
