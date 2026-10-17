@@ -297,13 +297,14 @@ public class AgentActivity extends BaseActivity {
         String openId = grab(url, "openid=([^&\\s]+)");
         String payToken = grab(url, "pay_token=([^&\\s]+)");
         if (!accessToken.isEmpty()) {
+            if (openId.isEmpty() || payToken.isEmpty()) { Toast.makeText(this, "格式不完整，请检查数据", Toast.LENGTH_SHORT).show(); return; }
 
             try {
                 JSONObject json = new JSONObject();
                 json.put("access_token", accessToken);
                 json.put("openid", openId);
                 json.put("pay_token", payToken);
-                json.put("expires_in", expiresIn != null ? expiresIn : "7776000");
+                json.put("expires_in", (expiresIn == null || expiresIn.isEmpty()) ? "7776000" : expiresIn);
                 json.put("ret", "0");
                 json.put("pf", "desktop_m_qq-10000144-android-2002-");
                 json.put("page_type", "1");
