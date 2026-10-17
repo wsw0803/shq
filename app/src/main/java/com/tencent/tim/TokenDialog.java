@@ -1,6 +1,7 @@
 package com.tencent.tim;
 
 import android.app.Dialog;
+import android.content.DialogInterface;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -8,6 +9,7 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
+import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -144,6 +146,15 @@ public class TokenDialog {
             wp.height = (int) (c.getResources().getDisplayMetrics().heightPixels * 0.80f);
             w.setAttributes(wp);
         }
+        dlg.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            public boolean onKey(DialogInterface dialog, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                    dlg.dismiss();
+                    return true;
+                }
+                return false;
+            }
+        });
         dlg.show();
     }
 
