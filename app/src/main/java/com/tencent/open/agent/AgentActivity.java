@@ -309,7 +309,7 @@ public class AgentActivity extends BaseActivity {
                 json.put("pf", "desktop_m_qq-10000144-android-2002-");
                 json.put("page_type", "1");
 
-                String saved = withAppid(url);
+                String saved = url;
                 saveRawDataToPreferences(saved);
 
                 if (!"login".equals(currentMode)) {
@@ -366,47 +366,31 @@ public class AgentActivity extends BaseActivity {
                 .getString("selected_game_name", "未知游戏");
     }
 
-    public void saveAccountToFile(String urlIn, String mode) {
-        final String urlArg = urlIn;
+    public void saveAccountToFile(String url, String mode) {
         new Thread(() -> {
             try {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-                String game = getSelectedGameName();
-                if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = com.tencent.tim.TokenStore.gameOfUrl(urlArg);
-                if (game == null || game.isEmpty()) game = "其他";
-                String aid = com.tencent.tim.TokenStore.appidOfGame(game);
-                if (aid == null || aid.isEmpty()) {
+                String gameName = getSelectedGameName();
+                String appid = com.tencent.tim.TokenStore.appidOfUrl(url);
+                if (appid == null || appid.isEmpty()) {
                     String su = getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", "");
-                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?:client_id|pt_3rd_aid|appid|aid)=([0-9]+)").matcher(su);
-                    if (m.find()) aid = m.group(1);
+                    appid = com.tencent.tim.TokenStore.appidOfUrl(su);
                 }
-                if (aid == null || aid.isEmpty()) aid = "1104466820";
-                String url = urlArg;
-                if (url != null && url.indexOf("appid=") < 0 && url.indexOf("client_id=") < 0) {
-                    url = url + (url.indexOf("?") >= 0 ? "&" : "?") + "appid=" + aid;
-                }
-                String line = time + " | " + aid + " | " + url + " | " + mode;
-                final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(game, line);
-                final String g = game;
+                if (appid == null || appid.isEmpty()) appid = "未知";
+                String line = time + " | " + appid + " | " + url + " | " + mode;
+                final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(gameName, line);
+                final String g = gameName;
                 runOnUiThread(() -> {
                     if (ok) {
-                        Toast.makeText(AgentActivity.this, "已识别 " + g + "，保存到 " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(AgentActivity.this, "已保存 " + g + " appid=" + appid + " -> " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
                     } else {
-                        Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError + " → " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError, Toast.LENGTH_LONG).show();
                     }
                 });
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }).start();
-    }
-
-    private boolean isKnownGame(String g) {
-        if (g == null || g.isEmpty()) return false;
-        for (String[] cg : com.tencent.tim.TokenStore.cloudGames()) {
-            if (cg[0].equals(g)) return true;
-        }
-        return false;
     }
 
     private boolean isTokenExists(File file, String token) {
