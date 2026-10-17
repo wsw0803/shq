@@ -4,6 +4,7 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_window">
     <View android:id="@+id/bg_hue" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
+    <View android:id="@+id/bg_glass" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:fitsSystemWindows="true" android:paddingLeft="18dp" android:paddingRight="18dp">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="20dp" android:paddingBottom="16dp">
             <View android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/dot_green" />
