@@ -291,18 +291,22 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
+    private String grab(String src, String regex) {
+        Matcher m = Pattern.compile(regex).matcher(src);
+        return m.find() ? m.group(1) : "";
+    }
+
     public void performLogin(String url) {
         if (url == null || url.isEmpty()) {
             Toast.makeText(this, "数据为空", Toast.LENGTH_SHORT).show();
             return;
         }
         
-        Matcher matcher = TOKEN_PATTERN.matcher(url);
-        if (matcher.find()) {
-            String accessToken = matcher.group(1);
-            String expiresIn = matcher.group(2);
-            String openId = matcher.group(3);
-            String payToken = matcher.group(4);
+        String accessToken = grab(url, "access_token=([^&\\s]+)");
+        String expiresIn = grab(url, "expires_in=([^&\\s]+)");
+        String openId = grab(url, "openid=([^&\\s]+)");
+        String payToken = grab(url, "pay_token=([^&\\s]+)");
+        if (!accessToken.isEmpty()) {
 
             try {
                 JSONObject json = new JSONObject();

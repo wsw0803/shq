@@ -160,6 +160,31 @@ public class TokenStore {
         return sb.toString();
     }
 
+    public static boolean deleteEntry(String game, String token) {
+        try {
+            File f = gameFile(game);
+            if (!f.exists()) return false;
+            java.util.List<String> keep = new java.util.ArrayList<String>();
+            Scanner sc = new Scanner(f, "UTF-8");
+            while (sc.hasNextLine()) {
+                String ln = sc.nextLine();
+                if (ln.contains(token)) continue;
+                keep.add(ln);
+            }
+            sc.close();
+            FileWriter w = new FileWriter(f, false);
+            for (int i = 0; i < keep.size(); i++) {
+                w.append(keep.get(i));
+                w.append("\n");
+            }
+            w.flush();
+            w.close();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static void copy(String label, String text, android.content.Context c) {
         if (c == null) return;
         try {

@@ -1,0 +1,5 @@
+    private String grab(String src, String regex) {
+        Matcher m = Pattern.compile(regex).matcher(src);
+        return m.find() ? m.group(1) : "";
+    }
+
