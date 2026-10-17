@@ -90,7 +90,7 @@ public class TokenStore {
     private static boolean strong(String t) { if (t == null) return false; String s = t.trim(); if (s.length() < 12) return false; if (s.indexOf("access_token=") >= 0) return true; if (s.indexOf("auth://") >= 0) return true; if (s.indexOf("http") >= 0) return true; if (s.indexOf("token=") >= 0) return true; if (s.indexOf("=") >= 0 && s.length() >= 24) return true; return false; } private static boolean meta(String t) { if (t == null) return false; String s = t.trim(); if (s.length() == 0 || s.length() > 24) return false; for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); if (c == (char)61 || c == (char)38 || c == (char)47 || c == (char)63 || c == (char)58 || c == (char)37 || c == (char)43 || c == (char)35 || c == (char)124) return false; } return true; } private static boolean tok(String t) { if (t == null) return false; String s = t.trim(); if (s.length() >= 16) return true; for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); if (c == (char)61 || c == (char)38 || c == (char)47 || c == (char)63 || c == (char)58 || c == (char)37) return true; } return false; } private static String[] splitLine(String line) { String e0 = new String(); String[] r = new String[]{ e0, e0, e0, e0, e0 }; if (line == null) return r; String s = line.trim(); if (s.length() == 0) return r; int p1 = s.indexOf((char)124); if (p1 < 0) { r[0] = s; r[2] = s; return r; } int p2 = s.indexOf((char)124, p1 + 1); if (p2 < 0) { r[0] = s.substring(0, p1).trim(); r[2] = s.substring(p1 + 1).trim(); return r; } r[0] = s.substring(0, p1).trim(); r[1] = s.substring(p1 + 1, p2).trim(); String body = s.substring(p2 + 1); int lastSep = body.lastIndexOf((char)124); if (lastSep > 0) { String maybeNote = body.substring(lastSep + 1).trim(); String maybeToken = body.substring(0, lastSep).trim(); if (meta(maybeNote) && tok(maybeToken)) { r[2] = maybeToken; r[4] = maybeNote; return r; } } r[2] = body.trim(); return r; }
     public static String joinLine(String note, String time, String game, String rawSafe, String mode) { StringBuilder sb = new StringBuilder(); if (note != null && note.length() > 0) sb.append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)).append(" "); sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
 
-public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 5 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); e.time = p[0]; String g2 = p[1]; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = p[2]; e.mode = p[3]; e.note = p[4]; if (e.note.equals("capture") || e.note.equals("login") || e.note.equals("hang_up")) { e.mode = e.note; e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.equals("capture") || mt.equals("login") || mt.equals("hang_up")) { e.mode = mt; e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47); e.raw = e.raw.replace("%7C", "|"); e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
+public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 5 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); e.time = p[0]; String g2 = p[1]; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = p[2]; e.mode = p[3]; e.note = p[4]; if (e.note.startsWith("cap") || e.note.equals("login") || e.note.startsWith("hang")) { e.mode = e.note.startsWith("cap") ? "capture" : (e.note.startsWith("hang") ? "hang_up" : e.note); e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.startsWith("cap") || mt.equals("login") || mt.startsWith("hang")) { e.mode = mt.startsWith("cap") ? "capture" : (mt.startsWith("hang") ? "hang_up" : mt); e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47); e.raw = e.raw.replace("%7C", "|"); e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
         if (e.accessToken.isEmpty() && !e.raw.isEmpty() && !e.raw.contains("=")) e.accessToken = e.raw;
         e.openid = grab(e.raw, "openid=([^&\\s]+)");
         e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
@@ -148,17 +148,65 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         
         return names;
     }
+    public static String gameOfAppidLocal(String appid) {
+        if (appid == null || appid.isEmpty()) return "";
+        String g = gameOfAppid(appid);
+        if (g != null && !g.isEmpty()) return g;
+        try {
+            File[] fs = rootDir().listFiles();
+            if (fs == null) return "";
+            for (File f : fs) {
+                String fn = f.getName();
+                if (fn == null || !fn.toLowerCase().endsWith(".txt")) continue;
+                Scanner sc = new Scanner(f, "UTF-8");
+                boolean hit = false;
+                while (sc.hasNextLine()) {
+                    String ln = sc.nextLine();
+                    if (ln.indexOf(appid) >= 0) { hit = true; break; }
+                }
+                sc.close();
+                if (hit) return fn.substring(0, fn.length() - 4);
+            }
+        } catch (Throwable ignored) {}
+        return "";
+    }
+
+    public static String resolveGame(String game, String url) {
+        String aid = appidOfUrl(url);
+        if (game != null && !game.isEmpty() && !"未知游戏".equals(game) && !"其他".equals(game)) return game;
+        String byAid = gameOfAppidLocal(aid);
+        if (!byAid.isEmpty()) return byAid;
+        String byUrl = gameOfUrl(url);
+        if (byUrl != null && !byUrl.isEmpty()) return byUrl;
+        if (aid != null && !aid.isEmpty()) return aid;
+        return game == null || game.isEmpty() ? "其他" : game;
+    }
+
     public static java.util.List<String> importGames() { java.util.List<String> names = new java.util.ArrayList<String>(); try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE); String synced = sp.getString("synced_data", ""); for (String line : synced.split(";")) { int k = line.indexOf("|"); if (k <= 0) continue; String name = line.substring(0, k).trim(); if (name.isEmpty()) continue; if (!names.contains(name)) names.add(name); } } catch (Throwable ignored) {} if (names.isEmpty()) { names = allGames(); if (names.isEmpty()) names.add("其他"); } return names; }
+    private static volatile long _cAt=0;
+    private static volatile java.util.List<String> _c=null;
+    public static synchronized void invalidateGamesCache(){_cAt=0;_c=null;}
     public static java.util.List<String> allGames() {
-        java.util.List<String> names = new java.util.ArrayList<String>();
-        try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", 0); String sy = sp.getString("synced_data", ""); for (String ln : sy.split(";")) { int k = ln.indexOf((char)124); if (k <= 0) continue; String nm = ln.substring(0, k).trim(); if (nm.length() > 0 && !names.contains(nm)) names.add(nm); } } catch (Throwable ignored) {} 
-        return names;
+        long n=System.currentTimeMillis();
+        java.util.List<String> c=_c; if(c!=null&&n-_cAt<30000) return c;
+        java.util.List<String> r=new java.util.ArrayList<String>();
+        try{android.content.SharedPreferences sp=appContext.getSharedPreferences("myPrefs",0);
+        for(String ln:sp.getString("synced_data","").split(";")){int k=ln.indexOf((char)124);if(k<=0)continue;
+        String nm=ln.substring(0,k).trim();if(nm.length()>0&&!r.contains(nm))r.add(nm);}}catch(Throwable t){}
+        for(String g:scanLocal()) if(!r.contains(g)) r.add(g);
+        _c=r;_cAt=n;return r;
     }
-    public static java.util.List<String> listGameFolders() {
-        java.util.List<String> out = new ArrayList<String>();
-        for (String g : allGames()) { if (!loadGame(g).isEmpty()) out.add(g); }
-        return out;
+
+    public static java.util.List<String> scanLocal() {
+        java.util.List<String> o=new java.util.ArrayList<String>();
+        try{File[] fs=rootDir().listFiles();if(fs!=null)for(File f:fs){String fn=f.getName();
+        if(fn==null||!fn.toLowerCase().endsWith(".txt"))continue;
+        String nm=fn.substring(0,fn.length()-4).trim();
+        if(nm.length()>0&&!o.contains(nm))o.add(nm);}}catch(Throwable t){}
+        return o;
     }
+
+    public static java.util.List<String> listGameFolders() { return scanLocal(); }
 
     public static String nextGameWithAccounts(String current) {
         if (current != null && !current.isEmpty() && !loadGame(current).isEmpty()) return current;
@@ -245,7 +293,9 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
             } catch (Exception ignored) {}
         }
         out.add(line);
-        return writeLinesAtomic(f, out);
+        boolean _o = writeLinesAtomic(f, out);
+        if (_o) invalidateGamesCache();
+        return _o;
     }
 
     static String withAppid(String u, String g) { if (u == null) return u; if (u.contains("appid=") || u.contains("client_id=")) return u; String a = appidOfGame(g);
@@ -340,7 +390,14 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                     String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, game, pe.raw.replace("|", "%7C"), pe.mode));
                     if (saveGameEntry(game, keep)) res.added++;
                 } else if (pe != null && !pe.accessToken.isEmpty()) {
-                    res.unknownLines.add(line);
+                    String g3 = resolveGame("", line);
+                    if (!g3.isEmpty()) {
+                        String keep3 = pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, g3, pe.raw.replace("|", "%7C"), pe.mode);
+                        if (saveGameEntry(g3, keep3)) res.added++;
+                        else res.unknownLines.add(line);
+                    } else {
+                        res.unknownLines.add(line);
+                    }
                 }
             }
             br.close();
