@@ -409,7 +409,7 @@ public class TokenDialog {
                 boolean done = TokenStore.updateNote(e.game, e.accessToken, nn);
                 d.dismiss();
                 android.widget.Toast.makeText(c, done ? "备注已保存" : "保存失败", android.widget.Toast.LENGTH_SHORT).show();
-                if (done && parent != null) parent.dismiss();
+                
             }
         });
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
