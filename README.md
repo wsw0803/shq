@@ -1,4 +1,4 @@
-# shq 极光上号器
+# shq 上号器
 
 Android 应用源码（Java + Gradle），包含抓号、上号、挂机三种模式。
 
