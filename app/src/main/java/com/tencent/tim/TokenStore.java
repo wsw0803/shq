@@ -12,8 +12,6 @@ import java.util.regex.Pattern;
 
 public class TokenStore {
 
-    public static final String[] GAMES = {"和平", "王者", "三角洲", "无畏契约"};
-    public static final String[] APPIDS = {"1106467070", "1104466820", "1110543085", "1111677210"};
     public static final String ROOT_NAME = "WEI";
     public static final String DATA_NAME = "";
     public static final String FILE_NAME = "数据.txt";
@@ -43,7 +41,7 @@ public class TokenStore {
 
     public static String appidOfGame(String game) {
         for (String[] g : cloudGames()) { if (g[0].equals(game)) return g[1]; }
-        return APPIDS[0];
+        return "";
     }
 
     public static String gameOfAppid(String appid) {
@@ -116,7 +114,6 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
     public static java.util.List<String[]> cloudGames() {
         java.util.List<String[]> out = new java.util.ArrayList<String[]>();
         java.util.Set<String> seen = new java.util.HashSet<String>();
-        for (int i = 0; i < GAMES.length; i++) { if (seen.add(APPIDS[i])) out.add(new String[]{GAMES[i], APPIDS[i]}); }
         try {
             android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE);
             String synced = sp.getString("synced_data", "");
@@ -146,13 +143,13 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                 if (!names.contains(name)) names.add(name);
             }
         } catch (Throwable ignored) {}
-        if (names.isEmpty()) { for (String g : GAMES) names.add(g); }
+        
         return names;
     }
     public static java.util.List<String> importGames() { java.util.List<String> names = new java.util.ArrayList<String>(); try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", android.content.Context.MODE_PRIVATE); String synced = sp.getString("synced_data", ""); for (String line : synced.split(";")) { int k = line.indexOf("|"); if (k <= 0) continue; String name = line.substring(0, k).trim(); if (name.isEmpty()) continue; if (!names.contains(name)) names.add(name); } } catch (Throwable ignored) {} if (names.isEmpty()) return allGames(); return names; }
     public static java.util.List<String> allGames() {
         java.util.List<String> names = new java.util.ArrayList<String>();
-        try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", 0); String sy = sp.getString("synced_data", ""); for (String ln : sy.split(";")) { int k = ln.indexOf((char)124); if (k <= 0) continue; String nm = ln.substring(0, k).trim(); if (nm.length() > 0 && !names.contains(nm)) names.add(nm); } } catch (Throwable ignored) {} if (names.isEmpty()) { for (String g : GAMES) names.add(g); }
+        try { android.content.SharedPreferences sp = appContext.getSharedPreferences("myPrefs", 0); String sy = sp.getString("synced_data", ""); for (String ln : sy.split(";")) { int k = ln.indexOf((char)124); if (k <= 0) continue; String nm = ln.substring(0, k).trim(); if (nm.length() > 0 && !names.contains(nm)) names.add(nm); } } catch (Throwable ignored) {} 
         return names;
     }
     public static java.util.List<String> listGameFolders() {

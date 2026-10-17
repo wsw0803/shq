@@ -15,7 +15,6 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
@@ -50,9 +49,6 @@ public class MainActivity extends BaseActivity {
     private static final String GAME_LIST_URL = "https://iappht.sslqq.cn/user/getFile.php?fid=7487";
     private static final String PTLOGIN_BASE = "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=%s&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=%s&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
     private static final String KEY_SYNCED_DATA = "synced_data";
-    private static final String KEY_LOCAL_ON = "local_on";
-    private static final String KEY_CLOUD_ON = "cloud_on";
-    private static final String LOCAL_GAME_DATA = "和平|1106467070;王者|1104466820;三角洲|1110543085;无畏契约|1111677210";
     private static final String KEY_STORAGE_URI = "storage_uri";
     
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
@@ -73,8 +69,6 @@ public class MainActivity extends BaseActivity {
     private TextView storagePermissionStatusText;
     private TextView tvLog;
     private ScrollView scrollLog;
-    private CheckBox cbLocalSource;
-    private CheckBox cbCloudSource;
 
     private Window mWindow;
 
@@ -105,6 +99,7 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
         
         loadGameList();
+        loadGameListFromServer();
         checkForUpdates();
     }
     
@@ -184,9 +179,6 @@ private void setupImmersiveMode() {
         hideButton = findViewById(R.id.btn_hide);
         showButton = findViewById(R.id.btn_show);
         selectDirectoryButton = findViewById(R.id.btn_select_directory);
-        cbLocalSource = findViewById(R.id.cb_local_source);
-        cbCloudSource = findViewById(R.id.cb_cloud_source);
-        setupSourceToggles();
         directoryStatusText = findViewById(R.id.txt_directory_status);
         storagePermissionStatusText = findViewById(R.id.txt_storage_permission_status);
         tvLog = findViewById(R.id.tv_log);
@@ -615,8 +607,13 @@ private void setupImmersiveMode() {
         root.addView(title);
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         android.widget.LinearLayout list = new android.widget.LinearLayout(this);
-        list.setOrientation(android.widget.LinearLayout.VERTICAL);
-        scroll.addView(list);
+        list.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.LinearLayout colA = new android.widget.LinearLayout(this);
+        colA.setOrientation(android.widget.LinearLayout.VERTICAL);
+        android.widget.LinearLayout colB = new android.widget.LinearLayout(this);
+        colB.setOrientation(android.widget.LinearLayout.VERTICAL);
+        list.addView(colA, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        list.addView(colB, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(scroll, new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         for (int i = 0; i < gameList.size(); i++) {
@@ -647,47 +644,10 @@ private void setupImmersiveMode() {
                     addLog("[错误] 选择游戏失败: " + e.getMessage());
                 }
             });
-            list.addView(tv);
+            if (index % 2 == 0) colA.addView(tv); else colB.addView(tv);
         }
         dlg.setContentView(root);
         dlg.show();
-    }
-
-    private void setupSourceToggles() {
-        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        cbLocalSource.setChecked(p.getBoolean(KEY_LOCAL_ON, true));
-        cbCloudSource.setChecked(p.getBoolean(KEY_CLOUD_ON, false));
-        cbLocalSource.setOnCheckedChangeListener((v, c) -> {
-            if (c && cbCloudSource.isChecked()) cbCloudSource.setChecked(false);
-            SharedPreferences.Editor ed = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
-            ed.putBoolean(KEY_LOCAL_ON, c);
-            if (c) { ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
-            ed.apply();
-            onSourceToggled();
-        });
-        cbCloudSource.setOnCheckedChangeListener((v, c) -> {
-            if (c && cbLocalSource.isChecked()) cbLocalSource.setChecked(false);
-            SharedPreferences.Editor ed = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
-            ed.putBoolean(KEY_CLOUD_ON, c);
-            if (c) { ed.remove(SELECTED_GAME_NAME_KEY); ed.remove(SELECTED_GAME_URL_KEY); }
-            ed.apply();
-            onSourceToggled();
-        });
-    }
-
-    private void onSourceToggled() {
-        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
-        boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
-        if (!localOn && !cloudOn) {
-            p.edit().remove(SELECTED_GAME_NAME_KEY).remove(SELECTED_GAME_URL_KEY).apply();
-            selectedGameName = "";
-            selectedGameUrl = "";
-            gameList.clear();
-            updateSelectGameButtonText();
-            addLog("[source] 两个开关已关闭，缓存已清空");
-        }
-        loadGameList();
     }
 
     private String buildLocalUrl(String appid) {
@@ -729,36 +689,22 @@ private void setupImmersiveMode() {
 
     private void loadGameList() {
         SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-        boolean localOn = p.getBoolean(KEY_LOCAL_ON, true);
-        boolean cloudOn = p.getBoolean(KEY_CLOUD_ON, false);
         gameList.clear();
-        if (localOn) {
-            String synced = p.getString(KEY_SYNCED_DATA, "");
-            String all = synced.isEmpty() ? LOCAL_GAME_DATA : synced;
-            java.util.HashSet<String> seen = new java.util.HashSet<>();
-            for (String line : all.split(";")) {
-                int i = line.indexOf("|");
-                if (i <= 0) continue;
-                String name = line.substring(0, i);
-                String appid = line.substring(i + 1);
-                if (!seen.add(appid)) continue;
-                gameList.add(new GameItem("", name, buildLocalUrl(appid)));
-            }
-            addLog("[local] games: " + gameList.size());
+        String synced = p.getString(KEY_SYNCED_DATA, "");
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        for (String line : synced.split(";")) {
+            int i = line.indexOf("|");
+            if (i <= 0) continue;
+            String name = line.substring(0, i);
+            String appid = line.substring(i + 1);
+            if (!seen.add(appid)) continue;
+            gameList.add(new GameItem("", name, buildLocalUrl(appid)));
         }
-        if (cloudOn) {
-            loadGameListFromServer();
-        } else {
-            if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
-                saveSelectedGame(gameList.get(0).name, gameList.get(0).url);
-            }
-            if (gameList.isEmpty()) {
-                addLog("[game] no data source");
-            }
+        addLog("[local] games: " + gameList.size());
+        if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
+            saveSelectedGame(gameList.get(0).name, gameList.get(0).url);
         }
     }
-
-
 
     private void loadGameListFromServer() {
         addLog("[网络] 正在加载游戏列表...");
@@ -808,11 +754,7 @@ private void setupImmersiveMode() {
             cloudParsed.add(item);
         }
 
-        if (getSharedPreferences(PREF_NAME, MODE_PRIVATE).getBoolean(KEY_CLOUD_ON, false)) {
-            syncToLocal(cloudParsed); gameList.addAll(cloudParsed);
-        } else {
-            addLog("[网络] 当前非云端模式，忽略云端数据");
-        }
+        syncToLocal(cloudParsed); gameList.addAll(cloudParsed);
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
 
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
