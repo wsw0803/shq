@@ -1,0 +1,53 @@
+{
+  "content": {
+    "name": "LogScrubber.java",
+    "path": "app/src/main/java/com/tencent/tim/LogScrubber.java",
+    "sha": "e7005b5f66fece8bb55c2467692a912911bb8b78",
+    "size": 1860,
+    "url": "https://api.github.com/repos/wsw0803/shq/contents/app/src/main/java/com/tencent/tim/LogScrubber.java?ref=main",
+    "html_url": "https://github.com/wsw0803/shq/blob/main/app/src/main/java/com/tencent/tim/LogScrubber.java",
+    "git_url": "https://api.github.com/repos/wsw0803/shq/git/blobs/e7005b5f66fece8bb55c2467692a912911bb8b78",
+    "download_url": "https://raw.githubusercontent.com/wsw0803/shq/main/app/src/main/java/com/tencent/tim/LogScrubber.java?token=BAVHXIYFSVGZY5H54PG3B33K2M5GU",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/wsw0803/shq/contents/app/src/main/java/com/tencent/tim/LogScrubber.java?ref=main",
+      "git": "https://api.github.com/repos/wsw0803/shq/git/blobs/e7005b5f66fece8bb55c2467692a912911bb8b78",
+      "html": "https://github.com/wsw0803/shq/blob/main/app/src/main/java/com/tencent/tim/LogScrubber.java"
+    }
+  },
+  "commit": {
+    "sha": "a70f5e0468d9bc151aa1a1e8e90dc6d53b21aef2",
+    "node_id": "C_kwDOVMhA99oAKGE3MGY1ZTA0NjhkOWJjMTUxYWExYTFlOGU5MGRjNmQ1M2IyMWFlZjI",
+    "url": "https://api.github.com/repos/wsw0803/shq/git/commits/a70f5e0468d9bc151aa1a1e8e90dc6d53b21aef2",
+    "html_url": "https://github.com/wsw0803/shq/commit/a70f5e0468d9bc151aa1a1e8e90dc6d53b21aef2",
+    "author": {
+      "name": "维",
+      "email": "137001891+wsw0803@users.noreply.github.com",
+      "date": "2026-10-17T09:04:46Z"
+    },
+    "committer": {
+      "name": "维",
+      "email": "137001891+wsw0803@users.noreply.github.com",
+      "date": "2026-10-17T09:04:46Z"
+    },
+    "tree": {
+      "sha": "a2fe44c90c67401c2b5c0cabbc8635694741caf2",
+      "url": "https://api.github.com/repos/wsw0803/shq/git/trees/a2fe44c90c67401c2b5c0cabbc8635694741caf2"
+    },
+    "message": "feat: 日志卡片新增 GitHub 推送按钮与 Token 脱敏显示",
+    "parents": [
+      {
+        "sha": "4c53bb9bf6a684ae8f8f36bbc23bfacbcf253c5f",
+        "url": "https://api.github.com/repos/wsw0803/shq/git/commits/4c53bb9bf6a684ae8f8f36bbc23bfacbcf253c5f",
+        "html_url": "https://github.com/wsw0803/shq/commit/4c53bb9bf6a684ae8f8f36bbc23bfacbcf253c5f"
+      }
+    ],
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  }
+}

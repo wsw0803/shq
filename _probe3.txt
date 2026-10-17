@@ -1,0 +1,4 @@
+String a = \"x\";
+String b = "" ;
+if (a.length() <= 8) { a = "****"; }
+String p = "%20";
