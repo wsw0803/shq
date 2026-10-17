@@ -600,6 +600,17 @@ public class TokenDialog {
                 String note = noteEt.getText().toString().trim();
                 String aid = TokenStore.appidOfUrl(raw);
                 if (aid == null || aid.isEmpty()) {
+                    String[] all = txt.split(String.valueOf((char)124));
+                    for (String sg : all) {
+                        String tg = sg.trim();
+                        if (tg.length() < 6) continue;
+                        boolean num = true;
+                        for (int ci = 0; ci < tg.length(); ci++) if (!Character.isDigit(tg.charAt(ci))) { num = false; break; }
+                        if (num) { aid = tg; break; }
+                    }
+                }
+                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(games[pick[0]]);
+                if (aid == null || aid.isEmpty()) {
                     d.dismiss();
                     if (parent != null) parent.dismiss();
                     java.util.List<String> one = new java.util.ArrayList<String>();
