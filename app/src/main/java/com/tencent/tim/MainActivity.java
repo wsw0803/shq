@@ -704,7 +704,7 @@ private void setupImmersiveMode() {
         return String.format(PTLOGIN_BASE, appid, appid);
     }
 
-    private void syncToLocal(java.util.List<String> items) {
+    private void syncToLocal(java.util.List<GameItem> items) {
         if (items == null || items.isEmpty()) return;
         java.util.HashSet<String> seen = new java.util.HashSet<String>();
         StringBuilder sb = new StringBuilder();
