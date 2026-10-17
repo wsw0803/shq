@@ -347,24 +347,81 @@ public class TokenDialog {
 
 
     private static void showNoteDialog(final Context c, final TokenStore.Entry e, final Dialog parent) {
-        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(c);
-        b.setTitle("设置备注");
+        final Dialog d = new Dialog(c);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackground(glass(c, 20, true));
+        int pad = dp(c, 18);
+        root.setPadding(pad, pad, pad, pad);
+        TextView t = new TextView(c);
+        t.setText("设置备注");
+        t.setTextColor(0xFFF5F7FA);
+        t.setTextSize(16);
+        t.setGravity(Gravity.CENTER);
+        root.addView(t);
+        TextView sub = new TextView(c);
+        sub.setText((e.game == null ? "" : e.game) + "  " + e.shortToken());
+        sub.setTextColor(0xFF8A9BB8);
+        sub.setTextSize(11);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(c, 8), 0, dp(c, 14));
+        root.addView(sub);
         final android.widget.EditText et = new android.widget.EditText(c);
         et.setText(e.note);
         et.setHint("输入备注...");
         et.setTextColor(0xFFE6EEF8);
         et.setHintTextColor(0xFF8A9BB8);
-        b.setView(et);
-        b.setPositiveButton("保存", new android.content.DialogInterface.OnClickListener() {
-            public void onClick(android.content.DialogInterface dialog, int which) {
-                String newNote = et.getText().toString().trim();
-                boolean done = TokenStore.updateNote(e.game, e.accessToken, newNote);
+        et.setTextSize(13);
+        et.setPadding(dp(c, 12), dp(c, 10), dp(c, 12), dp(c, 10));
+        et.setBackground(glass(c, 12, false));
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        elp.bottomMargin = dp(c, 14);
+        root.addView(et, elp);
+        LinearLayout btns = new LinearLayout(c);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = new TextView(c);
+        cancel.setText("取消");
+        cancel.setTextColor(0xFF8A9BB8);
+        cancel.setTextSize(13);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setPadding(0, dp(c, 11), 0, dp(c, 11));
+        cancel.setBackground(glass(c, 12, false));
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { d.dismiss(); }
+        });
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        clp.rightMargin = dp(c, 6);
+        btns.addView(cancel, clp);
+        TextView save = new TextView(c);
+        save.setText("保存");
+        save.setTextColor(0xFF22D3EE);
+        save.setTextSize(13);
+        save.setGravity(Gravity.CENTER);
+        save.setPadding(0, dp(c, 11), 0, dp(c, 11));
+        save.setBackground(glass(c, 12, true));
+        save.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String nn = et.getText().toString().trim();
+                boolean done = TokenStore.updateNote(e.game, e.accessToken, nn);
+                d.dismiss();
                 android.widget.Toast.makeText(c, done ? "备注已保存" : "保存失败", android.widget.Toast.LENGTH_SHORT).show();
                 if (done && parent != null) parent.dismiss();
             }
         });
-        b.setNegativeButton("取消", null);
-        b.show();
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        slp.leftMargin = dp(c, 6);
+        btns.addView(save, slp);
+        root.addView(btns);
+        d.setContentView(root);
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            WindowManager.LayoutParams wp = w.getAttributes();
+            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.82f);
+            w.setAttributes(wp);
+        }
+        d.show();
     }
 
     public static String segment(TokenStore.Entry e) {
