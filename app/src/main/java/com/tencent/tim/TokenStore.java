@@ -124,7 +124,7 @@ public class TokenStore {
     public static java.util.List<String> listGameFolders() {
         java.util.List<String> names = new ArrayList<String>();
         for (String g : GAMES) names.add(g);
-        File[] dirs = null;
+        File[] dirs = rootDir().listFiles();
         if (dirs != null) {
             for (File d : dirs) {
                 if (d.isDirectory() && !names.contains(d.getName())) names.add(d.getName());
@@ -147,7 +147,7 @@ public class TokenStore {
         try {
             Process p = Runtime.getRuntime().exec("su");
             java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
-            os.writeBytes("dumpsys window | grep mCurrentFocus | head -2\n");
+            os.writeBytes("dumpsys activity recents | grep cmp= | head -30\n");
             os.writeBytes("exit\n");
             os.flush();
             os.close();
@@ -203,7 +203,6 @@ public class TokenStore {
             } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
         }
         try {
-        if (rootAppend(f, line)) return true;
             File dir = gameDir(game);
             if (!dir.exists()) dir.mkdirs();
             FileWriter w = new FileWriter(f, true);

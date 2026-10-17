@@ -247,7 +247,7 @@ public class AgentActivity extends BaseActivity {
         if (!savedUrl.isEmpty()) {
             return savedUrl;
         }
-        return "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=1104466820&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=1104466820&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
+        return "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
     }
 
     private void showPickToken() {
@@ -268,7 +268,7 @@ public class AgentActivity extends BaseActivity {
             tv.setText("自动识别: " + g + "  ·  appid " + appid + "  ·  保存到 维/保存数据/" + g);
             tv.setTextColor(0xFF34D399);
         } else {
-            tv.setText("自动识别: 未识别到游戏（将默认按和平处理）");
+            tv.setText("自动识别: 未识别到游戏（将存入其他目录）");
             tv.setTextColor(0xFFFBBF24);
         }
     }
@@ -374,7 +374,7 @@ public class AgentActivity extends BaseActivity {
                 String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
                 String game = com.tencent.tim.TokenStore.gameOfUrl(url);
                 if (game == null || game.isEmpty()) game = com.tencent.tim.TokenStore.detectGameByRoot();
-                if (game == null || game.isEmpty()) game = "";
+                
                 if (game == null || game.isEmpty()) game = "其他";
                 String line = time + " | " + game + " | " + url + " | " + mode;
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(game, line);
