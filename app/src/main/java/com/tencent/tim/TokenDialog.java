@@ -32,7 +32,10 @@ public class TokenDialog {
 
 
     public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
-        final String[] games = TokenStore.importGames().toArray(new String[0]);
+        java.util.List<String> gl = new java.util.ArrayList<String>(TokenStore.importGames());
+        for (String ag : TokenStore.allGames()) { if (ag != null && ag.length() > 0 && !gl.contains(ag)) gl.add(ag); }
+        if (!gl.contains("其他")) gl.add("其他");
+        final String[] games = gl.toArray(new String[0]);
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(glass(c, 22, true));
