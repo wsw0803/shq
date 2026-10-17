@@ -818,30 +818,40 @@ private void setupImmersiveMode() {
     private void checkForUpdates() {
         new Thread(() -> {
             try {
-                java.net.URL url = new java.net.URL("https://api.github.com/repos/wsw0803/shq/releases/latest");
+                java.net.URL url = new java.net.URL("https://api.github.com/repos/wsw0803/shq/releases?per_page=100");
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
+                conn.setConnectTimeout(6000);
+                conn.setReadTimeout(6000);
                 if (conn.getResponseCode() == 200) {
                     java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
                     StringBuilder sb = new StringBuilder();
                     String line;
                     while ((line = reader.readLine()) != null) sb.append(line);
                     reader.close();
-                    org.json.JSONObject json = new org.json.JSONObject(sb.toString());
-                    String latestTag = json.optString("tag_name", "");
-                    String cleanLatest = latestTag.startsWith("v") ? latestTag.substring(1) : latestTag;
+                    org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
+                    String bestVer = "";
+                    String bestUrl = "";
+                    for (int i = 0; i < arr.length(); i++) {
+                        org.json.JSONObject rel = arr.getJSONObject(i);
+                        if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
+                        String tag = rel.optString("tag_name", "");
+                        String ver = tag.startsWith("v") ? tag.substring(1) : tag;
+                        if (ver.isEmpty()) continue;
+                        if (!bestVer.isEmpty() && compareVersion(ver, bestVer) <= 0) continue;
+                        org.json.JSONArray assets = rel.optJSONArray("assets");
+                        if (assets == null || assets.length() == 0) continue;
+                        String apkUrl = assets.getJSONObject(0).optString("browser_download_url", "");
+                        if (apkUrl.isEmpty()) continue;
+                        bestVer = ver;
+                        bestUrl = apkUrl;
+                    }
                     String currentVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-                    if (!cleanLatest.isEmpty() && !cleanLatest.equals(currentVersion)) {
-                        org.json.JSONArray assets = json.optJSONArray("assets");
-                        if (assets != null && assets.length() > 0) {
-                            String apkUrl = assets.getJSONObject(0).optString("browser_download_url", "");
-                            if (!apkUrl.isEmpty()) {
-                                runOnUiThread(() -> showUpdateDialog(cleanLatest, apkUrl));
-                            }
-                        }
+                    if (!bestVer.isEmpty() && compareVersion(bestVer, currentVersion) > 0) {
+                        final String fv = bestVer;
+                        final String fu = bestUrl;
+                        runOnUiThread(() -> showUpdateDialog(fv, fu));
                     }
                 }
                 conn.disconnect();
@@ -850,6 +860,25 @@ private void setupImmersiveMode() {
             }
         }).start();
     }
+
+    private static int parseIntSafe(String v) {
+        try { return Integer.parseInt(v.trim()); } catch (Exception e) { return 0; }
+    }
+
+    private static int compareVersion(String a, String b) {
+        if (a == null) a = "";
+        if (b == null) b = "";
+        String[] x = a.split("\\.");
+        String[] y = b.split("\\.");
+        int n = Math.max(x.length, y.length);
+        for (int i = 0; i < n; i++) {
+            int va = i < x.length ? parseIntSafe(x[i]) : 0;
+            int vb = i < y.length ? parseIntSafe(y[i]) : 0;
+            if (va != vb) return va < vb ? -1 : 1;
+        }
+        return 0;
+    }
+
     private void showUpdateDialog(String newVersion, String url) {
         final android.app.Dialog dlg = new android.app.Dialog(this);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
