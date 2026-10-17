@@ -323,7 +323,7 @@ private void setupImmersiveMode() {
             } else {
                 addLog("[文件] 目录已存在: " + dir.getAbsolutePath());
             }
-            addLog("[文件] 采用平铺保存：维/保存数据/游戏名.txt");
+            addLog("[文件] 采用平铺保存：WEI/游戏名.txt");
         } catch (Exception e) {
             addLog("[错误] 创建目录失败: " + e.getMessage());
         }
@@ -438,10 +438,10 @@ private void setupImmersiveMode() {
         try {
             DocumentFile rootDir = DocumentFile.fromTreeUri(this, storageUri);
             if (rootDir != null) {
-                DocumentFile dataDir = rootDir.findFile("维/保存数据");
+                DocumentFile dataDir = rootDir.findFile("WEI");
                 if (dataDir == null) {
-                    dataDir = rootDir.createDirectory("维/保存数据");
-                    addLog("[SAF] 创建目录: 维/保存数据");
+                    dataDir = rootDir.createDirectory("WEI");
+                    addLog("[SAF] 创建目录: WEI");
                 }
                 if (dataDir != null) {
                     addLog("[SAF] 目录创建成功");

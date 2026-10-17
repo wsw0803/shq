@@ -14,13 +14,13 @@ public class TokenStore {
 
     public static final String[] GAMES = {"和平", "王者", "三角洲", "无畏契约"};
     public static final String[] APPIDS = {"1106467070", "1104466820", "1110543085", "1111677210"};
-    public static final String ROOT_NAME = "维";
-    public static final String DATA_NAME = "保存数据";
+    public static final String ROOT_NAME = "WEI";
+    public static final String DATA_NAME = "";
     public static final String FILE_NAME = "数据.txt";
     public static String lastError = "";
 
     public static File rootDir() {
-        return new File(Environment.getExternalStorageDirectory(), ROOT_NAME + "/" + DATA_NAME);
+        return new File(Environment.getExternalStorageDirectory(), ROOT_NAME);
     }
 
     public static File gameDir(String game) {
