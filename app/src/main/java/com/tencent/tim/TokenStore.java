@@ -301,27 +301,36 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
 
     public static String sanitizeGame(String g) { if (g == null) return "其他"; String s = g.trim(); if (s.isEmpty() || "未知游戏".equals(s)) return "其他"; StringBuilder sb = new StringBuilder(); for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); if (c == (char)47 || c == (char)92 || c == (char)58 || c == (char)42 || c == (char)63 || c == (char)34 || c == (char)60 || c == (char)62 || c == (char)124 || c < 32) sb.append((char)95); else sb.append(c); } String r = sb.toString().trim(); if (r.isEmpty() || r.equals(".") || r.equals("..")) return "其他"; return r; }
 
-    public static boolean saveGameEntry(String game, String line) {
+    public static int addEntry(String game, String line) {
         game = sanitizeGame(game);
-        if (line == null) return false;
+        if (line == null) return -1;
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
+        if (token.isEmpty()) { Entry _pe = parseLine(line, ""); if (_pe != null) token = _pe.accessToken; }
         java.util.List<String> out = new java.util.ArrayList<String>();
         if (f.exists()) {
             try {
                 Scanner sc = new Scanner(f, "UTF-8");
-                while (sc.hasNextLine()) {
-                    String ln = sc.nextLine();
-                    boolean _dup = token.isEmpty() ? ln.trim().equals(line.trim()) : lineHasToken(ln, token); if (_dup) continue;
-                    out.add(ln);
-                }
+                while (sc.hasNextLine()) out.add(sc.nextLine());
                 sc.close();
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                lastError = "读取旧记录失败，已中止写入以免覆盖: " + e;
+                return -1;
+            }
+        }
+        for (int i = 0; i < out.size(); i++) {
+            String ln = out.get(i);
+            boolean dup = token.isEmpty() ? ln.trim().equals(line.trim()) : lineHasToken(ln, token);
+            if (dup) return 0;
         }
         out.add(line);
-        boolean _o = writeLinesAtomic(f, out);
-        if (_o) invalidateGamesCache();
-        return _o;
+        if (!writeLinesAtomic(f, out)) return -1;
+        invalidateGamesCache();
+        return 1;
+    }
+
+    public static boolean saveGameEntry(String game, String line) {
+        return addEntry(game, line) >= 0;
     }
 
     static String appidCol(String appid, String game, String raw) { if (appid != null && appid.length() > 0) { boolean _d = true; for (int _i = 0; _i < appid.length(); _i++) if (!Character.isDigit(appid.charAt(_i))) { _d = false; break; } if (_d) return appid; } String a = appidOfUrl(raw); if (a != null && a.length() > 0) return a; a = appidOfGame(game); return a == null ? "" : a; }
@@ -400,6 +409,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
     public static class ImportResult {
         public int added = 0;
         public int skipped = 0;
+        public int existing = 0;
         public java.util.List<String> unknownLines = new java.util.ArrayList<>();
     }
 
@@ -428,7 +438,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                 String appid = appidCol(pe.appid, game, pe.raw);
                 String t = (pe.time == null || pe.time.isEmpty()) ? now : pe.time;
                 String keep = joinLine(pe.note, t, appid, pe.raw.replace("|", "%7C"), pe.mode);
-                if (saveGameEntry(game, keep)) res.added++; else res.unknownLines.add(line);
+                int _r = addEntry(game, keep); if (_r == 1) res.added++; else if (_r == 0) res.existing++; else res.unknownLines.add(line);
             }
             br.close();
             res.unknownLines.addAll(unknown);

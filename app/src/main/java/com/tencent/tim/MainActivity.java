@@ -456,11 +456,11 @@ private void setupImmersiveMode() {
             android.net.Uri uri = data.getData();
             if (uri != null) {
                 TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
-                addLog("[导入] 新增 " + res.added + " 条，跳过 " + res.skipped + " 条，待定 " + res.unknownLines.size() + " 条" + (TokenStore.lastError.isEmpty() ? "" : ("，错误: " + TokenStore.lastError)));
+                addLog("[导入] 新增 " + res.added + " 条，已存在 " + res.existing + " 条，跳过 " + res.skipped + " 条，待定 " + res.unknownLines.size() + " 条" + (TokenStore.lastError.isEmpty() ? "" : ("，错误: " + TokenStore.lastError)));
                 if (!res.unknownLines.isEmpty()) {
                     TokenDialog.showChooseGameForTokens(this, res.unknownLines, res.added);
                 } else {
-                    Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录" + (res.skipped > 0 ? ("，跳过 " + res.skipped + " 条重复/无效") : "")) : (res.skipped > 0 ? ("未发现新记录（跳过 " + res.skipped + " 条重复/无效）") : "未发现新记录"), Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录" + (res.existing > 0 ? ("，已存在 " + res.existing + " 条") : "") + (res.skipped > 0 ? ("，跳过 " + res.skipped + " 条无效") : "")) : (res.skipped > 0 ? ("未发现新记录（跳过 " + res.skipped + " 条重复/无效）") : "未发现新记录"), Toast.LENGTH_LONG).show();
                     TokenDialog.show(this, "", null);
                 }
             }
