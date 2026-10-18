@@ -263,6 +263,7 @@ public class Updater {
     private static boolean fetch(final Activity act, List<String> urls, final File part, final File state, File out) {
         total = probe(urls);
         if (total <= 100000) return false;
+        if (out.exists() && out.length() == total) { got = total; return true; }
         got = 0;
         lastT = 0;
         for (int i = 0; i < THREADS; i++) {
