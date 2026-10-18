@@ -31,7 +31,24 @@ public class TokenDialog {
     }
 
 
-    public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
+            private static final java.util.List<String[]> _stage = new java.util.ArrayList<String[]>();
+
+    public static void showChooseGameForTokens(final Context c, final TokenStore.ImportResult res) {
+        if (c == null) return;
+        if (res == null) { show(c, "", null); return; }
+        _stage.clear();
+        showChooseNext(c, res, res.unknownLines);
+    }
+
+    private static void showChooseNext(final Context c, final TokenStore.ImportResult res, final java.util.List<String> tokens) {
+        if (tokens == null || tokens.isEmpty()) { finishImport(c, res); return; }
+        final java.util.List<String> rest0 = new java.util.ArrayList<String>(tokens);
+        final String line0 = rest0.get(0);
+        final int total = rest0.size();
+        final int autoCnt = res == null ? 0 : res.resolved.size();
+        final TokenStore.Entry pe0 = TokenStore.parseLine(line0, "");
+        String preview = (pe0 == null || pe0.accessToken.isEmpty()) ? line0 : pe0.shortToken();
+        if (preview != null && preview.length() > 40) preview = preview.substring(0, 40) + "...";
         java.util.List<String> gl = new java.util.ArrayList<String>(TokenStore.importGames());
         for (String ag : TokenStore.allGames()) { if (ag != null && ag.length() > 0 && !gl.contains(ag)) gl.add(ag); }
         if (!gl.contains("其他")) gl.add("其他");
@@ -41,28 +58,34 @@ public class TokenDialog {
         root.setBackground(glass(c, 22, true));
         int p = dp(c, 16);
         root.setPadding(p, p, p, p);
-
         TextView title = new TextView(c);
-        title.setText("选择游戏标签");
+        title.setText("逐条选择游戏标签");
         title.setTextColor(0xFFF5F7FA);
         title.setTextSize(17);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
-
         TextView tip = new TextView(c);
-        tip.setText("成功导入 " + added + " 条。\n有 " + tokens.size() + " 条 Token 无法自动识别游戏。\n请选择要将它们保存到哪个标签：");
+        tip.setText("自动识别 " + autoCnt + " 条，需手动归类 " + total + " 条\n已归类 " + _stage.size() + " 条，当前: " + preview + "\n（全部选完并确认后才会写入，中途退出不会保存）");
         tip.setTextColor(0xFF8A9BB8);
-        tip.setTextSize(12);
+        tip.setTextSize(11);
         tip.setGravity(Gravity.CENTER);
-        tip.setPadding(0, dp(c, 8), 0, dp(c, 16));
+        tip.setPadding(0, dp(c, 8), 0, dp(c, 12));
         root.addView(tip);
-
         final Dialog dlg = new Dialog(c);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-        }
-
+        if (dlg.getWindow() != null) dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        dlg.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            public boolean onKey(DialogInterface dialog, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                    _stage.clear();
+                    dlg.dismiss();
+                    android.widget.Toast.makeText(c, "已取消，本次导入未写入任何内容", android.widget.Toast.LENGTH_SHORT).show();
+                    show(c, "", null);
+                    return true;
+                }
+                return false;
+            }
+        });
         LinearLayout cols = new LinearLayout(c);
         cols.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout colA = new LinearLayout(c);
@@ -78,7 +101,7 @@ public class TokenDialog {
             btn.setTextColor(0xFF22D3EE);
             btn.setTextSize(15);
             btn.setGravity(Gravity.CENTER);
-            btn.setPadding(0, dp(c, 16), 0, dp(c, 16));
+            btn.setPadding(0, dp(c, 14), 0, dp(c, 14));
             btn.setBackground(glass(c, 12, false));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.leftMargin = dp(c, 4);
@@ -87,34 +110,49 @@ public class TokenDialog {
             btn.setLayoutParams(lp);
             btn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    boolean _miss = false;
-                    for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String _a = TokenStore.appidOfGame(g); if (_a == null) _a = ""; if (_a.isEmpty()) { String _u = (pe == null) ? null : TokenStore.appidOfUrl(pe.raw); if (_u != null) _a = _u; } if (_a.isEmpty()) _a = firstAppid(line); if (_a.isEmpty()) { _miss = true; break; } }
-                    if (_miss) { askAppid(c, dlg, g, tokens); return; }
-                    int count = 0; int exist = 0; int fail = 0;
-                    for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String aid2 = TokenStore.appidOfGame(g); if (aid2 == null) aid2 = ""; if (aid2.isEmpty()) { String _u = (pe == null) ? null : TokenStore.appidOfUrl(pe.raw); if (_u != null) aid2 = _u; } if (aid2.isEmpty()) aid2 = firstAppid(line); if (aid2.isEmpty()) { askAppid(c, dlg, g, tokens); return; } String keep = (pe == null || pe.raw.isEmpty()) ? line : TokenStore.joinLine(pe.note, pe.time.isEmpty() ? new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date()) : pe.time, aid2, pe.raw.replace("|", "%7C"), pe.mode); { int _r = TokenStore.addEntry(g, keep); if (_r == 1) count++; else if (_r == 0) exist++; else fail++; } }
-                    android.widget.Toast.makeText(c, "新增 " + count + " 条，已存在 " + exist + " 条" + (fail > 0 ? ("，失败 " + fail + " 条") : "") + "（标签 " + g + "）", android.widget.Toast.LENGTH_LONG).show();
+                    String aid2 = TokenStore.appidOfGame(g);
+                    if (aid2 == null) aid2 = "";
+                    if (aid2.isEmpty()) { String _u = (pe0 == null) ? null : TokenStore.appidOfUrl(pe0.raw); if (_u != null) aid2 = _u; }
+                    if (aid2.isEmpty()) aid2 = firstAppid(line0);
+                    if (aid2.isEmpty()) { askAppidForOne2(c, dlg, g, res, rest0); return; }
+                    String now = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
+                    String keep = (pe0 == null || pe0.raw.isEmpty()) ? line0 : TokenStore.joinLine(pe0.note, pe0.time.isEmpty() ? now : pe0.time, aid2, pe0.raw.replace("|", "%7C"), pe0.mode);
+                    _stage.add(new String[]{g, keep});
                     dlg.dismiss();
-                    show(c, g, null);
+                    showChooseNext(c, res, new java.util.ArrayList<String>(rest0.subList(1, rest0.size())));
                 }
             });
             if (i % 2 == 0) colA.addView(btn); else colB.addView(btn);
         }
         root.addView(cols);
-
+        TextView skip = new TextView(c);
+        skip.setText("跳过这条");
+        skip.setTextColor(0xFFFBBF24);
+        skip.setTextSize(12);
+        skip.setGravity(Gravity.CENTER);
+        skip.setPadding(0, dp(c, 12), 0, 0);
+        skip.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                dlg.dismiss();
+                showChooseNext(c, res, new java.util.ArrayList<String>(rest0.subList(1, rest0.size())));
+            }
+        });
+        root.addView(skip);
         TextView cancel = new TextView(c);
-        cancel.setText("放弃保存");
+        cancel.setText("放弃本次导入");
         cancel.setTextColor(0xFFF87171);
         cancel.setTextSize(12);
         cancel.setGravity(Gravity.CENTER);
-        cancel.setPadding(0, dp(c, 12), 0, 0);
+        cancel.setPadding(0, dp(c, 8), 0, 0);
         cancel.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                _stage.clear();
                 dlg.dismiss();
+                android.widget.Toast.makeText(c, "已取消，未写入任何内容", android.widget.Toast.LENGTH_SHORT).show();
                 show(c, "", null);
             }
         });
         root.addView(cancel);
-
         dlg.setContentView(root);
         Window w = dlg.getWindow();
         if (w != null) {
@@ -124,16 +162,90 @@ public class TokenDialog {
             wp.height = (int) (c.getResources().getDisplayMetrics().heightPixels * 0.80f);
             w.setAttributes(wp);
         }
-        dlg.setOnKeyListener(new DialogInterface.OnKeyListener() {
-            public boolean onKey(DialogInterface dialog, int keyCode, KeyEvent event) {
-                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
-                    dlg.dismiss();
-                    return true;
-                }
-                return false;
+        dlg.show();
+    }
+    private static void askAppidForOne2(final Context c, final Dialog parent, final String g, final TokenStore.ImportResult res, final java.util.List<String> tokens) {
+        final Dialog d = new Dialog(c);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout r = new LinearLayout(c);
+        r.setOrientation(LinearLayout.VERTICAL);
+        r.setBackground(glass(c, 20, true));
+        int p2 = dp(c, 16);
+        r.setPadding(p2, p2, p2, p2);
+        TextView t = new TextView(c);
+        t.setText("请输入「" + g + "」的 appid（仅当前这条）");
+        t.setTextColor(0xFFF5F7FA);
+        t.setTextSize(14);
+        t.setGravity(Gravity.CENTER);
+        r.addView(t);
+        final android.widget.EditText e = new android.widget.EditText(c);
+        e.setHint("纯数字 appid");
+        e.setTextColor(0xFFE6EEF8);
+        e.setHintTextColor(0xFF8A9BB8);
+        e.setTextSize(13);
+        e.setPadding(dp(c, 10), dp(c, 10), dp(c, 10), dp(c, 10));
+        e.setBackground(glass(c, 12, false));
+        r.addView(e);
+        TextView ok = new TextView(c);
+        ok.setText("确定并继续");
+        ok.setTextColor(0xFF34D399);
+        ok.setTextSize(14);
+        ok.setGravity(Gravity.CENTER);
+        ok.setPadding(0, dp(c, 14), 0, dp(c, 6));
+        ok.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                String aid = e.getText().toString().trim();
+                if (aid.isEmpty()) { android.widget.Toast.makeText(c, "appid 不能为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
+                String line0 = tokens.get(0);
+                TokenStore.Entry pe = TokenStore.parseLine(line0, "");
+                String now = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
+                String keep = (pe == null || pe.raw.isEmpty()) ? line0 : TokenStore.joinLine(pe.note, pe.time.isEmpty() ? now : pe.time, aid, pe.raw.replace("|", "%7C"), pe.mode);
+                _stage.add(new String[]{g, keep});
+                d.dismiss();
+                if (parent != null && parent.isShowing()) parent.dismiss();
+                showChooseNext(c, res, new java.util.ArrayList<String>(tokens.subList(1, tokens.size())));
             }
         });
-        dlg.show();
+        r.addView(ok);
+        TextView no = new TextView(c);
+        no.setText("取消");
+        no.setTextColor(0xFF8A9BB8);
+        no.setTextSize(12);
+        no.setGravity(Gravity.CENTER);
+        no.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { d.dismiss(); }
+        });
+        r.addView(no);
+        d.setContentView(r);
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            WindowManager.LayoutParams wp = w.getAttributes();
+            wp.width = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.86f);
+            w.setAttributes(wp);
+        }
+        d.show();
+    }
+
+    private static void finishImport(final Context c, final TokenStore.ImportResult res) {
+        java.util.List<String[]> all = new java.util.ArrayList<String[]>();
+        if (res != null && res.resolved != null) all.addAll(res.resolved);
+        all.addAll(_stage);
+        _stage.clear();
+        if (all.isEmpty()) {
+            android.widget.Toast.makeText(c, "没有可保存的 Token", android.widget.Toast.LENGTH_SHORT).show();
+            show(c, "", null);
+            return;
+        }
+        int[] st = TokenStore.saveBatch(all);
+        android.widget.Toast.makeText(c, "导入完成：新增 " + st[0] + " 条，已存在 " + st[1] + " 条" + (st[2] > 0 ? ("，失败 " + st[2] + " 条") : ""), android.widget.Toast.LENGTH_LONG).show();
+        show(c, "", null);
+    }
+
+    public static void showChooseGameForTokens(final Context c, final java.util.List<String> tokens, final int added) {
+        TokenStore.ImportResult r = new TokenStore.ImportResult();
+        if (tokens != null) r.unknownLines.addAll(tokens);
+        showChooseGameForTokens(c, r);
     }
 
     public static void show(final Context c, String game, final OnPick pick) {

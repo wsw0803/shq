@@ -329,6 +329,18 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         return 1;
     }
 
+
+    public static int[] saveBatch(java.util.List<String[]> pairs) {
+        int[] r = new int[]{0, 0, 0};
+        if (pairs == null) return r;
+        for (String[] pr : pairs) {
+            if (pr == null || pr.length < 2) continue;
+            int x = addEntry(pr[0], pr[1]);
+            if (x == 1) r[0]++; else if (x == 0) r[1]++; else r[2]++;
+        }
+        return r;
+    }
+
     public static boolean saveGameEntry(String game, String line) {
         return addEntry(game, line) >= 0;
     }
@@ -410,6 +422,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         public int added = 0;
         public int skipped = 0;
         public int existing = 0;
+        public java.util.List<String[]> resolved = new java.util.ArrayList<String[]>();
         public java.util.List<String> unknownLines = new java.util.ArrayList<>();
     }
 
@@ -438,10 +451,11 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                 String appid = appidCol(pe.appid, game, pe.raw);
                 String t = (pe.time == null || pe.time.isEmpty()) ? now : pe.time;
                 String keep = joinLine(pe.note, t, appid, pe.raw.replace("|", "%7C"), pe.mode);
-                int _r = addEntry(game, keep); if (_r == 1) res.added++; else if (_r == 0) res.existing++; else res.unknownLines.add(line);
+                res.resolved.add(new String[]{game, keep});
             }
             br.close();
             res.unknownLines.addAll(unknown);
+            res.added = res.resolved.size();
         } catch (Exception e) {
             lastError = "导入失败: " + e;
         } finally {
