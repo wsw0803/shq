@@ -112,17 +112,23 @@ public class TokenStore {
   else if (_rs.endsWith("|hang_up")) _rs = _rs.substring(0, _rs.length() - 8);
   else break;
  }
- rawSafe = _rs; sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); if (note != null && note.length() > 0) sb.append((char) 124).append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)); return sb.toString(); }
+ rawSafe = _rs; if (note != null && note.length() > 0) { sb.append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)).append(" "); } sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
 
-                    public static Entry parseAnyInput(String text) {
+                        public static Entry parseAnyInput(String text) {
         if (text == null) return null;
         String s = text.trim();
         if (s.length() == 0) return null;
         Entry e = new Entry();
         e.time = ""; e.game = ""; e.mode = ""; e.note = ""; e.appid = "";
-        java.util.regex.Matcher tm = java.util.regex.Pattern.compile("^(\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?)\\s*").matcher(s);
         String body = s;
-        if (tm.find()) { e.time = tm.group(1); body = s.substring(tm.end()).trim(); }
+        java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?").matcher(s);
+        if (tm.find()) {
+            e.time = tm.group();
+            String pre = s.substring(0, tm.start()).trim();
+            if (pre.length() > 0) e.note = pre;
+            body = s.substring(tm.end()).trim();
+            if (body.startsWith("|")) body = body.substring(1).trim();
+        }
         String[] seg = body.split("\\|", -1);
         java.util.List<String> raw = new java.util.ArrayList<String>();
         for (int i = 0; i < seg.length; i++) raw.add(seg[i].trim());
@@ -154,10 +160,6 @@ public class TokenStore {
             String p = raw.get(i).replace("%7C", "|");
             if (p.length() == 0) continue;
             if (isModeWord(p)) { if (e.mode.length() == 0) e.mode = p; continue; }
-            if (e.time.length() == 0) {
-                java.util.regex.Matcher dm = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?").matcher(p);
-                if (dm.find()) { e.time = dm.group(); String rest = (p.substring(0, dm.start()) + " " + p.substring(dm.end())).trim(); if (rest.length() > 0 && e.note.length() == 0) e.note = rest; continue; }
-            }
             if (e.appid.length() == 0 && p.matches("\\d{5,12}")) { e.appid = p; continue; }
             if (e.game.length() == 0) { e.game = p; continue; }
             if (e.note.length() == 0) e.note = p; else e.note = e.note + " " + p;
