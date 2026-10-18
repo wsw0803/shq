@@ -950,8 +950,3 @@ private static boolean isExplicitToken(String p) {
         return e != null && token.equals(e.accessToken);
     }
 }
-
-     return e != null && token.equals(e.accessToken);
-    }
-}
-
