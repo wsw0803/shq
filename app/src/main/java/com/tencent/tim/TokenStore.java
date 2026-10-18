@@ -114,63 +114,14 @@ public class TokenStore {
  }
  rawSafe = _rs; if (note != null && note.length() > 0) { sb.append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)).append(" "); } sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
 
-                        public static Entry parseAnyInput(String text) {
+                            public static Entry parseAnyInput(String text) {
         if (text == null) return null;
         String s = text.trim();
         if (s.length() == 0) return null;
-        Entry e = new Entry();
-        e.time = ""; e.game = ""; e.mode = ""; e.note = ""; e.appid = "";
-        String body = s;
-        java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?").matcher(s);
-        if (tm.find()) {
-            e.time = tm.group();
-            String pre = s.substring(0, tm.start()).trim();
-            if (pre.length() > 0) e.note = pre;
-            body = s.substring(tm.end()).trim();
-            if (body.startsWith("|")) body = body.substring(1).trim();
-        }
-        String[] seg = body.split("\\|", -1);
-        java.util.List<String> raw = new java.util.ArrayList<String>();
-        for (int i = 0; i < seg.length; i++) raw.add(seg[i].trim());
-        int ti = -1;
-        for (int i = 0; i < raw.size(); i++) { if (isExplicitToken(raw.get(i))) { ti = i; break; } }
-        if (ti < 0) {
-            int bestScore = -1; int best = -1;
-            for (int i = 0; i < raw.size(); i++) { int sc = tokenScore(raw.get(i)); if (sc > bestScore) { bestScore = sc; best = i; } }
-            if (bestScore >= 2) ti = best;
-        }
-        if (ti < 0) {
-            String only = raw.size() > 0 ? raw.get(0) : body;
-            e.raw = only;
-            e.accessToken = extractToken(only);
-            if (e.accessToken.length() == 0 && only.indexOf((char) 61) < 0) e.accessToken = only;
-            String a = appidOfUrl(only);
-            e.appid = a == null ? "" : a;
-            e.openid = grab(only, "openid=([^&\\s]+)");
-            e.payToken = grab(only, "pay_token=([^&\\s]+)");
-            e.expiresIn = grab(only, "expires_in=([^&\\s]+)");
-            return e;
-        }
-        String tokRaw = raw.get(ti).replace("%7C", "|");
-        e.raw = tokRaw;
-        e.accessToken = extractToken(tokRaw);
-        if (e.accessToken.length() == 0 && tokRaw.length() > 0 && tokRaw.indexOf((char) 61) < 0) e.accessToken = tokRaw;
-        for (int i = 0; i < raw.size(); i++) {
-            if (i == ti) continue;
-            String p = raw.get(i).replace("%7C", "|");
-            if (p.length() == 0) continue;
-            if (isModeWord(p)) { if (e.mode.length() == 0) e.mode = p; continue; }
-            if (e.appid.length() == 0 && p.matches("\\d{5,12}")) { e.appid = p; continue; }
-            if (e.game.length() == 0) { e.game = p; continue; }
-            if (e.note.length() == 0) e.note = p; else e.note = e.note + " " + p;
-        }
-        if (e.appid.length() == 0) { String a = appidOfUrl(e.raw); if (a != null) e.appid = a; }
-        e.openid = grab(e.raw, "openid=([^&\\s]+)");
-        e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
-        e.expiresIn = grab(e.raw, "expires_in=([^&\\s]+)");
-        return e;
+        return parseLine(s, "");
     }
-    private static boolean isExplicitToken(String p) {
+
+private static boolean isExplicitToken(String p) {
         if (p == null) return false;
         String lp = p.toLowerCase();
         return p.indexOf("access_token=") >= 0 || lp.startsWith("auth://") || lp.startsWith("http://") || lp.startsWith("https://");
@@ -215,8 +166,146 @@ public class TokenStore {
         return true;
     }
 
-public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 10 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45 && Character.isDigit(s.charAt(i+5)) && s.charAt(i+7) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); boolean _noSep = s.indexOf((char)124) < 0 && s.indexOf("%7C") < 0; e.time = _noSep ? "" : p[0]; String g2 = _noSep ? "" : p[1]; if (g2 != null && g2.equals("未知")) g2 = ""; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { e.appid = g2; String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } if (e.appid.length() == 0 && game != null && game.length() > 0) e.appid = appidOfGame(game); e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = _noSep ? s : p[2]; e.mode = _noSep ? "" : p[3]; e.note = _noSep ? "" : p[4]; if (e.note.startsWith("cap") || e.note.equals("login") || e.note.startsWith("hang")) { e.mode = e.note.startsWith("cap") ? "capture" : (e.note.startsWith("hang") ? "hang_up" : e.note); e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.startsWith("cap") || mt.equals("login") || mt.startsWith("hang")) { e.mode = mt.startsWith("cap") ? "capture" : (mt.startsWith("hang") ? "hang_up" : mt); e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);  e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
-        if (e.accessToken.isEmpty() && !e.raw.isEmpty() && !e.raw.contains("=")) e.accessToken = e.raw;
+    private static boolean isDigitAt(String s, int i) {
+        return i >= 0 && i < s.length() && s.charAt(i) >= (char) 48 && s.charAt(i) <= (char) 57;
+    }
+
+    private static int firstDateIndex(String s) {
+        for (int i = 0; i + 9 < s.length(); i++) {
+            if (isDigitAt(s, i) && isDigitAt(s, i + 1) && isDigitAt(s, i + 2) && isDigitAt(s, i + 3)
+                    && s.charAt(i + 4) == (char) 45
+                    && isDigitAt(s, i + 5) && isDigitAt(s, i + 6)
+                    && s.charAt(i + 7) == (char) 45
+                    && isDigitAt(s, i + 8) && isDigitAt(s, i + 9)) return i;
+        }
+        return -1;
+    }
+
+    private static int dateTokenEnd(String s) {
+        if (s.length() < 10) return s.length();
+        int n = 10;
+        if (n + 2 < s.length() && (s.charAt(n) == (char) 32 || s.charAt(n) == (char) 84)
+                && isDigitAt(s, n + 1) && isDigitAt(s, n + 2)) n = n + 3;
+        else return n;
+        if (n + 2 < s.length() && s.charAt(n) == (char) 58
+                && isDigitAt(s, n + 1) && isDigitAt(s, n + 2)) n = n + 3;
+        return n;
+    }
+
+    private static String stripLead(String s) {
+        int i = 0;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == (char) 32 || c == (char) 124) i++; else break;
+        }
+        return s.substring(i);
+    }
+
+    private static java.util.List<String> splitByPipe(String s) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        int start = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == (char) 124) { out.add(s.substring(start, i)); start = i + 1; }
+        }
+        out.add(s.substring(start));
+        return out;
+    }
+
+    public static Entry parseLine(String line, String game) {
+        if (line == null) return null;
+        String s = line.trim();
+        if (s.length() == 0) return null;
+        Entry e = new Entry();
+        String preNote = "";
+        int di = firstDateIndex(s);
+        String date = "";
+        String rest;
+        if (di > 0) preNote = s.substring(0, di).trim();
+        if (di >= 0) {
+            int de = di + dateTokenEnd(s.substring(di));
+            date = s.substring(di, de).trim();
+            rest = stripLead(s.substring(de));
+        } else {
+            rest = s.trim();
+        }
+        java.util.List<String> parts = splitByPipe(rest);
+        int tokIdx = -1;
+        for (int i = 0; i < parts.size(); i++) {
+            if (isExplicitToken(parts.get(i).trim())) { tokIdx = i; break; }
+        }
+        if (tokIdx < 0) {
+            int bestScore = -1; int best = -1;
+            for (int i = 0; i < parts.size(); i++) {
+                int sc = tokenScore(parts.get(i).trim());
+                if (sc > bestScore) { bestScore = sc; best = i; }
+            }
+            if (bestScore >= 2) tokIdx = best;
+        }
+        String gameName = "";
+        String appid = "";
+        String mode = "";
+        java.util.List<String> notes = new java.util.ArrayList<String>();
+        if (tokIdx >= 0) {
+            for (int i = 0; i < parts.size(); i++) {
+                if (i == tokIdx) continue;
+                String p = parts.get(i).trim();
+                if (p.length() == 0) continue;
+                if (isModeWord(p)) { if (mode.length() == 0) mode = p; continue; }
+                if (p.matches("[0-9]{5,12}")) { if (appid.length() == 0) appid = p; continue; }
+                if (gameName.length() == 0 && !p.matches("[0-9]+")) { gameName = p; continue; }
+                notes.add(p);
+            }
+        } else {
+            for (int i = 0; i < parts.size(); i++) {
+                String p = parts.get(i).trim();
+                if (p.length() >= 6 && !isModeWord(p) && !p.matches("[0-9]+")) { tokIdx = i; break; }
+            }
+            if (tokIdx < 0) {
+                String only = rest.trim();
+                if (only.startsWith("|")) only = stripLead(only);
+                parts.clear();
+                parts.add(only);
+                tokIdx = 0;
+            }
+        }
+        String tokRaw = parts.get(tokIdx).trim().replace("%7C", "|");
+        if (tokRaw.length() == 0) tokRaw = rest.trim();
+        e.raw = tokRaw;
+        e.accessToken = extractToken(tokRaw);
+        if (e.accessToken.length() == 0 && tokRaw.length() > 0 && tokRaw.indexOf((char) 61) < 0) e.accessToken = tokRaw;
+        if (appid.length() == 0) {
+            String a = appidOfUrl(tokRaw);
+            if (a != null) appid = a;
+            else if (tokRaw.matches("[0-9]{5,12}")) appid = tokRaw;
+        }
+        if (appid.length() == 0 && game != null && game.length() > 0) appid = appidOfGame(game);
+        if (appid.length() == 0) {
+            String a = appidOfUrl(s);
+            if (a != null) appid = a;
+        }
+        if (gameName.length() == 0 && appid.length() > 0) {
+            String nm = gameOfAppid(appid);
+            if (nm != null && nm.length() > 0) gameName = nm;
+        }
+        if (gameName.length() == 0 && game != null && game.length() > 0) gameName = game;
+        e.time = date;
+        e.appid = appid;
+        e.game = gameName;
+        e.mode = mode;
+        StringBuilder nb = new StringBuilder();
+        for (int i = 0; i < notes.size(); i++) {
+            if (nb.length() > 0) nb.append((char) 32);
+            nb.append(notes.get(i));
+        }
+        String note = nb.toString();
+        if (note.length() == 0) note = preNote;
+        else if (preNote.length() > 0) note = preNote + " " + note;
+        e.note = note.replace((char) 10, (char) 32).replace((char) 13, (char) 32).replace((char) 124, (char) 47);
+        int mk = e.raw.lastIndexOf((char) 124);
+        if (mk > 0) {
+            String mt = e.raw.substring(mk + 1).trim();
+            if (isModeWord(mt)) { if (e.mode.length() == 0) e.mode = mt; e.raw = e.raw.substring(0, mk); }
+        }
         e.openid = grab(e.raw, "openid=([^&\\s]+)");
         e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
         e.expiresIn = grab(e.raw, "expires_in=([^&\\s]+)");

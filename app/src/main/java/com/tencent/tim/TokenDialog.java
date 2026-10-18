@@ -47,7 +47,7 @@ public class TokenDialog {
         final int total = rest0.size();
         final int autoCnt = res == null ? 0 : res.resolved.size();
         final TokenStore.Entry pe0 = TokenStore.parseLine(line0, "");
-        String preview = (pe0 == null || pe0.accessToken == null || pe0.accessToken.length() == 0) ? line0 : pe0.accessToken;
+        String preview = (pe0 == null || pe0.accessToken == null || pe0.accessToken.length() == 0) ? (line0.length() > 60 ? line0.substring(0, 60) + "..." : line0) : pe0.accessToken;
         
         java.util.List<String> gl = new java.util.ArrayList<String>(TokenStore.importGames());
         for (String ag : TokenStore.allGames()) { if (ag != null && ag.length() > 0 && !gl.contains(ag)) gl.add(ag); }

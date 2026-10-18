@@ -882,6 +882,7 @@ private void setupImmersiveMode() {
                     org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
                     String bestVer = "";
                     String bestUrl = "";
+                    long bestSize = 0;
                     for (int i = 0; i < arr.length(); i++) {
                         org.json.JSONObject rel = arr.getJSONObject(i);
                         if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
@@ -891,16 +892,28 @@ private void setupImmersiveMode() {
                         if (!bestVer.isEmpty() && compareVersion(ver, bestVer) <= 0) continue;
                         org.json.JSONArray assets = rel.optJSONArray("assets");
                         if (assets == null || assets.length() == 0) continue;
-                        String apkUrl = assets.getJSONObject(0).optString("browser_download_url", "");
+                        String apkUrl = "";
+                        long apkSize = 0;
+                        for (int a = 0; a < assets.length(); a++) {
+                            org.json.JSONObject as = assets.optJSONObject(a);
+                            if (as == null) continue;
+                            String nm = as.optString("name", "").toLowerCase();
+                            String u2 = as.optString("browser_download_url", "");
+                            if (u2.isEmpty()) continue;
+                            if (nm.endsWith(".apk")) { apkUrl = u2; apkSize = as.optLong("size", 0); break; }
+                            if (apkUrl.isEmpty()) { apkUrl = u2; apkSize = as.optLong("size", 0); }
+                        }
                         if (apkUrl.isEmpty()) continue;
                         bestVer = ver;
                         bestUrl = apkUrl;
+                        bestSize = apkSize;
                     }
                     String currentVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
                     if (!bestVer.isEmpty() && compareVersion(bestVer, currentVersion) > 0) {
                         final String fv = bestVer;
                         final String fu = bestUrl;
-                        runOnUiThread(() -> showUpdateDialog(fv, fu));
+                        final long fz = bestSize;
+                        runOnUiThread(() -> showUpdateDialog(fv, fu, fz));
                     }
                 }
                 conn.disconnect();
@@ -928,7 +941,7 @@ private void setupImmersiveMode() {
         return 0;
     }
 
-    private void showUpdateDialog(String newVersion, String url) {
+    private void showUpdateDialog(String newVersion, String url, long size) {
         final android.app.Dialog dlg = new android.app.Dialog(this);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         if (dlg.getWindow() != null) {
@@ -965,7 +978,7 @@ private void setupImmersiveMode() {
         btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
         btnOk.setOnClickListener(v -> {
             dlg.dismiss();
-            Updater.start(MainActivity.this, url, () -> runOnUiThread(() -> showUpdateDialog(newVersion, url)));
+            Updater.start(MainActivity.this, url, size, () -> runOnUiThread(() -> showUpdateDialog(newVersion, url, size)));
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp2.leftMargin = (int)(6 * getResources().getDisplayMetrics().density);
