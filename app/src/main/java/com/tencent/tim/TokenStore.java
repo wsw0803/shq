@@ -112,13 +112,14 @@ public class TokenStore {
   else if (_rs.endsWith("|hang_up")) _rs = _rs.substring(0, _rs.length() - 8);
   else break;
  }
- rawSafe = _rs; sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
+ rawSafe = _rs; sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); if (note != null && note.length() > 0) sb.append((char) 124).append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)); return sb.toString(); }
 
-            public static Entry parseAnyInput(String text) {
+                public static Entry parseAnyInput(String text) {
         if (text == null) return null;
         String s = text.trim();
         if (s.length() == 0) return null;
         Entry e = new Entry();
+        e.time = ""; e.game = ""; e.mode = ""; e.note = ""; e.appid = "";
         String[] seg = s.split("\\|", -1);
         java.util.List<String> raw = new java.util.ArrayList<String>();
         for (int i = 0; i < seg.length; i++) raw.add(seg[i].trim());
@@ -135,53 +136,60 @@ public class TokenStore {
             }
             if (bestScore >= 2) ti = best;
         }
-        if (ti >= 0) {
-            String tokRaw = raw.get(ti).replace("%7C", "|");
-            e.raw = tokRaw;
-            e.accessToken = extractToken(tokRaw);
-            if (e.accessToken.length() == 0 && tokRaw.length() > 0 && tokRaw.indexOf((char) 61) < 0) e.accessToken = tokRaw;
-            if (ti >= 1) {
-                String g = raw.get(ti - 1);
-                if (g.length() > 0 && !g.matches("\\d{4}-\\d{2}-\\d{2}.*") && !isModeWord(g)) {
-                    if (g.matches("\\d{5,12}")) e.appid = g; else e.game = g;
-                }
-            }
-            for (int i = ti + 1; i < raw.size(); i++) {
-                if (isModeWord(raw.get(i))) { e.mode = raw.get(i); break; }
-            }
-            String left = (ti >= 1) ? raw.get(ti - 1) : "";
-            java.util.regex.Matcher dm = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?").matcher(left);
-            if (dm.find()) {
-                e.time = dm.group();
-                String pre = left.substring(0, dm.start()).trim();
-                if (pre.length() > 0 && e.game.length() == 0) e.game = pre;
-            } else if (left.length() > 0 && !left.matches("\\d{5,12}") && !isModeWord(left)) {
-                if (e.game.length() == 0) e.game = left;
-            }
-            if (e.time == null) e.time = "";
-            if (e.game == null) e.game = "";
-            if (e.mode == null) e.mode = "";
-            if (e.appid == null) e.appid = "";
-            e.note = "";
-            if (e.appid.length() == 0) { String a = appidOfUrl(e.raw); if (a != null) e.appid = a; }
-            e.openid = grab(e.raw, "openid=([^&\\s]+)");
-            e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
-            e.expiresIn = grab(e.raw, "expires_in=([^&\\s]+)");
+        if (ti < 0) {
+            String only = raw.size() > 0 ? raw.get(0) : s;
+            e.raw = only;
+            e.accessToken = extractToken(only);
+            if (e.accessToken.length() == 0 && only.indexOf((char) 61) < 0) e.accessToken = only;
+            String a = appidOfUrl(only);
+            e.appid = a == null ? "" : a;
+            e.openid = grab(only, "openid=([^&\\s]+)");
+            e.payToken = grab(only, "pay_token=([^&\\s]+)");
+            e.expiresIn = grab(only, "expires_in=([^&\\s]+)");
             return e;
         }
-        String only = raw.size() > 0 ? raw.get(0) : s;
-        e.raw = only;
-        e.accessToken = extractToken(only);
-        if (e.accessToken.length() == 0 && only.indexOf((char) 61) < 0) e.accessToken = only;
-        String a2 = appidOfUrl(only);
-        e.appid = a2 == null ? "" : a2;
-        e.game = "";
-        e.mode = "";
-        e.note = "";
-        e.time = "";
-        e.openid = grab(only, "openid=([^&\\s]+)");
-        e.payToken = grab(only, "pay_token=([^&\\s]+)");
-        e.expiresIn = grab(only, "expires_in=([^&\\s]+)");
+        String tokRaw = raw.get(ti).replace("%7C", "|");
+        e.raw = tokRaw;
+        e.accessToken = extractToken(tokRaw);
+        if (e.accessToken.length() == 0 && tokRaw.length() > 0 && tokRaw.indexOf((char) 61) < 0) e.accessToken = tokRaw;
+        java.util.List<String> others = new java.util.ArrayList<String>();
+        java.util.List<String> leftovers = new java.util.ArrayList<String>();
+        for (int i = 0; i < raw.size(); i++) {
+            if (i == ti) continue;
+            String p = raw.get(i).replace("%7C", "|");
+            if (p.length() == 0) continue;
+            if (e.time.length() == 0) {
+                java.util.regex.Matcher dm = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?").matcher(p);
+                if (dm.find()) {
+                    e.time = dm.group();
+                    String pre = p.substring(0, dm.start()).trim();
+                    String post = p.substring(dm.end()).trim();
+                    if (pre.length() > 0) leftovers.add(pre);
+                    if (post.length() > 0) leftovers.add(post);
+                    continue;
+                }
+            }
+            others.add(p);
+        }
+        for (int i = 0; i < others.size(); i++) {
+            String p = others.get(i);
+            if (e.mode.length() == 0 && isModeWord(p)) { e.mode = p; continue; }
+            if (e.appid.length() == 0 && p.matches("\\d{5,12}")) { e.appid = p; continue; }
+            if (e.game.length() == 0) { e.game = p; continue; }
+            if (e.note.length() == 0) { e.note = p; continue; }
+            e.note = e.note + " " + p;
+        }
+        for (int i = 0; i < leftovers.size(); i++) {
+            String p = leftovers.get(i);
+            if (e.mode.length() == 0 && isModeWord(p)) { e.mode = p; continue; }
+            if (e.game.length() == 0) { e.game = p; continue; }
+            if (e.note.length() == 0) { e.note = p; continue; }
+            e.note = e.note + " " + p;
+        }
+        if (e.appid.length() == 0) { String a = appidOfUrl(e.raw); if (a != null) e.appid = a; }
+        e.openid = grab(e.raw, "openid=([^&\\s]+)");
+        e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
+        e.expiresIn = grab(e.raw, "expires_in=([^&\\s]+)");
         return e;
     }
     private static boolean isExplicitToken(String p) {
