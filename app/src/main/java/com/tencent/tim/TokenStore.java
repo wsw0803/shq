@@ -73,7 +73,7 @@ public class TokenStore {
         public String openid = "";
         public String payToken = "";
         public String expiresIn = "";
-        public String note = "";
+        public String appid = ""; public String note = "";
 
         public String shortToken() {
             if (accessToken.length() <= 12) return accessToken;
@@ -114,7 +114,7 @@ public class TokenStore {
  }
  rawSafe = _rs; if (note != null && note.length() > 0) sb.append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)).append(" "); sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
 
-public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 10 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45 && Character.isDigit(s.charAt(i+5)) && s.charAt(i+7) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); e.time = p[0]; String g2 = p[1]; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = p[2]; e.mode = p[3]; e.note = p[4]; if (e.note.startsWith("cap") || e.note.equals("login") || e.note.startsWith("hang")) { e.mode = e.note.startsWith("cap") ? "capture" : (e.note.startsWith("hang") ? "hang_up" : e.note); e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.startsWith("cap") || mt.equals("login") || mt.startsWith("hang")) { e.mode = mt.startsWith("cap") ? "capture" : (mt.startsWith("hang") ? "hang_up" : mt); e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);  e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
+public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 10 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45 && Character.isDigit(s.charAt(i+5)) && s.charAt(i+7) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); e.time = p[0]; String g2 = p[1]; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { e.appid = g2; String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } if (e.appid.length() == 0 && game != null && game.length() > 0) e.appid = appidOfGame(game); e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = p[2]; e.mode = p[3]; e.note = p[4]; if (e.note.startsWith("cap") || e.note.equals("login") || e.note.startsWith("hang")) { e.mode = e.note.startsWith("cap") ? "capture" : (e.note.startsWith("hang") ? "hang_up" : e.note); e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.startsWith("cap") || mt.equals("login") || mt.startsWith("hang")) { e.mode = mt.startsWith("cap") ? "capture" : (mt.startsWith("hang") ? "hang_up" : mt); e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);  e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
         if (e.accessToken.isEmpty() && !e.raw.isEmpty() && !e.raw.contains("=")) e.accessToken = e.raw;
         e.openid = grab(e.raw, "openid=([^&\\s]+)");
         e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
@@ -355,7 +355,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         return true;
     }
 
-    public static boolean updateNote(String game, String token, String note) { File f = gameFile(game); if (!f.exists()) return false; java.util.List<String> lines = new java.util.ArrayList<String>(); boolean found = false; try { Scanner sc = new Scanner(f, java.nio.charset.StandardCharsets.UTF_8.name()); while (sc.hasNextLine()) { String line = sc.nextLine(); if (!found && lineHasToken(line, token)) { String nt = note == null ? new String() : note.trim(); Entry _pe = parseLine(line, ""); lines.add(joinLine(nt, _pe.time, _pe.game, _pe.raw.replace("|", "%7C"), _pe.mode)); found = true; } else { lines.add(line); } } sc.close(); } catch (Exception ex) { lastError = String.valueOf(ex); return false; } if (!found) return false; if (!writeLinesAtomic(f, lines)) return false; return true; } public static void copy(String label, String text, android.content.Context c) {
+    public static boolean updateNote(String game, String token, String note) { File f = gameFile(game); if (!f.exists()) return false; java.util.List<String> lines = new java.util.ArrayList<String>(); boolean found = false; try { Scanner sc = new Scanner(f, java.nio.charset.StandardCharsets.UTF_8.name()); while (sc.hasNextLine()) { String line = sc.nextLine(); if (!found && lineHasToken(line, token)) { String nt = note == null ? new String() : note.trim(); Entry _pe = parseLine(line, ""); lines.add(joinLine(nt, _pe.time, _pe.appid.length() > 0 ? _pe.appid : _pe.game, _pe.raw.replace("|", "%7C"), _pe.mode)); found = true; } else { lines.add(line); } } sc.close(); } catch (Exception ex) { lastError = String.valueOf(ex); return false; } if (!found) return false; if (!writeLinesAtomic(f, lines)) return false; return true; } public static void copy(String label, String text, android.content.Context c) {
         if (c == null) return;
         try {
             android.content.ClipboardManager cm =
@@ -382,7 +382,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                     Entry e = parseLine(ln, g);
                     if (e == null || e.accessToken.isEmpty()) continue;
                     if (!seen.add(e.accessToken)) continue;
-                    String rawSafe = e.raw.replace("|", "%7C"); w.append(joinLine(e.note, e.time, e.game, rawSafe, e.mode));
+                    String rawSafe = e.raw.replace("|", "%7C"); w.append(joinLine(e.note, e.time, e.appid.length() > 0 ? e.appid : e.game, rawSafe, e.mode));
                     
                     w.append((char)10);
                     n++;
@@ -411,12 +411,12 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                 Entry pe = parseLine(line, "");
                 String game = gameOfUrl(line); if ((game == null || game.isEmpty()) && pe != null && pe.game != null && !pe.game.isEmpty() && allGames().contains(pe.game)) game = pe.game;
                 if (game != null && !game.isEmpty()) {
-                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, game, pe.raw.replace("|", "%7C"), pe.mode));
+                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, pe.appid.length() > 0 ? pe.appid : game, pe.raw.replace("|", "%7C"), pe.mode));
                     if (saveGameEntry(game, keep)) res.added++;
                 } else if (pe != null && !pe.accessToken.isEmpty()) {
                     String g3 = resolveGame("", line);
                     if (!g3.isEmpty()) {
-                        String keep3 = pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, g3, pe.raw.replace("|", "%7C"), pe.mode);
+                        String keep3 = pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, pe.appid.length() > 0 ? pe.appid : g3, pe.raw.replace("|", "%7C"), pe.mode);
                         if (saveGameEntry(g3, keep3)) res.added++;
                         else res.unknownLines.add(line);
                     } else {
