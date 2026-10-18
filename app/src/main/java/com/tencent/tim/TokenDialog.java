@@ -595,6 +595,7 @@ public class TokenDialog {
                 String txt = et.getText().toString().trim();
                 if (txt.isEmpty()) { android.widget.Toast.makeText(c, "内容为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
                 String raw = txt; if (raw.indexOf((char)124) >= 0) { String[] seg = raw.split(String.valueOf((char)124)); for (String sg : seg) { String tg = sg.trim(); if (tg.contains("access_token=") || tg.startsWith("auth://")) { raw = tg; break; } } }
+                { int _cutIdx = raw.indexOf("%7C"); if (_cutIdx < 0) _cutIdx = raw.indexOf((char)124); if (_cutIdx > 0) raw = raw.substring(0, _cutIdx).trim(); }
                 if (!raw.contains("access_token=")) raw = "access_token=" + raw;
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
