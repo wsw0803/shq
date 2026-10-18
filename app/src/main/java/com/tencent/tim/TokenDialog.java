@@ -610,7 +610,7 @@ public class TokenDialog {
                         if (num) { aid = tg; break; }
                     }
                 }
-                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(games[pick[0]]);
+                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(games[pick[0]]); { boolean _ok = aid != null && aid.length() > 0; if (_ok) { for (int _i = 0; _i < aid.length(); _i++) if (!Character.isDigit(aid.charAt(_i))) { _ok = false; break; } } if (!_ok) aid = null; }
                 if (aid == null || aid.isEmpty()) {
                     d.dismiss();
                     if (parent != null) parent.dismiss();

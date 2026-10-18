@@ -149,7 +149,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                 String name = line.substring(0, k).trim();
                 String appid = line.substring(k + 1).trim();
                 if (name.isEmpty() || appid.isEmpty()) continue;
-                if (seen.add(appid)) out.add(new String[]{name, appid});
+                { boolean _n = true; for (int _i = 0; _i < appid.length(); _i++) if (!Character.isDigit(appid.charAt(_i))) { _n = false; break; } if (!_n) continue; } if (seen.add(appid)) out.add(new String[]{name, appid});
             }
         } catch (Throwable ignored) {}
         return out;
