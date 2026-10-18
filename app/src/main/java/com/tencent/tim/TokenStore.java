@@ -73,7 +73,7 @@ public class TokenStore {
         public String openid = "";
         public String payToken = "";
         public String expiresIn = "";
-        public String appid = ""; public String note = "";
+        public String appid = ""; public String note = ""; public String line = "";
 
         public String shortToken() {
             if (accessToken.length() <= 12) return accessToken;
@@ -149,7 +149,15 @@ public class TokenStore {
         for (int i = 0; i < parts.size(); i++) {
             String p = parts.get(i);
             if (isExplicitToken(p)) { if (tokenPart.length() == 0) tokenPart = p; continue; }
-            if (timePart.length() == 0 && p.matches("\\d{4}-\\d{2}-\\d{2}.*")) { timePart = p; continue; }
+            if (timePart.length() == 0) {
+                java.util.regex.Matcher _dm = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2})?").matcher(p);
+                if (_dm.find()) {
+                    timePart = _dm.group();
+                    String _rest = (p.substring(0, _dm.start()) + " " + p.substring(_dm.end())).trim();
+                    if (_rest.length() > 0) remain.add(_rest);
+                    continue;
+                }
+            }
             if (modePart.length() == 0 && isModeWord(p)) { modePart = p; continue; }
             if (appidPart.length() == 0 && p.matches("\\d{5,12}")) { appidPart = p; continue; }
             remain.add(p);
@@ -240,7 +248,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         try {
             Scanner sc = new Scanner(f, "UTF-8");
             while (sc.hasNextLine()) {
-                Entry e = parseLine(sc.nextLine(), game);
+                String _rawLine = sc.nextLine(); Entry e = parseLine(_rawLine, game); if (e != null) e.line = _rawLine;
                 if (e != null && !e.accessToken.isEmpty()) list.add(e);
             }
             sc.close();
@@ -488,6 +496,43 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         }
         if (!writeLinesAtomic(f, keep)) { lastError = "delete fail"; return false; }
         return true;
+    }
+
+    public static boolean deleteEntryByLine(String game, String line) {
+        if (line == null) return false;
+        File f = gameFile(game);
+        if (!f.exists()) return false;
+        java.util.List<String> keep = new java.util.ArrayList<String>();
+        boolean removed = false;
+        try {
+            Scanner sc = new Scanner(f, "UTF-8");
+            while (sc.hasNextLine()) {
+                String ln = sc.nextLine();
+                if (!removed && ln.equals(line)) { removed = true; continue; }
+                keep.add(ln);
+            }
+            sc.close();
+        } catch (Exception e) {
+            lastError = "read fail: " + e.getMessage();
+            return false;
+        }
+        if (!removed) return false;
+        if (!writeLinesAtomic(f, keep)) { lastError = "delete fail"; return false; }
+        invalidateGamesCache();
+        return true;
+    }
+
+    public static java.util.List<String> sortedGames() {
+        java.util.List<String> list = new java.util.ArrayList<String>(listGameFolders());
+        java.util.Collections.sort(list, new java.util.Comparator<String>() {
+            public int compare(String a, String b) {
+                int la = a == null ? 0 : a.length();
+                int lb = b == null ? 0 : b.length();
+                if (la != lb) return la - lb;
+                return (a == null ? "" : a).compareTo(b == null ? "" : b);
+            }
+        });
+        return list;
     }
 
     public static boolean updateNote(String game, String token, String note) { File f = gameFile(game); if (!f.exists()) return false; java.util.List<String> lines = new java.util.ArrayList<String>(); boolean found = false; try { Scanner sc = new Scanner(f, java.nio.charset.StandardCharsets.UTF_8.name()); while (sc.hasNextLine()) { String line = sc.nextLine(); if (!found && lineHasToken(line, token)) { String nt = note == null ? new String() : note.trim(); Entry _pe = parseLine(line, ""); lines.add(joinLine(nt, _pe.time, appidCol(_pe.appid, _pe.game, _pe.raw), _pe.raw.replace("|", "%7C"), _pe.mode)); found = true; } else { lines.add(line); } } sc.close(); } catch (Exception ex) { lastError = String.valueOf(ex); return false; } if (!found) return false; if (!writeLinesAtomic(f, lines)) return false; return true; } public static void copy(String label, String text, android.content.Context c) {

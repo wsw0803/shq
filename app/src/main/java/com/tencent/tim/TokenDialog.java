@@ -71,6 +71,13 @@ public class TokenDialog {
         tip.setGravity(Gravity.CENTER);
         tip.setPadding(0, dp(c, 8), 0, dp(c, 12));
         root.addView(tip);
+        TextView tokView = new TextView(c);
+        tokView.setText("Token: " + preview);
+        tokView.setTextColor(0xFF34D399);
+        tokView.setTextSize(11);
+        tokView.setGravity(Gravity.CENTER);
+        tokView.setPadding(0, 0, 0, dp(c, 10));
+        root.addView(tokView);
         final Dialog dlg = new Dialog(c);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
         if (dlg.getWindow() != null) dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
@@ -274,7 +281,7 @@ public class TokenDialog {
         root.addView(tip);
 
         final List<String> tabs = new ArrayList<String>();
-        for (String g : TokenStore.listGameFolders()) {
+        for (String g : TokenStore.sortedGames()) {
             if (!TokenStore.loadGame(g).isEmpty()) tabs.add(g);
         }
 
@@ -547,7 +554,7 @@ public class TokenDialog {
         ok.setPadding(0, dp(c, 10), 0, dp(c, 10));
         ok.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                boolean done = TokenStore.deleteEntry(e.game, e.accessToken);
+                boolean done = TokenStore.deleteEntryByLine(e.game, e.line);
                 d.dismiss();
                 android.widget.Toast.makeText(c, done ? "已删除" : "删除失败", android.widget.Toast.LENGTH_SHORT).show();
                 if (done) {
@@ -712,7 +719,8 @@ public class TokenDialog {
                 TokenStore.Entry pe = TokenStore.parseAnyInput(txt);
                 if (pe == null || pe.accessToken == null || pe.accessToken.length() < 4) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
                 if (pe.accessToken.matches("[0-9]+") || pe.accessToken.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*")) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
-                String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
+                String _now = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
+                String time = (pe.time != null && pe.time.length() > 0) ? pe.time : _now;
                 String note = noteEt.getText().toString().trim();
                 String game = games[pick[0]];
                 String aid = pe.appid;
