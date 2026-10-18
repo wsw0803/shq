@@ -207,17 +207,20 @@ public class TokenStore {
         int tokIdx = -1;
         int tokScore = -1;
         java.util.List<String> notes = new java.util.ArrayList<String>();
+        java.util.Set<String> noteSeen = new java.util.HashSet<String>();
         for (int i = 0; i < parts.size(); i++) {
-            String _raw = parts.get(i);
-            String _p = _raw.trim();
-            if (_p.length() == 0) continue;
-            if (isDateSeg(_p)) continue;
-            int _di = firstDateIndex(_p);
-            if (_di > 0) {
-                String _note = _p.substring(0, _di).trim();
-                if (_note.length() > 0) notes.add(_note);
-                parts.set(i, _p.substring(_di).trim());
+            String p0 = parts.get(i).trim();
+            if (p0.length() == 0) { parts.set(i, ""); continue; }
+            int di0 = firstDateIndex(p0);
+            if (di0 < 0) continue;
+            if (di0 > 0) {
+                String nt0 = p0.substring(0, di0).trim();
+                if (nt0.length() > 0 && noteSeen.add(nt0)) notes.add(nt0);
             }
+            int de0 = di0 + dateTokenEnd(p0.substring(di0));
+            if (de0 > p0.length()) de0 = p0.length();
+            if (date.length() == 0) date = p0.substring(di0, de0).trim();
+            parts.set(i, stripLead(p0.substring(de0)));
         }
         for (int i = 0; i < parts.size(); i++) {
             String raw = parts.get(i);
@@ -240,7 +243,7 @@ public class TokenStore {
                 if (digits) { if (appid.length() == 0) appid = p; continue; }
             }
             if (gameName.length() == 0 && isKnownGame(p)) { gameName = p; continue; }
-            notes.add(p);
+            if (noteSeen.add(p)) notes.add(p);
         }
         if (gameName.length() == 0 && game != null && game.length() > 0) gameName = game;
         String tokRaw = "";
