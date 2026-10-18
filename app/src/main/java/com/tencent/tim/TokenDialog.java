@@ -597,15 +597,38 @@ public class TokenDialog {
             public void onClick(View v) {
                 String txt = et.getText().toString().trim();
                 if (txt.isEmpty()) { android.widget.Toast.makeText(c, "内容为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
-                String raw = txt; if (raw.indexOf((char)124) >= 0) { String[] seg = raw.split(String.valueOf((char)124)); String _pick = "".trim(); for (String sg : seg) { String tg = sg.trim(); if (tg.contains("access_token=") || tg.startsWith("auth://")) { _pick = tg; break; } } if (_pick.length() == 0) { for (String sg : seg) { String tg = sg.trim(); if (tg.length() >= 16 && !tg.matches("[0-9]+") && !tg.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*") && tg.indexOf(":") < 0) { _pick = tg; break; } } } if (_pick.length() > 0) raw = _pick; }
-                { int _cutIdx = raw.indexOf("%7C"); if (_cutIdx < 0) _cutIdx = raw.indexOf((char)124); if (_cutIdx > 0) raw = raw.substring(0, _cutIdx).trim(); }
-                if (!raw.contains("access_token=")) raw = "access_token=" + raw; String _tk = raw.substring(raw.indexOf("access_token=") + 13).trim(); if (_tk.length() < 8 || _tk.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*") || _tk.indexOf((char)32) >= 0) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
+                String[] seg = txt.split(String.valueOf((char)124));
+                if (txt.indexOf("%7C") >= 0) {
+                    java.util.List<String> parts = new java.util.ArrayList<String>();
+                    for (String p0 : seg) { for (String q0 : p0.split("%7C")) parts.add(q0); }
+                    seg = parts.toArray(new String[0]);
+                }
+                String raw = txt;
+                String tok = "";
+                for (String sg : seg) { String tg = sg.trim(); if (tg.contains("access_token=") || tg.startsWith("auth://") || tg.startsWith("http://") || tg.startsWith("https://")) { tok = tg; break; } }
+                if (tok.isEmpty()) {
+                    for (String sg : seg) {
+                        String tg = sg.trim();
+                        if (tg.length() < 8) continue;
+                        if (tg.matches("[0-9]+")) continue;
+                        if (tg.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*")) continue;
+                        if (tg.indexOf((char)32) >= 0) continue;
+                        if (tg.equals("capture") || tg.equals("login") || tg.equals("hang_up")) continue;
+                        if (tok.isEmpty() || tg.length() > tok.length()) tok = tg;
+                    }
+                }
+                if (!tok.isEmpty()) raw = tok;
+                else if (seg.length > 1) { android.widget.Toast.makeText(c, "未识别到有效 token（有 appid 时请确保 token 段以 access_token= 开头或长度不少于 8 位）", android.widget.Toast.LENGTH_LONG).show(); return; }
+                if (!raw.contains("access_token=")) raw = "access_token=" + raw;
+                String _tk = raw.substring(raw.indexOf("access_token=") + 13).trim();
+                int _amp0 = _tk.indexOf((char)38); if (_amp0 > 0) _tk = _tk.substring(0, _amp0).trim();
+                int _sp0 = _tk.indexOf((char)32); if (_sp0 > 0) _tk = _tk.substring(0, _sp0).trim();
+                if (_tk.length() < 8 || _tk.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*")) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
                 String aid = TokenStore.appidOfUrl(raw);
                 if (aid == null || aid.isEmpty()) {
-                    String[] all = txt.split(String.valueOf((char)124));
-                    for (String sg : all) {
+                    for (String sg : seg) {
                         String tg = sg.trim();
                         if (tg.length() < 6) continue;
                         boolean num = true;
@@ -613,7 +636,8 @@ public class TokenDialog {
                         if (num) { aid = tg; break; }
                     }
                 }
-                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(games[pick[0]]); { boolean _ok = aid != null && aid.length() > 0; if (_ok) { for (int _i = 0; _i < aid.length(); _i++) if (!Character.isDigit(aid.charAt(_i))) { _ok = false; break; } } if (!_ok) aid = null; }
+                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(games[pick[0]]);
+                { boolean _ok = aid != null && aid.length() > 0; if (_ok) { for (int _i = 0; _i < aid.length(); _i++) if (!Character.isDigit(aid.charAt(_i))) { _ok = false; break; } } if (!_ok) aid = null; }
                 if (aid == null || aid.isEmpty()) {
                     d.dismiss();
                     if (parent != null) parent.dismiss();
@@ -622,7 +646,7 @@ public class TokenDialog {
                     showChooseGameForTokens(c, one, 0);
                     return;
                 }
-                String line = TokenStore.joinLine(note, time, aid, raw, "capture");
+String line = TokenStore.joinLine(note, time, aid, raw, "capture");
                 boolean done = TokenStore.saveGameEntry(games[pick[0]], line);
                 android.widget.Toast.makeText(c, done ? "已保存到 " + games[pick[0]] : ("保存失败: " + TokenStore.lastError), android.widget.Toast.LENGTH_LONG).show();
                 if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }
