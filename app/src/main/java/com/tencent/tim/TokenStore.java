@@ -362,8 +362,11 @@ private static boolean isExplicitToken(String p) {
         if (n + 2 < s.length() && (s.charAt(n) == (char) 32 || s.charAt(n) == (char) 84)
                 && isDigitAt(s, n + 1) && isDigitAt(s, n + 2)) n = n + 3;
         else return n;
-        if (n + 2 < s.length() && s.charAt(n) == (char) 58
-                && isDigitAt(s, n + 1) && isDigitAt(s, n + 2)) n = n + 3;
+        for (int k = 0; k < 2; k++) {
+            if (n + 2 < s.length() && s.charAt(n) == (char) 58
+                    && isDigitAt(s, n + 1) && isDigitAt(s, n + 2)) n = n + 3;
+            else break;
+        }
         return n;
     }
 

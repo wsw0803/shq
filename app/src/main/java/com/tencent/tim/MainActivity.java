@@ -463,22 +463,7 @@ private void setupImmersiveMode() {
             android.net.Uri uri = data.getData();
             if (uri != null) {
                 try { getContentResolver().takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Throwable t) {}
-                try {
-                    android.net.Uri dir = null;
-                    try {
-                        androidx.documentfile.provider.DocumentFile df = androidx.documentfile.provider.DocumentFile.fromSingleUri(this, uri);
-                        if (df != null) { androidx.documentfile.provider.DocumentFile pr = df.getParentFile(); if (pr != null) dir = pr.getUri(); }
-                    } catch (Throwable t2) {}
-                    if (dir == null) {
-                        String us = uri.toString();
-                        int cut = us.lastIndexOf(47);
-                        if (cut > 0) { try { dir = android.net.Uri.parse(us.substring(0, cut)); } catch (Throwable t3) {} }
-                    }
-                    if (dir != null) {
-                        try { getContentResolver().takePersistableUriPermission(dir, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Throwable t4) {}
-                        getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putString(KEY_IMPORT_URI, dir.toString()).apply();
-                    }
-                } catch (Throwable t) {}
+                try { getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putString(KEY_IMPORT_URI, uri.toString()).apply(); } catch (Throwable t) {}
                 TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
                 addLog("[导入] 自动识别 " + res.added + " 条，待归类 " + res.unknownLines.size() + " 条，跳过 " + res.skipped + " 条" + (TokenStore.lastError.isEmpty() ? "" : ("，错误: " + TokenStore.lastError)));
                 TokenDialog.showChooseGameForTokens(this, res);
