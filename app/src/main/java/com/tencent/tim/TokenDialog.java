@@ -707,61 +707,32 @@ public class TokenDialog {
         ok.setPadding(0, dp(c, 16), 0, dp(c, 8));
         ok.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                String txt = et.getText().toString().trim();
+                                String txt = et.getText().toString().trim();
                 if (txt.isEmpty()) { android.widget.Toast.makeText(c, "内容为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
-                String[] seg = txt.split(String.valueOf((char)124));
-                if (txt.indexOf("%7C") >= 0) {
-                    java.util.List<String> parts = new java.util.ArrayList<String>();
-                    for (String p0 : seg) { for (String q0 : p0.split("%7C")) parts.add(q0); }
-                    seg = parts.toArray(new String[0]);
-                }
-                String raw = txt;
-                String tok = "";
-                for (String sg : seg) { String tg = sg.trim(); if (tg.contains("access_token=") || tg.startsWith("auth://") || tg.startsWith("http://") || tg.startsWith("https://")) { tok = tg; break; } }
-                if (tok.isEmpty()) {
-                    for (String sg : seg) {
-                        String tg = sg.trim();
-                        if (tg.length() < 8) continue;
-                        if (tg.matches("[0-9]+")) continue;
-                        if (tg.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*")) continue;
-                        if (tg.indexOf((char)32) >= 0) continue;
-                        if (tg.equals("capture") || tg.equals("login") || tg.equals("hang_up")) continue;
-                        if (tok.isEmpty() || tg.length() > tok.length()) tok = tg;
-                    }
-                }
-                if (!tok.isEmpty()) raw = tok;
-                else if (seg.length > 1) { android.widget.Toast.makeText(c, "未识别到有效 token（有 appid 时请确保 token 段以 access_token= 开头或长度不少于 8 位）", android.widget.Toast.LENGTH_LONG).show(); return; }
-                if (!raw.contains("access_token=")) raw = "access_token=" + raw;
-                String _tk = raw.substring(raw.indexOf("access_token=") + 13).trim();
-                int _amp0 = _tk.indexOf((char)38); if (_amp0 > 0) _tk = _tk.substring(0, _amp0).trim();
-                int _sp0 = _tk.indexOf((char)32); if (_sp0 > 0) _tk = _tk.substring(0, _sp0).trim();
-                if (_tk.length() < 8 || _tk.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*")) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
+                TokenStore.Entry pe = TokenStore.parseAnyInput(txt);
+                if (pe == null || pe.accessToken == null || pe.accessToken.length() < 4) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
+                if (pe.accessToken.matches("[0-9]+") || pe.accessToken.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*")) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
-                String aid = TokenStore.appidOfUrl(raw);
-                if (aid == null || aid.isEmpty()) {
-                    for (String sg : seg) {
-                        String tg = sg.trim();
-                        if (tg.length() < 6) continue;
-                        boolean num = true;
-                        for (int ci = 0; ci < tg.length(); ci++) if (!Character.isDigit(tg.charAt(ci))) { num = false; break; }
-                        if (num) { aid = tg; break; }
-                    }
-                }
-                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(games[pick[0]]);
-                { boolean _ok = aid != null && aid.length() > 0; if (_ok) { for (int _i = 0; _i < aid.length(); _i++) if (!Character.isDigit(aid.charAt(_i))) { _ok = false; break; } } if (!_ok) aid = null; }
-                if (aid == null || aid.isEmpty()) {
+                String game = games[pick[0]];
+                String aid = pe.appid;
+                if (aid == null || aid.isEmpty()) aid = TokenStore.appidOfGame(game);
+                String rawSafe = pe.raw.replace("|", "%7C");
+                String mode = (pe.mode == null || pe.mode.isEmpty()) ? "capture" : pe.mode;
+                boolean aidOk = aid != null && aid.length() > 0;
+                if (aidOk) { for (int _i = 0; _i < aid.length(); _i++) if (!Character.isDigit(aid.charAt(_i))) { aidOk = false; break; } }
+                if (!aidOk) {
                     d.dismiss();
                     if (parent != null) parent.dismiss();
                     java.util.List<String> one = new java.util.ArrayList<String>();
-                    one.add(TokenStore.joinLine(note, time, "", raw, "capture"));
+                    one.add(TokenStore.joinLine(note, time, "", rawSafe, mode));
                     showChooseGameForTokens(c, one, 0);
                     return;
                 }
-String line = TokenStore.joinLine(note, time, aid, raw, "capture");
-                int _rc = TokenStore.addEntry(games[pick[0]], line); boolean done = _rc >= 0;
-                android.widget.Toast.makeText(c, _rc == 1 ? ("已保存到 " + games[pick[0]]) : (_rc == 0 ? ("该 Token 已存在于 " + games[pick[0]]) : ("保存失败: " + TokenStore.lastError)), android.widget.Toast.LENGTH_LONG).show();
-                if (done) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, games[pick[0]], null); }
+                String line = TokenStore.joinLine(note, time, aid, rawSafe, mode);
+                int _rc = TokenStore.addEntry(game, line);
+                android.widget.Toast.makeText(c, _rc == 1 ? ("已保存到 " + game) : (_rc == 0 ? ("该 Token 已存在于 " + game) : ("保存失败: " + TokenStore.lastError)), android.widget.Toast.LENGTH_LONG).show();
+                if (_rc >= 0) { d.dismiss(); if (parent != null) parent.dismiss(); show(c, game, null); }
             }
         });
         root.addView(ok);
