@@ -88,7 +88,7 @@ public class TokenDialog {
             btn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     int count = 0;
-                    for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String aid2 = TokenStore.appidOfGame(g); if (aid2 == null || aid2.isEmpty()) aid2 = TokenStore.appidOfUrl(pe.raw); if (aid2 == null || aid2.isEmpty()) aid2 = "未知"; String keep = (pe == null || pe.raw.isEmpty()) ? line : TokenStore.joinLine(pe.note, pe.time.isEmpty() ? new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date()) : pe.time, aid2, pe.raw.replace("|", "%7C"), pe.mode); if (TokenStore.saveGameEntry(g, keep)) count++; }
+                    for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String aid2 = TokenStore.appidOfGame(g); if (aid2 == null || aid2.isEmpty()) aid2 = TokenStore.appidOfUrl(pe.raw); if (aid2 == null) aid2 = ""; String keep = (pe == null || pe.raw.isEmpty()) ? line : TokenStore.joinLine(pe.note, pe.time.isEmpty() ? new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date()) : pe.time, aid2, pe.raw.replace("|", "%7C"), pe.mode); if (TokenStore.saveGameEntry(g, keep)) count++; }
                     android.widget.Toast.makeText(c, "已保存 " + count + " 条到 " + g, android.widget.Toast.LENGTH_SHORT).show();
                     dlg.dismiss();
                     show(c, g, null);
