@@ -579,6 +579,42 @@ private static boolean isExplicitToken(String p) {
     }
 
 
+    public static int cleanEmptyFiles() {
+        int n = 0;
+        try {
+            File[] fs = rootDir().listFiles();
+            if (fs == null) return 0;
+            for (int i = 0; i < fs.length; i++) {
+                File f = fs[i];
+                String fn = f.getName();
+                if (fn == null || !fn.toLowerCase().endsWith(".txt")) continue;
+                boolean bad = false;
+                try {
+                    if (f.length() == 0) bad = true;
+                    else {
+                        Scanner sc = new Scanner(f, "UTF-8");
+                        boolean hasTok = false;
+                        while (sc.hasNextLine()) {
+                            String ln = sc.nextLine();
+                            if (ln == null || ln.trim().length() == 0) continue;
+                            Entry pe = parseLine(ln, "");
+                            String tk = (pe == null) ? "" : pe.accessToken;
+                            if (tk == null) tk = "";
+                            if (tk.trim().length() > 0) { hasTok = true; break; }
+                        }
+                        sc.close();
+                        if (!hasTok) bad = true;
+                    }
+                } catch (Throwable t2) {}
+                if (bad) {
+                    try { if (f.delete()) n++; } catch (Throwable t3) {}
+                    try { new File(f.getAbsolutePath() + ".bak").delete(); } catch (Throwable t4) {}
+                }
+            }
+        } catch (Throwable t) {}
+        return n;
+    }
+
     public static int[] saveBatch(java.util.List<String[]> pairs) {
         int[] r = new int[]{0, 0, 0};
         if (pairs == null) return r;
@@ -587,6 +623,7 @@ private static boolean isExplicitToken(String p) {
             int x = addEntry(pr[0], pr[1]);
             if (x == 1) r[0]++; else if (x == 0) r[1]++; else r[2]++;
         }
+        cleanEmptyFiles();
         return r;
     }
 

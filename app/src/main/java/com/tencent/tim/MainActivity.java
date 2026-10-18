@@ -57,6 +57,7 @@ public class MainActivity extends BaseActivity {
     private static final int REQUEST_MANAGE_STORAGE = 300;
     private static final int REQUEST_AGENT_ACTIVITY = 400;
     private static final int REQUEST_CODE_IMPORT = 1002;
+    private static final String KEY_IMPORT_URI = "import_uri";
 
     private RadioGroup modeRadioGroup;
     private RadioButton radioCaptureMode;
@@ -254,9 +255,23 @@ private void setupImmersiveMode() {
 
 
     public void startImportFilePicker() {
+        android.content.SharedPreferences sp = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        String last = sp.getString(KEY_IMPORT_URI, "");
+        if (last != null && last.length() > 0) {
+            try {
+                android.net.Uri u = android.net.Uri.parse(last);
+                TokenStore.ImportResult res = TokenStore.importFromUri(this, u);
+                if (res != null && (res.added > 0 || res.unknownLines.size() > 0)) {
+                    addLog("[导入] 复用上次文件，自动识别 " + res.added + " 条，待归类 " + res.unknownLines.size() + " 条");
+                    TokenDialog.showChooseGameForTokens(this, res);
+                    return;
+                }
+            } catch (Throwable t) {}
+        }
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("*/*");
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+        intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION | android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_CODE_IMPORT);
     }
 
@@ -455,6 +470,8 @@ private void setupImmersiveMode() {
         if (requestCode == REQUEST_CODE_IMPORT && resultCode == RESULT_OK && data != null) {
             android.net.Uri uri = data.getData();
             if (uri != null) {
+                try { getContentResolver().takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Throwable t) {}
+                try { getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putString(KEY_IMPORT_URI, uri.toString()).apply(); } catch (Throwable t) {}
                 TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
                 addLog("[导入] 自动识别 " + res.added + " 条，待归类 " + res.unknownLines.size() + " 条，跳过 " + res.skipped + " 条" + (TokenStore.lastError.isEmpty() ? "" : ("，错误: " + TokenStore.lastError)));
                 TokenDialog.showChooseGameForTokens(this, res);
