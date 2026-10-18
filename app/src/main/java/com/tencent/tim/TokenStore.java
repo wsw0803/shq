@@ -91,6 +91,13 @@ public class TokenStore {
     private static String[] splitLine(String line) {
         String[] r = splitLineInner(line);
         for (int i = 0; i < r.length; i++) if (r[i] != null) r[i] = r[i].replace(String.valueOf((char) 1), "|");
+        if (r[3] != null && r[3].length() == 0 && r[2] != null) {
+            boolean _sp4 = false;
+            String[] _mk = new String[]{"capture", "login", "hang_up"}; 
+            for (String _m : _mk) {
+                if (r[2].endsWith("|" + _m)) { r[2] = r[2].substring(0, r[2].length() - _m.length() - 1).trim(); r[3] = _m; _sp4 = true; break; }
+            }
+        }
         return r;
     }
 
