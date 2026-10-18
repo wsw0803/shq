@@ -87,6 +87,9 @@ public class TokenDialog {
             btn.setLayoutParams(lp);
             btn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
+                    boolean _miss = false;
+                    for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String _a = TokenStore.appidOfGame(g); if (_a == null) _a = ""; if (_a.isEmpty()) { String _u = (pe == null) ? null : TokenStore.appidOfUrl(pe.raw); if (_u != null) _a = _u; } if (_a.isEmpty()) _a = firstAppid(line); if (_a.isEmpty()) { _miss = true; break; } }
+                    if (_miss) { askAppid(c, dlg, g, tokens); return; }
                     int count = 0;
                     for (String line : tokens) { TokenStore.Entry pe = TokenStore.parseLine(line, ""); String aid2 = TokenStore.appidOfGame(g); if (aid2 == null) aid2 = ""; if (aid2.isEmpty()) { String _u = (pe == null) ? null : TokenStore.appidOfUrl(pe.raw); if (_u != null) aid2 = _u; } if (aid2.isEmpty()) aid2 = firstAppid(line); if (aid2.isEmpty()) { askAppid(c, dlg, g, tokens); return; } String keep = (pe == null || pe.raw.isEmpty()) ? line : TokenStore.joinLine(pe.note, pe.time.isEmpty() ? new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date()) : pe.time, aid2, pe.raw.replace("|", "%7C"), pe.mode); if (TokenStore.saveGameEntry(g, keep)) count++; }
                     android.widget.Toast.makeText(c, "已保存 " + count + " 条到 " + g, android.widget.Toast.LENGTH_SHORT).show();
@@ -596,7 +599,7 @@ public class TokenDialog {
                 if (txt.isEmpty()) { android.widget.Toast.makeText(c, "内容为空", android.widget.Toast.LENGTH_SHORT).show(); return; }
                 String raw = txt; if (raw.indexOf((char)124) >= 0) { String[] seg = raw.split(String.valueOf((char)124)); String _pick = "".trim(); for (String sg : seg) { String tg = sg.trim(); if (tg.contains("access_token=") || tg.startsWith("auth://")) { _pick = tg; break; } } if (_pick.length() == 0) { for (String sg : seg) { String tg = sg.trim(); if (tg.length() >= 16 && !tg.matches("[0-9]+") && !tg.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*") && tg.indexOf(":") < 0) { _pick = tg; break; } } } if (_pick.length() > 0) raw = _pick; }
                 { int _cutIdx = raw.indexOf("%7C"); if (_cutIdx < 0) _cutIdx = raw.indexOf((char)124); if (_cutIdx > 0) raw = raw.substring(0, _cutIdx).trim(); }
-                if (!raw.contains("access_token=")) raw = "access_token=" + raw; String _tk = raw.substring(raw.indexOf("access_token=") + 13).trim(); if (!(txt.indexOf((char)124) >= 0 && txt.split(String.valueOf((char)124)).length >= 3) && (_tk.length() < 8 || _tk.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*"))) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
+                if (!raw.contains("access_token=")) raw = "access_token=" + raw; String _tk = raw.substring(raw.indexOf("access_token=") + 13).trim(); if (_tk.length() < 8 || _tk.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*") || _tk.indexOf((char)32) >= 0) { android.widget.Toast.makeText(c, "未识别到有效 token", android.widget.Toast.LENGTH_LONG).show(); return; }
                 String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
                 String note = noteEt.getText().toString().trim();
                 String aid = TokenStore.appidOfUrl(raw);

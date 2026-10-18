@@ -56,6 +56,7 @@ public class MainActivity extends BaseActivity {
     private static final int REQUEST_STORAGE_PERMISSION = 200;
     private static final int REQUEST_MANAGE_STORAGE = 300;
     private static final int REQUEST_AGENT_ACTIVITY = 400;
+    private static final int REQUEST_CODE_IMPORT = 1002;
 
     private RadioGroup modeRadioGroup;
     private RadioButton radioCaptureMode;
@@ -256,7 +257,7 @@ private void setupImmersiveMode() {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("*/*");
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, 1002);
+        startActivityForResult(intent, REQUEST_CODE_IMPORT);
     }
 
     private String getFileNameFromUri(android.net.Uri uri) {
@@ -451,14 +452,15 @@ private void setupImmersiveMode() {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 1002 && resultCode == RESULT_OK && data != null) {
+        if (requestCode == REQUEST_CODE_IMPORT && resultCode == RESULT_OK && data != null) {
             android.net.Uri uri = data.getData();
             if (uri != null) {
                 TokenStore.ImportResult res = TokenStore.importFromUri(this, uri);
+                addLog("[导入] 新增 " + res.added + " 条，跳过 " + res.skipped + " 条，待定 " + res.unknownLines.size() + " 条" + (TokenStore.lastError.isEmpty() ? "" : ("，错误: " + TokenStore.lastError)));
                 if (!res.unknownLines.isEmpty()) {
                     TokenDialog.showChooseGameForTokens(this, res.unknownLines, res.added);
                 } else {
-                    Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录") : "未发现新记录", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, res.added > 0 ? ("已导入 " + res.added + " 条新记录" + (res.skipped > 0 ? ("，跳过 " + res.skipped + " 条重复/无效") : "")) : (res.skipped > 0 ? ("未发现新记录（跳过 " + res.skipped + " 条重复/无效）") : "未发现新记录"), Toast.LENGTH_LONG).show();
                     TokenDialog.show(this, "", null);
                 }
             }

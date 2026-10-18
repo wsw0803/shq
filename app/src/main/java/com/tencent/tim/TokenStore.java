@@ -114,7 +114,7 @@ public class TokenStore {
  }
  rawSafe = _rs; if (note != null && note.length() > 0) sb.append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)).append(" "); sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
 
-public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 10 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45 && Character.isDigit(s.charAt(i+5)) && s.charAt(i+7) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); e.time = p[0]; String g2 = p[1]; if (g2 != null && g2.equals("未知")) g2 = ""; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { e.appid = g2; String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } if (e.appid.length() == 0 && game != null && game.length() > 0) e.appid = appidOfGame(game); e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = p[2]; e.mode = p[3]; e.note = p[4]; if (e.note.startsWith("cap") || e.note.equals("login") || e.note.startsWith("hang")) { e.mode = e.note.startsWith("cap") ? "capture" : (e.note.startsWith("hang") ? "hang_up" : e.note); e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.startsWith("cap") || mt.equals("login") || mt.startsWith("hang")) { e.mode = mt.startsWith("cap") ? "capture" : (mt.startsWith("hang") ? "hang_up" : mt); e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);  e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
+public static Entry parseLine(String line, String game) { if (line == null) return null; String s = line.trim(); if (s.length() == 0) return null; Entry e = new Entry(); String preNote = ""; int di = -1; for (int i = 0; i + 10 < s.length(); i++) { if (Character.isDigit(s.charAt(i)) && Character.isDigit(s.charAt(i+1)) && Character.isDigit(s.charAt(i+2)) && Character.isDigit(s.charAt(i+3)) && s.charAt(i+4) == (char)45 && Character.isDigit(s.charAt(i+5)) && s.charAt(i+7) == (char)45) { di = i; break; } } if (di > 0) { preNote = s.substring(0, di).trim(); s = s.substring(di).trim(); } String[] p = splitLine(s); boolean _noSep = s.indexOf((char)124) < 0 && s.indexOf("%7C") < 0; e.time = _noSep ? "" : p[0]; String g2 = _noSep ? "" : p[1]; if (g2 != null && g2.equals("未知")) g2 = ""; if (g2 != null && g2.length() > 0 && g2.matches("[0-9]+")) { e.appid = g2; String nm = gameOfAppid(g2); if (nm != null && !nm.isEmpty()) g2 = nm; } if (e.appid.length() == 0 && game != null && game.length() > 0) e.appid = appidOfGame(game); e.game = (game == null || game.length() == 0) ? g2 : game; e.raw = _noSep ? s : p[2]; e.mode = _noSep ? "" : p[3]; e.note = _noSep ? "" : p[4]; if (e.note.startsWith("cap") || e.note.equals("login") || e.note.startsWith("hang")) { e.mode = e.note.startsWith("cap") ? "capture" : (e.note.startsWith("hang") ? "hang_up" : e.note); e.note = ""; } else { int mk = e.raw.lastIndexOf((char)124); if (mk > 0) { String mt = e.raw.substring(mk + 1); if (mt.startsWith("cap") || mt.equals("login") || mt.startsWith("hang")) { e.mode = mt.startsWith("cap") ? "capture" : (mt.startsWith("hang") ? "hang_up" : mt); e.raw = e.raw.substring(0, mk); } } } if (e.note.isEmpty()) e.note = preNote; else if (preNote.length() > 0) e.note = preNote + " " + e.note; e.note = e.note.replace((char)10, (char)32).replace((char)13, (char)32).replace((char)124, (char)47);  e.accessToken = grab(e.raw, "access_token=([^&\\s]+)");
         if (e.accessToken.isEmpty() && !e.raw.isEmpty() && !e.raw.contains("=")) e.accessToken = e.raw;
         e.openid = grab(e.raw, "openid=([^&\\s]+)");
         e.payToken = grab(e.raw, "pay_token=([^&\\s]+)");
@@ -202,7 +202,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         if (!byAid.isEmpty()) return byAid;
         String byUrl = gameOfUrl(url);
         if (byUrl != null && !byUrl.isEmpty()) return byUrl;
-        if (aid != null && !aid.isEmpty()) return aid;
+        if (aid != null && !aid.isEmpty()) { String _nm = gameOfAppid(aid); if (_nm != null && !_nm.isEmpty()) return _nm; }
         return game == null || game.isEmpty() ? "其他" : game;
     }
 
@@ -299,9 +299,11 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
         return all;
     }
 
+    public static String sanitizeGame(String g) { if (g == null) return "其他"; String s = g.trim(); if (s.isEmpty() || "未知游戏".equals(s)) return "其他"; StringBuilder sb = new StringBuilder(); for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); if (c == (char)47 || c == (char)92 || c == (char)58 || c == (char)42 || c == (char)63 || c == (char)34 || c == (char)60 || c == (char)62 || c == (char)124 || c < 32) sb.append((char)95); else sb.append(c); } String r = sb.toString().trim(); if (r.isEmpty() || r.equals(".") || r.equals("..")) return "其他"; return r; }
+
     public static boolean saveGameEntry(String game, String line) {
-        
-        if (game == null || game.isEmpty() || "未知游戏".equals(game)) game = "其他";
+        game = sanitizeGame(game);
+        if (line == null) return false;
         File f = gameFile(game);
         String token = grab(line, "access_token=([^&\\s]+)");
         java.util.List<String> out = new java.util.ArrayList<String>();
@@ -310,7 +312,7 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
                 Scanner sc = new Scanner(f, "UTF-8");
                 while (sc.hasNextLine()) {
                     String ln = sc.nextLine();
-                    if (!token.isEmpty() && lineHasToken(ln, token)) continue;
+                    boolean _dup = token.isEmpty() ? ln.trim().equals(line.trim()) : lineHasToken(ln, token); if (_dup) continue;
                     out.add(ln);
                 }
                 sc.close();
@@ -397,37 +399,43 @@ public static Entry parseLine(String line, String game) { if (line == null) retu
     }
     public static class ImportResult {
         public int added = 0;
+        public int skipped = 0;
         public java.util.List<String> unknownLines = new java.util.ArrayList<>();
     }
 
     public static ImportResult importFromUri(android.content.Context ctx, android.net.Uri uri) {
         ImportResult res = new ImportResult();
+        java.io.InputStream is = null;
         try {
-            java.io.InputStream is = ctx.getContentResolver().openInputStream(uri);
+            is = ctx.getContentResolver().openInputStream(uri);
+            if (is == null) { lastError = "无法读取文件"; return res; }
             java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "UTF-8"));
             String line;
+            java.util.Set<String> seen = new java.util.HashSet<String>();
+            java.util.List<String> unknown = new java.util.ArrayList<String>();
+            String now = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date());
             while ((line = br.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
                 Entry pe = parseLine(line, "");
-                String game = gameOfUrl(line); if ((game == null || game.isEmpty()) && pe != null && pe.game != null && !pe.game.isEmpty() && allGames().contains(pe.game)) game = pe.game;
-                if (game != null && !game.isEmpty()) {
-                    String keep = (pe == null || pe.raw.isEmpty()) ? line : (pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, appidCol(pe.appid, game, pe.raw), pe.raw.replace("|", "%7C"), pe.mode));
-                    if (saveGameEntry(game, keep)) res.added++;
-                } else if (pe != null && !pe.accessToken.isEmpty()) {
-                    String g3 = resolveGame("", line);
-                    if (!g3.isEmpty()) {
-                        String keep3 = pe.time.isEmpty() ? pe.raw : joinLine(pe.note, pe.time, appidCol(pe.appid, g3, pe.raw), pe.raw.replace("|", "%7C"), pe.mode);
-                        if (saveGameEntry(g3, keep3)) res.added++;
-                        else res.unknownLines.add(line);
-                    } else {
-                        res.unknownLines.add(line);
-                    }
-                }
+                if (pe == null || pe.accessToken.isEmpty()) { res.skipped++; continue; }
+                if (!seen.add(pe.accessToken)) { res.skipped++; continue; }
+                String game = "";
+                if (pe.game != null && !pe.game.isEmpty() && !pe.game.matches("[0-9]+")) game = pe.game.trim();
+                if (game.isEmpty()) { String byUrl = gameOfUrl(line); if (byUrl != null && !byUrl.isEmpty() && !byUrl.matches("[0-9]+")) game = byUrl; }
+                if (game.isEmpty() && pe.appid != null && !pe.appid.isEmpty()) { String byAid = gameOfAppid(pe.appid); if (byAid != null && !byAid.isEmpty()) game = byAid; }
+                if (game.isEmpty()) { unknown.add(line); continue; }
+                String appid = appidCol(pe.appid, game, pe.raw);
+                String t = (pe.time == null || pe.time.isEmpty()) ? now : pe.time;
+                String keep = joinLine(pe.note, t, appid, pe.raw.replace("|", "%7C"), pe.mode);
+                if (saveGameEntry(game, keep)) res.added++; else res.unknownLines.add(line);
             }
             br.close();
+            res.unknownLines.addAll(unknown);
         } catch (Exception e) {
-            lastError = e.toString();
+            lastError = "导入失败: " + e;
+        } finally {
+            try { if (is != null) is.close(); } catch (Throwable ignored) {}
         }
         return res;
     }
