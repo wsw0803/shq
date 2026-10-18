@@ -256,6 +256,7 @@ public class TokenDialog {
     }
 
     public static void show(final Context c, String game, final OnPick pick) {
+        try { TokenStore.cleanEmptyFiles(); } catch (Throwable _t) {}
         if (c == null) return;
         final OnPick cb = pick;
         final Dialog dlg = new Dialog(c);

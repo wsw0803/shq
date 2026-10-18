@@ -208,6 +208,18 @@ public class TokenStore {
         int tokScore = -1;
         java.util.List<String> notes = new java.util.ArrayList<String>();
         for (int i = 0; i < parts.size(); i++) {
+            String _raw = parts.get(i);
+            String _p = _raw.trim();
+            if (_p.length() == 0) continue;
+            if (isDateSeg(_p)) continue;
+            int _di = firstDateIndex(_p);
+            if (_di > 0) {
+                String _note = _p.substring(0, _di).trim();
+                if (_note.length() > 0) notes.add(_note);
+                parts.set(i, _p.substring(_di).trim());
+            }
+        }
+        for (int i = 0; i < parts.size(); i++) {
             String raw = parts.get(i);
             String p = raw.trim();
             if (p.length() == 0) continue;
@@ -267,7 +279,7 @@ public class TokenStore {
             if (nb.length() > 0) nb.append((char) 32);
             nb.append(notes.get(i));
         }
-        e.note = nb.toString().replace((char) 10, (char) 32).replace((char) 13, (char) 32).replace((char) 124, (char) 47);
+        e.note = stripDateFromNote(nb.toString().replace((char) 10, (char) 32).replace((char) 13, (char) 32).replace((char) 124, (char) 47));
         if (e.mode.length() == 0) {
             int mk = e.raw.lastIndexOf((char) 124);
             if (mk > 0) {
@@ -579,36 +591,67 @@ private static boolean isExplicitToken(String p) {
     }
 
 
+    private static String stripDateFromNote(String note) {
+        if (note == null) return "";
+        String s = note;
+        for (int g = 0; g < 6; g++) {
+            int di = firstDateIndex(s);
+            if (di < 0) break;
+            int de = di + dateTokenEnd(s.substring(di));
+            if (de > s.length()) de = s.length();
+            String a = s.substring(0, di).trim();
+            String b = s.substring(de).trim();
+            s = (a + " " + b).trim();
+        }
+        return s;
+    }
+
+    public static boolean isValidTokenStr(String tk) {
+        if (tk == null) return false;
+        String t = tk.trim();
+        if (t.length() < 8) return false;
+        if (isDateSeg(t)) return false;
+        if (hasCJK(t)) return false;
+        return true;
+    }
+
     public static int cleanEmptyFiles() {
         int n = 0;
         try {
-            File[] fs = rootDir().listFiles();
-            if (fs == null) return 0;
-            for (int i = 0; i < fs.length; i++) {
-                File f = fs[i];
-                String fn = f.getName();
-                if (fn == null || !fn.toLowerCase().endsWith(".txt")) continue;
-                boolean bad = false;
-                try {
-                    if (f.length() == 0) bad = true;
-                    else {
+            File dir = rootDir();
+            File[] fs = dir.listFiles();
+            if (fs != null) {
+                for (int i = 0; i < fs.length; i++) {
+                    File f = fs[i];
+                    String fn = f.getName();
+                    if (fn == null || !fn.toLowerCase().endsWith(".txt")) continue;
+                    boolean hasTok = false;
+                    try {
                         Scanner sc = new Scanner(f, "UTF-8");
-                        boolean hasTok = false;
                         while (sc.hasNextLine()) {
                             String ln = sc.nextLine();
                             if (ln == null || ln.trim().length() == 0) continue;
                             Entry pe = parseLine(ln, "");
                             String tk = (pe == null) ? "" : pe.accessToken;
-                            if (tk == null) tk = "";
-                            if (tk.trim().length() > 0) { hasTok = true; break; }
+                            if (isValidTokenStr(tk)) { hasTok = true; break; }
                         }
                         sc.close();
-                        if (!hasTok) bad = true;
+                    } catch (Throwable t2) {}
+                    if (!hasTok) {
+                        try { if (f.delete()) n++; } catch (Throwable t3) {}
+                        try { new File(f.getAbsolutePath() + ".bak").delete(); } catch (Throwable t4) {}
                     }
-                } catch (Throwable t2) {}
-                if (bad) {
-                    try { if (f.delete()) n++; } catch (Throwable t3) {}
-                    try { new File(f.getAbsolutePath() + ".bak").delete(); } catch (Throwable t4) {}
+                }
+            }
+            File[] bs = dir.listFiles();
+            if (bs != null) {
+                for (int i = 0; i < bs.length; i++) {
+                    File b = bs[i];
+                    String bn = b.getName();
+                    if (bn == null || !bn.toLowerCase().endsWith(".txt.bak")) continue;
+                    String base = bn.substring(0, bn.length() - 4);
+                    File origin = new File(dir, base);
+                    if (!origin.exists()) { try { b.delete(); n++; } catch (Throwable t5) {} }
                 }
             }
         } catch (Throwable t) {}
