@@ -220,7 +220,14 @@ public class TokenStore {
             int de0 = di0 + dateTokenEnd(p0.substring(di0));
             if (de0 > p0.length()) de0 = p0.length();
             if (date.length() == 0) date = p0.substring(di0, de0).trim();
-            parts.set(i, stripLead(p0.substring(de0)));
+            if (date.length() > 10 && date.charAt(10) != (char) 32) date = date.substring(0, 10) + (char) 32 + date.substring(10);
+            String rest0 = stripLead(p0.substring(de0));
+            int tpe = timePrefixEnd(rest0);
+            if (tpe > 0 && date.indexOf((char) 32) < 0) {
+                date = date + (char) 32 + rest0.substring(0, tpe);
+                rest0 = rest0.substring(tpe);
+            }
+            parts.set(i, rest0);
         }
         for (int i = 0; i < parts.size(); i++) {
             String raw = parts.get(i);
@@ -243,7 +250,7 @@ public class TokenStore {
                 if (digits) { if (appid.length() == 0) appid = p; continue; }
             }
             if (gameName.length() == 0 && isKnownGame(p)) { gameName = p; continue; }
-            if (noteSeen.add(p)) notes.add(p);
+            if (!p.matches("[0-9][0-9]?:[0-9][0-9](:[0-9][0-9])?") && noteSeen.add(p)) notes.add(p);
         }
         if (gameName.length() == 0 && game != null && game.length() > 0) gameName = game;
         String tokRaw = "";
@@ -345,6 +352,18 @@ private static boolean isExplicitToken(String p) {
         return i >= 0 && i < s.length() && s.charAt(i) >= (char) 48 && s.charAt(i) <= (char) 57;
     }
 
+    private static int timePrefixEnd(String s) {
+        if (s == null || s.length() < 4) return 0;
+        int i = 0;
+        while (i < s.length() && i < 2 && isDigitAt(s, i)) i++;
+        if (i < 1 || i >= s.length() || s.charAt(i) != (char) 58) return 0;
+        int j = i + 1;
+        int d = 0;
+        while (j < s.length() && d < 2 && isDigitAt(s, j)) { j++; d++; }
+        if (d < 1) return 0;
+        if (j + 2 < s.length() && s.charAt(j) == (char) 58 && isDigitAt(s, j + 1) && isDigitAt(s, j + 2)) j = j + 3;
+        return j;
+    }
     private static int firstDateIndex(String s) {
         for (int i = 0; i + 9 < s.length(); i++) {
             if (isDigitAt(s, i) && isDigitAt(s, i + 1) && isDigitAt(s, i + 2) && isDigitAt(s, i + 3)
@@ -361,6 +380,7 @@ private static boolean isExplicitToken(String p) {
         int n = 10;
         if (n + 2 < s.length() && (s.charAt(n) == (char) 32 || s.charAt(n) == (char) 84)
                 && isDigitAt(s, n + 1) && isDigitAt(s, n + 2)) n = n + 3;
+        else if (isDigitAt(s, n) && isDigitAt(s, n + 1)) n = n + 2;
         else return n;
         for (int k = 0; k < 2; k++) {
             if (n + 2 < s.length() && s.charAt(n) == (char) 58
@@ -928,6 +948,10 @@ private static boolean isExplicitToken(String p) {
         if (line == null || token == null || token.isEmpty()) return false;
         Entry e = parseLine(line, "");
         return e != null && token.equals(e.accessToken);
+    }
+}
+
+     return e != null && token.equals(e.accessToken);
     }
 }
 
