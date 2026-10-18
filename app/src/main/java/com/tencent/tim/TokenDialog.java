@@ -47,8 +47,8 @@ public class TokenDialog {
         final int total = rest0.size();
         final int autoCnt = res == null ? 0 : res.resolved.size();
         final TokenStore.Entry pe0 = TokenStore.parseLine(line0, "");
-        String preview = (pe0 == null || pe0.accessToken.isEmpty()) ? line0 : pe0.shortToken();
-        if (preview != null && preview.length() > 40) preview = preview.substring(0, 40) + "...";
+        String preview = (pe0 == null) ? line0 : pe0.accessToken;
+        if (preview != null && preview.length() > 200) preview = preview.substring(0, 200) + "...";
         java.util.List<String> gl = new java.util.ArrayList<String>(TokenStore.importGames());
         for (String ag : TokenStore.allGames()) { if (ag != null && ag.length() > 0 && !gl.contains(ag)) gl.add(ag); }
         if (!gl.contains("其他")) gl.add("其他");
@@ -74,7 +74,7 @@ public class TokenDialog {
         TextView tokView = new TextView(c);
         tokView.setText("Token: " + preview);
         tokView.setTextColor(0xFF34D399);
-        tokView.setTextSize(11);
+        tokView.setTextSize(10); tokView.setTextIsSelectable(true);
         tokView.setGravity(Gravity.CENTER);
         tokView.setPadding(0, 0, 0, dp(c, 10));
         root.addView(tokView);
