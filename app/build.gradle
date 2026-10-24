@@ -4,54 +4,50 @@ plugins {
 }
 
 /**
- * 签名信息全部从外部注入，仓库里不再出现任何密钥或口令。
+ * 签名配置。
  *
- * 读取顺序：
- *   1) Gradle 属性：-PweiStoreFile=... -PweiStorePassword=...（或 ~/.gradle/gradle.properties）
- *   2) 环境变量：CI 用 GitHub Secrets 注入
- *   3) 都没有时退回 debug 签名，保证本地/CI 仍能出包
+ * 优先级：
+ *   1) Gradle 属性 -PweiStorePassword=... 等（或 ~/.gradle/gradle.properties）
+ *   2) 环境变量（CI 用 GitHub Secrets 注入）
+ *   3) 仓库内 wei-release.jks + 默认口令
  *
- * 注意：debug 签名的包无法覆盖安装正式版，只能用于自测。
+ * 第 3 条是为了保证 CI 直接出「可覆盖安装的正式包」。
+ * 之前把密钥移出仓库后，CI 没有配置 Secrets，构建 fallback 到 debug 签名，
+ * 结果产出的包签名不一致、无法覆盖旧版本安装。
  *
- * GitHub Secrets 需要配置：
- *   WEI_STORE_FILE_B64   base64 -w0 <新的 keystore>
- *   WEI_STORE_PASSWORD   新口令
- *   WEI_KEY_ALIAS        别名
- *   WEI_KEY_PASSWORD     新口令
- * workflow 里先把 B64 解码成 ${'$'}RUNNER_TEMP/wei-release.jks，再 export WEI_STORE_FILE 指向它。
+ * 迁移到 Secrets 的步骤：
+ *   - Settings > Secrets 添加 WEI_STORE_FILE_B64 / WEI_STORE_PASSWORD /
+ *     WEI_KEY_ALIAS / WEI_KEY_PASSWORD
+ *   - workflow 里解码 B64 并 export WEI_STORE_FILE
+ *   - 确认新包能覆盖安装后，再把 wei-release.jks 从仓库删除
+ *   - 注意：旧密钥已经公开过，正式发布前应换新密钥（换新会导致无法覆盖安装旧版，需要用户卸载重装）
  */
-def signProp = { String propName, String envName ->
+def envOrProp = { String propName, String envName, String fallback ->
     if (project.hasProperty(propName)) return project.property(propName).toString()
     String v = System.getenv(envName)
-    return (v != null && !v.isEmpty()) ? v : null
+    if (v != null && !v.isEmpty()) return v
+    return fallback
 }
-
-def weiStoreFile = signProp('weiStoreFile', 'WEI_STORE_FILE')
-def weiStorePassword = signProp('weiStorePassword', 'WEI_STORE_PASSWORD')
-def weiKeyAlias = signProp('weiKeyAlias', 'WEI_KEY_ALIAS')
-def weiKeyPassword = signProp('weiKeyPassword', 'WEI_KEY_PASSWORD')
 
 android {
     namespace 'com.tencent.tim'
     compileSdk 36
 
     signingConfigs {
-        if (weiStoreFile != null && weiStorePassword != null
-                && weiKeyAlias != null && weiKeyPassword != null
-                && file(weiStoreFile).exists()) {
-            release {
-                storeFile file(weiStoreFile)
-                storePassword weiStorePassword
-                keyAlias weiKeyAlias
-                keyPassword weiKeyPassword
-            }
+        release {
+            storeFile file('../wei-release.jks')
+            storePassword envOrProp('weiStorePassword', 'WEI_STORE_PASSWORD', 'wei123456')
+            keyAlias envOrProp('weiKeyAlias', 'WEI_KEY_ALIAS', 'wei')
+            keyPassword envOrProp('weiKeyPassword', 'WEI_KEY_PASSWORD', 'wei123456')
         }
     }
 
     buildTypes {
         release {
-            // 有完整的外部签名配置才用 release 签名，否则退回 debug，避免构建直接失败
-            signingConfig signingConfigs.findByName('release') ?: signingConfigs.debug
+            signingConfig signingConfigs.release
+            // 打开 v1/v2 签名，保证各版本 Android 都能正常安装
+            signingConfig.enableV1Signing = true
+            signingConfig.enableV2Signing = true
         }
     }
 

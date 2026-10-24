@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
+import java.io.File;
 import java.io.InputStream;
 
 public class Ui {
@@ -25,8 +26,14 @@ public class Ui {
     public static final String KEY_THEME = "ui_theme";
     public static final String KEY_BASE_DPI = "ui_base_dpi";
 
-    /** 玻璃控件的基础底色，API < 24 时拿不到 ColorStateList，用它兜底。 */
     private static final int GLASS_BASE = 0x33FFFFFF;
+    /** 应用私有目录里的背景图文件名，与 SettingsActivity 保持一致。 */
+    private static final String BG_FILE = "bg_custom.img";
+
+    /** 私有背景图的绝对路径，写入 KEY_BG_URI 时用这个而不是 content:// 。 */
+    public static String localBgPath(Context c) {
+        return new File(c.getFilesDir(), BG_FILE).getAbsolutePath();
+    }
 
     public static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
@@ -38,9 +45,7 @@ public class Ui {
         if (pct > 200) pct = 200;
         if (pct == 100) return base;
         Configuration cfg = new Configuration(base.getResources().getConfiguration());
-        // 基准 DPI 只在首次计算时写入一次，之后始终读同一个值。
-        // 原来是在这里面反复 apply()，和 applyDpi() 抢写，导致每次改 DPI 都拿上一次的结果当基准，
-        // 缩放会逐次漂移。
+        // 基准 DPI 只在首次计算时写入一次，避免和 applyDpi 抢写导致缩放漂移
         int baseDpi = prefs(base).getInt(KEY_BASE_DPI, 0);
         if (baseDpi <= 0) {
             baseDpi = base.getResources().getDisplayMetrics().densityDpi;
@@ -65,47 +70,67 @@ public class Ui {
         }
         ImageView custom = a.findViewById(R.id.bg_custom);
         if (custom != null) {
-            String uriStr = p.getString(KEY_BG_URI, "");
-            if (!uriStr.isEmpty()) {
-                InputStream in = null;
-                try {
-                    in = a.getContentResolver().openInputStream(Uri.parse(uriStr));
-                    Drawable d = Drawable.createFromStream(in, "bg");
-                    if (d != null) {
-                        custom.setImageDrawable(d);
-                        custom.setVisibility(View.VISIBLE);
-                    } else {
-                        custom.setVisibility(View.GONE);
-                    }
-                } catch (Exception e) {
-                    custom.setVisibility(View.GONE);
-                } finally {
-                    try {
-                        if (in != null) in.close();
-                    } catch (Exception ignored) {
-                    }
-                }
-            } else {
-                custom.setVisibility(View.GONE);
-            }
+            applyCustomBg(a, custom, p.getString(KEY_BG_URI, ""));
         }
         applyTheme(a);
         View content = a.findViewById(android.R.id.content);
         if (content instanceof ViewGroup) {
             View root = ((ViewGroup) content).getChildAt(0);
             int th = p.getInt(KEY_THEME, 0);
-            boolean lt = th == 1 || (th == 0 && (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES);
+            boolean lt = th == 1 || (th == 0
+                    && (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES);
             if (root != null) root.setBackgroundResource(lt ? R.drawable.bg_light : bgRes(p.getInt(KEY_BG, 0)));
+        }
+    }
+
+    /**
+     * 设置自定义背景。
+     *
+     * 优先读私有目录里的文件（这种路径是绝对路径，不依赖 URI 授权，升级/重启后仍在）；
+     * 兼容老的 content:// 记录，读不到就隐藏，不再让 View 停留在上一次的图。
+     */
+    private static void applyCustomBg(Activity a, ImageView custom, String ref) {
+        if (ref == null || ref.isEmpty()) {
+            custom.setVisibility(View.GONE);
+            return;
+        }
+        InputStream in = null;
+        try {
+            Drawable d;
+            if (ref.startsWith("/")) {
+                // 私有目录绝对路径
+                File f = new File(ref);
+                if (!f.exists()) {
+                    custom.setVisibility(View.GONE);
+                    return;
+                }
+                d = Drawable.createFromPath(ref);
+            } else {
+                in = a.getContentResolver().openInputStream(Uri.parse(ref));
+                d = Drawable.createFromStream(in, "bg");
+            }
+            if (d != null) {
+                custom.setImageDrawable(d);
+                custom.setVisibility(View.VISIBLE);
+            } else {
+                custom.setVisibility(View.GONE);
+            }
+        } catch (Exception e) {
+            custom.setVisibility(View.GONE);
+        } finally {
+            try {
+                if (in != null) in.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
     /**
      * 递归调整带 tag="glass" 的控件透明度。
      *
-     * 原实现调用 getBackground().mutate() 却没有把返回值设回 View：
-     * mutate() 只是返回一份可安全修改的副本，不写回就不会生效；
+     * mutate() 只是返回可安全修改的副本，不写回 View 就不会生效；
      * 而多个控件共享同一个 drawable 时，直接改原对象又会互相污染。
-     * 这里改为 mutate() 后显式 setBackground()。
+     * 所以必须 mutate() 之后 setBackground()。
      */
     public static void applyGlass(View v, int glass) {
         if (v == null) return;
@@ -173,9 +198,8 @@ public class Ui {
     /**
      * 修改 DPI 后重启界面。
      *
-     * 直接改 Activity 的 resources.displayMetrics 是无效的（Resources 内部已缓存），
-     * 真正的缩放靠 attachBaseContext 里 createConfigurationContext 实现，
-     * 所以这里只需要落盘配置并重启，不要再手动改 densityDpi 制造假象。
+     * 直接改 resources.displayMetrics 是无效的（Resources 内部已缓存），
+     * 真正的缩放靠 attachBaseContext 里的 createConfigurationContext 实现。
      */
     public static void applyDpi(Activity a) {
         if (a == null) return;

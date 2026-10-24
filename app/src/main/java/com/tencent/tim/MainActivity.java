@@ -82,6 +82,15 @@ public class MainActivity extends BaseActivity {
     private Uri storageUri = null;
     private boolean useSaf = false;
 
+    /** 一个 GitHub Release 的下载信息。 */
+    private static class ReleaseInfo {
+        String version = "";
+        String title = "";
+        String body = "";
+        String apkUrl = "";
+        long size = 0;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -110,7 +119,6 @@ public class MainActivity extends BaseActivity {
         mWindow = getWindow();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            // 只设置内容延伸，不隐藏状态栏
             mWindow.getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
@@ -132,12 +140,7 @@ public class MainActivity extends BaseActivity {
         }
     }
 
-    /**
-     * 追加一行日志。
-     *
-     * token 脱敏统一交给 LogScrubber：原来的 replaceToken 只处理了固定几种前缀，
-     * 且没有覆盖 GitHub token 等敏感串，容易在日志区明文暴露凭据。
-     */
+    /** 追加日志，敏感信息统一由 LogScrubber 脱敏。 */
     private void addLog(final String log) {
         runOnUiThread(() -> {
             String time = new SimpleDateFormat("HH:mm:ss").format(new Date());
@@ -852,61 +855,90 @@ public class MainActivity extends BaseActivity {
         }
     }
 
+    /**
+     * 检查更新。
+     *
+     * 原实现只保留「最高的一个版本」（bestVer），所以用户只能看到最新一条，
+     * 从 0.0.1 到 0.0.3 之间的版本完全看不到。
+     * 现在收集所有高于当前版本的 Release，并在弹窗里逐条列出。
+     */
     private void checkForUpdates() {
         new Thread(() -> {
+            HttpURLConnection conn = null;
             try {
-                java.net.URL url = new java.net.URL("https://api.github.com/repos/wsw0803/shq/releases?per_page=100");
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                URL url = new URL("https://api.github.com/repos/wsw0803/shq/releases?per_page=100");
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
                 conn.setConnectTimeout(6000);
                 conn.setReadTimeout(6000);
-                if (conn.getResponseCode() == 200) {
-                    java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) sb.append(line);
-                    reader.close();
-                    org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
-                    String bestVer = "";
-                    String bestUrl = "";
-                    long bestSize = 0;
-                    for (int i = 0; i < arr.length(); i++) {
-                        org.json.JSONObject rel = arr.getJSONObject(i);
-                        if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
-                        String tag = rel.optString("tag_name", "");
-                        String ver = tag.startsWith("v") ? tag.substring(1) : tag;
-                        if (ver.isEmpty()) continue;
-                        if (!bestVer.isEmpty() && compareVersion(ver, bestVer) <= 0) continue;
-                        org.json.JSONArray assets = rel.optJSONArray("assets");
-                        if (assets == null || assets.length() == 0) continue;
-                        String apkUrl = "";
-                        long apkSize = 0;
-                        for (int a = 0; a < assets.length(); a++) {
-                            org.json.JSONObject as = assets.optJSONObject(a);
-                            if (as == null) continue;
-                            String nm = as.optString("name", "").toLowerCase();
-                            String u2 = as.optString("browser_download_url", "");
-                            if (u2.isEmpty()) continue;
-                            if (nm.endsWith(".apk")) { apkUrl = u2; apkSize = as.optLong("size", 0); break; }
-                            if (apkUrl.isEmpty()) { apkUrl = u2; apkSize = as.optLong("size", 0); }
+                if (conn.getResponseCode() != 200) return;
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+
+                String currentVersion = getPackageManager()
+                        .getPackageInfo(getPackageName(), 0).versionName;
+
+                org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
+                java.util.List<ReleaseInfo> newer = new java.util.ArrayList<>();
+
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONObject rel = arr.getJSONObject(i);
+                    if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
+
+                    String tag = rel.optString("tag_name", "");
+                    String ver = tag.startsWith("v") ? tag.substring(1) : tag;
+                    if (ver.isEmpty()) continue;
+                    if (compareVersion(ver, currentVersion) <= 0) continue;
+
+                    org.json.JSONArray assets = rel.optJSONArray("assets");
+                    if (assets == null || assets.length() == 0) continue;
+
+                    String apkUrl = "";
+                    long apkSize = 0;
+                    for (int a = 0; a < assets.length(); a++) {
+                        org.json.JSONObject as = assets.optJSONObject(a);
+                        if (as == null) continue;
+                        String nm = as.optString("name", "").toLowerCase();
+                        String u2 = as.optString("browser_download_url", "");
+                        if (u2.isEmpty()) continue;
+                        if (nm.endsWith(".apk")) {
+                            apkUrl = u2;
+                            apkSize = as.optLong("size", 0);
+                            break;
                         }
-                        if (apkUrl.isEmpty()) continue;
-                        bestVer = ver;
-                        bestUrl = apkUrl;
-                        bestSize = apkSize;
+                        if (apkUrl.isEmpty()) {
+                            apkUrl = u2;
+                            apkSize = as.optLong("size", 0);
+                        }
                     }
-                    String currentVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-                    if (!bestVer.isEmpty() && compareVersion(bestVer, currentVersion) > 0) {
-                        final String fv = bestVer;
-                        final String fu = bestUrl;
-                        final long fz = bestSize;
-                        runOnUiThread(() -> showUpdateDialog(fv, fu, fz));
-                    }
+                    if (apkUrl.isEmpty()) continue;
+
+                    ReleaseInfo info = new ReleaseInfo();
+                    info.version = ver;
+                    info.title = rel.optString("name", "");
+                    if (info.title.isEmpty()) info.title = "shq v" + ver;
+                    info.body = rel.optString("body", "");
+                    info.apkUrl = apkUrl;
+                    info.size = apkSize;
+                    newer.add(info);
                 }
-                conn.disconnect();
+
+                if (newer.isEmpty()) return;
+
+                // 按版本号从新到旧排序，弹窗里最新在最上面
+                java.util.Collections.sort(newer, (x, y) -> -compareVersion(x.version, y.version));
+
+                final java.util.List<ReleaseInfo> list = newer;
+                runOnUiThread(() -> showUpdateDialog(list));
             } catch (Exception e) {
                 e.printStackTrace();
+            } finally {
+                if (conn != null) conn.disconnect();
             }
         }).start();
     }
@@ -934,26 +966,28 @@ public class MainActivity extends BaseActivity {
     }
 
     /**
-     * 更新提示：不再强制。
+     * 更新弹窗：列出所有可更新的版本（各自的 GitHub 标题），非强制。
      *
-     * 原实现 setCancelable(false) + setCanceledOnTouchOutside(false)，且只有一个「立即更新」按钮，
-     * 用户除非杀掉应用否则无法继续使用。现改为可取消，并提供「以后再说」。
+     * 用户点某一条即下载该版本；默认高亮最新版。
      */
-    private void showUpdateDialog(String newVersion, String url, long size) {
+    private void showUpdateDialog(java.util.List<ReleaseInfo> releases) {
         final android.app.Dialog dlg = new android.app.Dialog(this);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         if (dlg.getWindow() != null) {
             dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.8f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
+
+        float density = getResources().getDisplayMetrics().density;
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
         root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
-        int p = (int)(16 * getResources().getDisplayMetrics().density);
+        int p = (int)(16 * density);
         root.setPadding(p, p, p, p);
 
         android.widget.TextView title = new android.widget.TextView(this);
-        title.setText("发现新版本 " + newVersion);
+        title.setText("发现 " + releases.size() + " 个新版本");
         title.setTextColor(0xFFF5F7FA);
         title.setTextSize(17);
         title.setGravity(android.view.Gravity.CENTER);
@@ -962,15 +996,65 @@ public class MainActivity extends BaseActivity {
         android.widget.TextView tip = new android.widget.TextView(this);
         tip.setText("可以立即更新，也可以稍后再更新，不影响当前使用");
         tip.setTextColor(0xFF9CA3AF);
-        tip.setTextSize(13);
+        tip.setTextSize(12);
         tip.setGravity(android.view.Gravity.CENTER);
-        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+        android.widget.LinearLayout.LayoutParams tipLp = new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                 android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = (int)(10 * getResources().getDisplayMetrics().density);
-        lp.bottomMargin = (int)(16 * getResources().getDisplayMetrics().density);
-        tip.setLayoutParams(lp);
+        tipLp.topMargin = (int)(8 * density);
+        tipLp.bottomMargin = (int)(12 * density);
+        tip.setLayoutParams(tipLp);
         root.addView(tip);
+
+        // 版本列表：每条显示 GitHub Release 的标题 + 版本号
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        android.widget.LinearLayout list = new android.widget.LinearLayout(this);
+        list.setOrientation(android.widget.LinearLayout.VERTICAL);
+
+        final ReleaseInfo[] chosen = new ReleaseInfo[]{ releases.get(0) };
+
+        for (int i = 0; i < releases.size(); i++) {
+            final int index = i;
+            final ReleaseInfo info = releases.get(i);
+
+            android.widget.TextView row = new android.widget.TextView(this);
+            String label = info.title;
+            if (!label.contains(info.version)) {
+                label = label + "  (" + info.version + ")";
+            }
+            if (i == 0) label = "★ " + label;
+            row.setText(label);
+            row.setTextSize(14);
+            row.setTextColor(i == 0 ? 0xFF22D3EE : 0xFFD5DBDB);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            row.setPadding((int)(10 * density), (int)(10 * density),
+                    (int)(10 * density), (int)(10 * density));
+            row.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+
+            android.widget.LinearLayout.LayoutParams rowLp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = (int)(6 * density);
+            row.setLayoutParams(rowLp);
+
+            row.setOnClickListener(v -> {
+                chosen[0] = info;
+                for (int k = 0; k < list.getChildCount(); k++) {
+                    android.view.View c = list.getChildAt(k);
+                    if (c instanceof android.widget.TextView) {
+                        ((android.widget.TextView) c).setTextColor(k == index ? 0xFF22D3EE : 0xFFD5DBDB);
+                    }
+                }
+            });
+            list.addView(row);
+        }
+
+        scroll.addView(list);
+        android.widget.LinearLayout.LayoutParams scrollLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        scrollLp.bottomMargin = (int)(12 * density);
+        scroll.setLayoutParams(scrollLp);
+        root.addView(scroll, scrollLp);
 
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
@@ -982,25 +1066,29 @@ public class MainActivity extends BaseActivity {
         btnLater.setOnClickListener(v -> dlg.dismiss());
         android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(
                 0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        lp1.rightMargin = (int)(6 * getResources().getDisplayMetrics().density);
+        lp1.rightMargin = (int)(6 * density);
         btnRow.addView(btnLater, lp1);
 
         android.widget.Button btnOk = new android.widget.Button(this);
-        btnOk.setText("立即更新");
+        btnOk.setText("更新所选版本");
         btnOk.setTextColor(0xFF000000);
         btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
         btnOk.setOnClickListener(v -> {
+            final ReleaseInfo target = chosen[0];
             dlg.dismiss();
-            Updater.start(MainActivity.this, url, size, () -> runOnUiThread(() -> showUpdateDialog(newVersion, url, size)));
+            Updater.start(MainActivity.this, target.apkUrl, target.size,
+                    () -> runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "更新失败，请稍后重试", Toast.LENGTH_SHORT).show();
+                    }));
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(
                 0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        lp2.leftMargin = (int)(6 * getResources().getDisplayMetrics().density);
+        lp2.leftMargin = (int)(6 * density);
         btnRow.addView(btnOk, lp2);
 
         root.addView(btnRow);
         dlg.setContentView(root);
-        // 关键：允许返回键 / 点击外部关闭，不再强制用户更新
+        // 允许返回键 / 点击外部关闭，不强制更新
         dlg.setCancelable(true);
         dlg.setCanceledOnTouchOutside(true);
         dlg.show();

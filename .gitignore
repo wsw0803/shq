@@ -7,11 +7,19 @@ local.properties
 .idea/
 *.iml
 
-# 签名密钥：绝不能提交
+# 签名密钥
+# 注意：wei-release.jks 目前仍在仓库里，仅为保证 CI 能直接产出
+# 可覆盖安装的正式签名包。待你把这些值配到 GitHub Secrets：
+#   WEI_STORE_FILE_B64 / WEI_STORE_PASSWORD / WEI_KEY_ALIAS / WEI_KEY_PASSWORD
+# 并确认新包能覆盖安装之后，删掉下面这行例外、执行 git rm --cached wei-release.jks，
+# 这个密钥就彻底离开仓库了。
+#
+# 强烈建议尽快换成新密钥：旧密钥已经随仓库公开过，任何人都能伪造「官方更新包」。
 *.jks
 *.keystore
+!wei-release.jks
 
-# 调试残留：这些不应出现在主干
+# 调试残留
 ci_logs/
 ci_logs.zip
 *.bak
