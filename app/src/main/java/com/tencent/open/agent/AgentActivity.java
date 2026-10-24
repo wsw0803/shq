@@ -35,18 +35,12 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 本次修复的关键点：
+ * 上号模式的处理策略（重要）：
  *
- * 1) 外部唤起判定修正
- *    原来只看 Intent.ACTION_VIEW，但游戏通过 auth:// 唤起时，
- *    系统可能在 intent 里带上其它 action，导致误判成「不是游戏唤起的」。
- *    真正可靠的依据是 referrer（android-app://<调用方包名>）。
- *    现在优先用 referrer 判断，其次看数据 scheme。
- *
- * 2) setResult 能被系统丢弃的根源在 Manifest（singleTask），已修。
- *    这里同时保留直接派发作为兜底。
- *
- * 3) 诊断字段用 at/oid/pt/exp 缩写，避免被脱敏抹掉。
+ * 有的游戏用 startActivity + NEW_TASK 唤起本应用，referrer 有值，
+ * 但根本没有结果回传通道，setResult 到不了游戏。三角洲就是这种。
+ * 因此上号模式下不能把希望寄托在 setResult 上，
+ * 必须主动把 auth 派发给游戏（GameLaunch）。setResult 只作兼容保留。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -62,7 +56,6 @@ public class AgentActivity extends BaseActivity {
     private Button manualLoginButton;
     private String currentMode;
     private Window mWindow;
-    /** 调用方包名，从 referrer 解析。为空表示由本应用自己启动。 */
     private String callerPackage = "";
     private boolean launchedExternally = false;
 
@@ -154,11 +147,6 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
-    /**
-     * 解析调用方。
-     * referrer 的格式是 android-app://<包名>，这是判断「谁唤起了我」最可靠的依据。
-     * 游戏通过 auth:// 唤起本应用时，这里拿到的就是游戏包名。
-     */
     private void resolveCaller(Intent intent) {
         try {
             String ref = "";
@@ -175,7 +163,6 @@ public class AgentActivity extends BaseActivity {
                 callerPackage = pkg;
                 launchedExternally = true;
             }
-            // 再看数据 scheme 作为辅助判断
             if (intent != null && intent.getData() != null) {
                 String scheme = intent.getData().getScheme();
                 if (scheme != null
@@ -400,25 +387,31 @@ public class AgentActivity extends BaseActivity {
             if (!"login".equals(currentMode)) {
                 saveAccountToFile(saved, appid, currentMode != null ? currentMode : "抓号模式");
             } else {
-                // 优先依赖 setResult（Manifest 已去掉 singleTask，结果能回到游戏）。
-                // 若判定为「不是游戏唤起的」，则尝试直接派发作为兜底。
-                if (!launchedExternally) {
-                    boolean sent = false;
+                // 上号模式：先主动派发。
+                // 不能因为 referrer 有值就以为 setResult 能回传 ——
+                // 有的游戏用 NEW_TASK 唤起，根本没有结果通道。
+                boolean sent = false;
+                if (GameLaunch.hasPackage(gameName)) {
                     try {
                         sent = GameLaunch.dispatch(this, gameName, saved);
                     } catch (Throwable t) {
                         LoginDiag.add("DISPATCH", "派发异常: " + t);
                     }
-                    if (sent) {
-                        Toast.makeText(this, "已发送到 " + gameName + "，请查看游戏",
-                                Toast.LENGTH_LONG).show();
-                    } else {
-                        Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
-                    }
+                } else {
+                    LoginDiag.add("DISPATCH", "「" + gameName + "」未配置包名，只能依赖 setResult");
+                }
+
+                if (sent) {
+                    Toast.makeText(this, "已发送到 " + gameName + "，请查看游戏",
+                            Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "已直接派发给游戏");
+                } else if (launchedExternally) {
+                    Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "派发失败，回退 setResult（调用方 "
+                            + callerPackage + "）");
                 } else {
                     Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "本界面由 " + callerPackage
-                            + " 唤起，将通过 setResult 交回该应用");
+                    LoginDiag.add("RETURN", "派发失败且非外部唤起，游戏很可能收不到");
                 }
             }
 
