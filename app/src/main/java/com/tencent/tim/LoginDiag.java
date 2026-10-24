@@ -8,7 +8,6 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 
-import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
@@ -18,26 +17,32 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 登录诊断器。三种模式通用：抓号、挂机、上号。
+ * 登录诊断器。
  *
- * 要点：
- * 1) URL 轨迹：由 BaseLoginWebViewClient 与 AgentActivity 每步写入内存环形缓冲。
- *    系统 logcat 看不到 WebView 导航链，这一路是定位卡点的关键。
- * 2) su logcat：有 root 时抓系统日志里与 WebView / 崩溃 / SSL 相关的行。
+ * 改为两步式，符合实际使用流程：
+ *   1) 点「开启诊断」 → 清空缓冲，开始记录
+ *   2) 正常走一遍上号/抓号流程
+ *   3) 点「导出诊断」 → 落盘 + 复制到剪贴板
  *
- * 导出到：
- *   Android/data/com.tencent.tim/files/diag_login.txt
+ * 这样记录里只有本次操作，不会被启动阶段的噪音淹没。
  *
- * 界面：右上角动态挂「诊断」按钮，点击即导出并复制到剪贴板。
- * 不改布局、不改 Activity 结构，零侵入。
+ * 记录内容：
+ * - 模式、游戏、已选 appid
+ * - WebView 导航链（系统 logcat 看不到，必须自己记）
+ * - token 各字段长度（不记明文）
+ * - token 内 appid 与已选 appid 是否一致
+ * - Cookie 状态（针对「登录成功又被踢回登录页」这类问题）
+ * - su logcat 抓到的系统层日志
+ *
+ * 导出到：Android/data/com.tencent.tim/files/diag_login.txt
  */
 public class LoginDiag {
 
     private static final int MAX_EVENTS = 400;
     private static final List<String> events = new ArrayList<String>();
     private static long startedAt = 0L;
+    private static boolean recording = false;
 
-    /** 用弱标记避免重复挂按钮导致叠层。 */
     private static String attachedKey = null;
 
     private static final SimpleDateFormat TS =
@@ -46,10 +51,16 @@ public class LoginDiag {
     public static synchronized void begin() {
         events.clear();
         startedAt = System.currentTimeMillis();
-        add("DIAG", "begin");
+        recording = true;
+        add("DIAG", "开始记录");
+    }
+
+    public static synchronized boolean isRecording() {
+        return recording;
     }
 
     public static synchronized void add(String tag, String detail) {
+        if (!recording) return;
         if (events.size() >= MAX_EVENTS) {
             events.remove(0);
         }
@@ -66,8 +77,8 @@ public class LoginDiag {
     }
 
     /**
-     * 动态挂诊断悬浮按钮。同一 Activity 只挂一次。
-     * 抓号/挂机由 BaseLoginWebViewClient 调用，上号由 AgentActivity 调用。
+     * 在右上角挂「诊断」按钮。首次点击开启，之后点击导出。
+     * 按 Activity 去重，避免叠层。
      */
     public static void attachButton(final Activity act, final String gameName) {
         if (act == null) return;
@@ -77,8 +88,8 @@ public class LoginDiag {
             attachedKey = key;
         }
         try {
-            Button btn = new Button(act);
-            btn.setText("诊断");
+            final Button btn = new Button(act);
+            btn.setText("开启诊断");
             btn.setTextSize(11);
             btn.setTextColor(0xFFF5F7FA);
             btn.setAlpha(0.9f);
@@ -96,7 +107,16 @@ public class LoginDiag {
 
             btn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    exportAsync(act, gameName);
+                    if (!isRecording()) {
+                        begin();
+                        add("DIAG", "game=" + gameName + " 模式已就绪，请开始操作");
+                        btn.setText("导出诊断");
+                        android.widget.Toast.makeText(act,
+                                "已开启诊断，请开始操作，完成后点这里导出",
+                                android.widget.Toast.LENGTH_LONG).show();
+                    } else {
+                        exportAsync(act, gameName);
+                    }
                 }
             });
 
@@ -110,22 +130,19 @@ public class LoginDiag {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT));
             }
-            add("DIAG", "按钮已挂载");
         } catch (Throwable t) {
-            add("ERR", "挂载诊断按钮失败: " + t);
+            // 挂不上就算了，不能影响主流程
         }
     }
 
-    /** 重置挂载标记，Activity 重建时用。 */
     public static synchronized void resetButtonFlag() {
         attachedKey = null;
     }
 
     private static void exportAsync(final Activity act, final String gameName) {
-        add("DIAG", "用户点击导出");
-        final android.widget.Toast tip = android.widget.Toast.makeText(act,
-                "正在收集诊断信息...", android.widget.Toast.LENGTH_SHORT);
-        tip.show();
+        add("DIAG", "导出");
+        android.widget.Toast.makeText(act, "正在收集诊断信息...",
+                android.widget.Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             public void run() {
                 final String path = export(act, gameName);
@@ -146,10 +163,13 @@ public class LoginDiag {
                                     "diag", sb.toString()));
                         } catch (Throwable ignored) {
                         }
+                        synchronized (LoginDiag.class) {
+                            recording = false;
+                        }
                         new android.app.AlertDialog.Builder(act)
                                 .setTitle("诊断已导出")
                                 .setMessage("文件:\n" + path
-                                        + "\n\nURL 轨迹已复制到剪贴板，可直接粘贴发送。")
+                                        + "\n\n轨迹已复制到剪贴板，可直接粘贴发送。")
                                 .setPositiveButton("知道了", null)
                                 .show();
                     }
@@ -158,7 +178,7 @@ public class LoginDiag {
         }).start();
     }
 
-    /** 导出诊断文件，返回路径，失败返回 null。需在后台线程调用。 */
+    /** 导出诊断文件，返回路径。需在后台线程调用。 */
     public static String export(Context ctx, String gameName) {
         if (ctx == null) return null;
         File dir = ctx.getExternalFilesDir(null);
@@ -180,7 +200,7 @@ public class LoginDiag {
         sb.append("--- 事件轨迹 ---\n");
         List<String> snap = snapshot();
         if (snap.isEmpty()) {
-            sb.append("(空)\n");
+            sb.append("(空，可能未开启诊断)\n");
         } else {
             for (String line : snap) sb.append(line).append('\n');
         }
@@ -202,7 +222,7 @@ public class LoginDiag {
         }
     }
 
-    /** 用 su 抓 logcat 并过滤。Android 高版本对普通应用读 logcat 有限制，走 su 更稳。 */
+    /** 用 su 抓 logcat 并过滤。 */
     private static String suLogcat(int maxLines) {
         Process p = null;
         try {

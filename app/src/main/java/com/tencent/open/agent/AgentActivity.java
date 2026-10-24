@@ -34,15 +34,15 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 本次改动：接入 LoginDiag，让三种模式都能导出诊断。
- * 上号模式不走 WebView，所以诊断点埋在 AgentActivity 里：
- *   - 进入界面时记录 模式 / 游戏 / appid / 输入内容是否含 token
- *   - performLogin 记录各字段长度（不记录明文）
- *   - 记录解析出的 appid 与「已选游戏登记的 appid」是否一致
- *     —— 这是排查「其他游戏能登、某个游戏登不上」的关键
- *   - 保存到文件的结果也记录
+ * 诊断改为按需开启，符合实际操作顺序：
+ *   点「开启诊断」→ 走一遍上号/抓号流程 → 点「导出诊断」
+ * 进入界面时不自动开始记录，避免把启动噪音混进来。
  *
- * 业务逻辑与原实现保持一致，只加了埋点。
+ * 上号模式的诊断点：
+ * - 进入界面记录 模式 / 游戏 / 已选 appid / 输入是否含 token
+ * - performLogin 记录各字段长度（不记明文）
+ * - 记录 token 内 appid 与已选 appid 是否一致
+ * - 记录保存结果
  */
 public class AgentActivity extends BaseActivity {
 
@@ -128,11 +128,6 @@ public class AgentActivity extends BaseActivity {
             }
         }
 
-        // 诊断从这里开始，三种模式都覆盖
-        LoginDiag.resetButtonFlag();
-        LoginDiag.begin();
-        LoginDiag.add("AGENT", "mode=" + currentMode + " game=" + getSelectedGameName());
-
         if ("login".equals(currentMode)) {
             setupLoginMode();
         } else if ("capture".equals(currentMode)) {
@@ -143,8 +138,8 @@ public class AgentActivity extends BaseActivity {
             setupCaptureMode();
         }
 
-        // 上号模式也挂诊断按钮。WebView 模式已由 BaseLoginWebViewClient 挂过，
-        // 内部按 Activity 去重，不会重复。
+        // 诊断按钮：首次点击开启，之后点击导出
+        LoginDiag.resetButtonFlag();
         try {
             LoginDiag.attachButton(this, getSelectedGameName());
         } catch (Throwable ignored) {
@@ -178,12 +173,6 @@ public class AgentActivity extends BaseActivity {
             webView.setVisibility(View.GONE);
             loginScroll.setVisibility(View.VISIBLE);
             loadRawDataFromPreferences();
-
-            String input = plainText.getText() == null ? "" : plainText.getText().toString();
-            LoginDiag.add("LOGIN", "game=" + getSelectedGameName()
-                    + " 已选appid=" + getSelectedGameAppid()
-                    + " 输入长度=" + input.length()
-                    + " 含token=" + input.contains("access_token="));
 
             if (pasteLoginButton != null) {
                 pasteLoginButton.setOnClickListener(v -> pasteAndLogin());
@@ -323,7 +312,6 @@ public class AgentActivity extends BaseActivity {
         String openId = grab(url, "openid=([^&\\s#]+)");
         String payToken = grab(url, "pay_token=([^&\\s#]+)");
 
-        // 关键诊断：各字段只记录长度，脱敏后可安全展示
         LoginDiag.add("PARSE", "access_token=" + (accessToken.isEmpty() ? "空" : ("len" + accessToken.length()))
                 + " openid=" + (openId.isEmpty() ? "空" : ("len" + openId.length()))
                 + " pay_token=" + (payToken.isEmpty() ? "空" : ("len" + payToken.length()))
@@ -352,10 +340,10 @@ public class AgentActivity extends BaseActivity {
             String appid = appidFrom(url);
             String chosenAppid = getSelectedGameAppid();
 
-            // appid 一致性检查：这是「其他游戏能登、某个游戏登不上」的首要怀疑点
+            // appid 一致性：排查「其他游戏能登、某个游戏登不上」的关键
             LoginDiag.add("RESULT", "game=" + gameName
                     + " token里appid=" + appid
-                    + " 已选游戏appid=" + chosenAppid
+                    + " 已选appid=" + chosenAppid
                     + " 一致=" + appid.equals(chosenAppid)
                     + " mode=" + currentMode);
 

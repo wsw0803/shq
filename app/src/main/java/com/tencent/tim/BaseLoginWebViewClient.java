@@ -17,19 +17,20 @@ import com.tencent.open.agent.AgentActivity;
 /**
  * 登录模块通用基类（抓号 / 挂机共用）。
  *
- * 多层兜底抓 token：
- * 1) shouldOverrideUrlLoading  常规跳转
- * 2) onPageStarted / Finished  页面 URL
- * 3) doUpdateVisitedHistory    部分 ROM 只回调历史
- * 4) JS 桥 + 轮询              从页面侧发现跳转
+ * 多层兜底抓 token：跳转 / 页面开始结束 / 历史变化 / JS 桥轮询。
  *
- * 关键修复（此前推送失败未入库）：
- * - LoginChromeClient 复用同一实例。原来每次 prepare() 都 new 一个，
- *   弹窗容器状态全丢，依赖 window.open 登录的游戏会卡死。
- * - 拿到 token 后收起弹窗，避免盖住主界面。
+ * 关于「登录卡住」的两种不同病因，这里都做了埋点以便区分：
  *
- * 每条回调都写入 LoginDiag，并自动挂上「诊断」悬浮按钮，
- * 卡住时用户点一下即可导出 URL 轨迹给开发者。
+ * A) Cookie 被系统或 ROM 拦截
+ *    表现：登录页正常，扫码成功，但又跳回登录页或提示未登录。
+ *    处理：开启第三方 Cookie，并在每次页面结束时记录 Cookie 状态
+ *         （域名数量、是否含关键域），便于判断是否真的写进去了。
+ *
+ * B) window.open 弹窗被吞
+ *    表现：点登录后没有任何反应，弹窗不出现。
+ *    处理：setSupportMultipleWindows + onCreateWindow 真实挂载容器。
+ *
+ * 这两者症状不同，不能混为一谈。诊断文件里会分别记录。
  */
 public abstract class BaseLoginWebViewClient extends WebViewClient {
 
@@ -46,8 +47,8 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     private boolean tokenGot = false;
     private boolean errorToastShown = false;
     private boolean watchdogFired = false;
+    private int pageCount = 0;
 
-    /** 复用同一个 ChromeClient，保住弹窗容器状态。 */
     private LoginChromeClient chromeClient;
 
     private WebView lastView;
@@ -83,7 +84,6 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         return tokenGot;
     }
 
-    /** 统一的 token 投递口。 */
     protected final boolean deliver(WebView view, String url) {
         if (!isTokenUrl(url)) return false;
         synchronized (this) {
@@ -94,6 +94,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             tokenGot = true;
         }
         LoginDiag.add("TOKEN", "命中 token URL");
+        logCookieState("拿到token时");
         try {
             handler.removeCallbacks(watchdog);
         } catch (Throwable ignored) {
@@ -138,14 +139,36 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     protected void onTokenDelivered(WebView view) {
     }
 
-    /** 幂等地补齐 WebView 设置，并复用 ChromeClient 与 JS 桥。 */
+    /**
+     * 记录 Cookie 状态。
+     *
+     * CookieManager 没有直接枚举全部 Cookie 的接口，但可以按关键域名探测：
+     * 登录态主要落在 qq.com / ptlogin2.qq.com 上。
+     * 这里把关键 cookie 的「有无」和总长度记下来，足以判断是否写入成功。
+     */
+    protected void logCookieState(String when) {
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            String qq = cm.getCookie("https://qq.com");
+            String pt = cm.getCookie("https://xui.ptlogin2.qq.com");
+            String connect = cm.getCookie("https://connect.qq.com");
+            int qqLen = qq == null ? 0 : qq.length();
+            int ptLen = pt == null ? 0 : pt.length();
+            int cnLen = connect == null ? 0 : connect.length();
+            LoginDiag.add("COOKIE", when + " qq.com=" + qqLen
+                    + " ptlogin=" + ptLen + " connect=" + cnLen
+                    + " 有登录态=" + (ptLen > 0 || cnLen > 0));
+        } catch (Throwable t) {
+            LoginDiag.add("COOKIE", when + " 读取失败: " + t);
+        }
+    }
+
     protected void prepare(final WebView view) {
         if (view == null) return;
         lastView = view;
 
         if (!configured) {
             configured = true;
-            LoginDiag.begin();
             try {
                 WebSettings ws = view.getSettings();
                 ws.setJavaScriptEnabled(true);
@@ -170,12 +193,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                 } catch (Throwable ignored) {
                 }
                 LoginDiag.add("SETUP", "UA=" + ws.getUserAgentString());
-            } catch (Throwable ignored) {
-            }
-
-            // 挂上诊断按钮，卡住时用户可自行导出
-            try {
-                LoginDiag.attachButton(activity, activity.getSelectedGameName());
+                logCookieState("初始化时");
             } catch (Throwable ignored) {
             }
         }
@@ -233,7 +251,8 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     @Override
     public void onPageStarted(WebView view, String url, Bitmap favicon) {
         super.onPageStarted(view, url, favicon);
-        LoginDiag.add("PAGE+", url);
+        pageCount++;
+        LoginDiag.add("PAGE+", "#" + pageCount + " " + url);
         prepare(view);
         startWatchdog(view);
         deliver(view, url);
@@ -261,6 +280,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             CookieManager.getInstance().flush();
         } catch (Throwable ignored) {
         }
+        logCookieState("页面加载完成");
         if (!deliver(view, url) && view != null) {
             deliver(view, view.getUrl());
         }
