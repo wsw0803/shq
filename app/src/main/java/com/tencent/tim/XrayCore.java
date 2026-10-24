@@ -18,17 +18,14 @@ import java.security.MessageDigest;
 /**
  * 更新下载用的本地代理核心（只代理本应用的更新流量，不接管全局）。
  *
- * 二进制落地位置：
- * Android 10 起应用私有目录是 noexec，直接 exec 会被拒。
- * 本应用有 root，用 su 安装到 /data/local/tmp/shq/，该目录可执行、升级后保留。
+ * 本次关键修复：
+ * 首次使用要下载 31MB 核心，原来只给 10 秒等待，根本下不完，
+ * 导致第一次更新必然失败；而核心其实还在后台下载、最终会成功，
+ * 表现就是「卡在探测文件，随后失败」。
+ * 现在增加了进度回调，界面能看到「下载核心 62%」，并给足时间。
  *
- * 关键修复：
- * 1) 启动是否成功，改为探测 127.0.0.1:10808 能否连上。
- *    原来靠 Process.exitValue() 抛异常来判断「还活着」，
- *    但 xray 由 su -c 启动会脱离 Java 进程树，这个判断既可能误判成功
- *    也可能误判失败（App 重启后 proc 为 null）。
- * 2) 启动失败时把 xray 的 stderr 记进 lastError，便于定位配置错误。
- * 3) 下载核心时若已存在同 SHA 的文件则跳过下载。
+ * 启动成功与否改用探测 127.0.0.1:10808 判断：
+ * xray 由 su -c 启动会脱离 Java 进程树，Process 状态不可靠。
  */
 public class XrayCore {
 
@@ -43,10 +40,14 @@ public class XrayCore {
     private static final String KEY_READY = "ready";
     private static final String KEY_VER = "ver";
 
-    /** 最近一次失败原因，供诊断显示。 */
     public static volatile String lastError = "";
 
     private static volatile Process proc;
+
+    /** 进度回调，用于在界面显示下载百分比。 */
+    public interface Progress {
+        void onStage(String text);
+    }
 
     public static String buildConfig() {
         return NodeConfig.buildJson(SOCKS_PORT);
@@ -64,18 +65,27 @@ public class XrayCore {
         return prefs(c).getBoolean(KEY_READY, false);
     }
 
-    /** 确保核心与配置都可用。二进制缺失则下载；配置指纹变了只重写 config。 */
     public static boolean ensureReady(Context c) {
+        return ensureReady(c, null);
+    }
+
+    /** 确保核心与配置都可用。二进制缺失则下载（带进度）；配置指纹变了只重写 config。 */
+    public static boolean ensureReady(Context c, Progress p) {
         if (!isInstalled(c)) {
-            if (!downloadAndInstall(c)) return false;
+            if (!downloadAndInstall(c, p)) return false;
         } else if (!NodeConfig.isApplied(c)) {
+            if (p != null) p.onStage("更新代理配置...");
             if (!writeConfig(c)) return false;
         }
         return true;
     }
 
-    /** 从仓库下载核心，校验 SHA-256，再通过 su 安装到 /data/local/tmp/shq/。 */
     public static boolean downloadAndInstall(Context c) {
+        return downloadAndInstall(c, null);
+    }
+
+    /** 从仓库下载核心，校验 SHA-256，再通过 su 安装到 /data/local/tmp/shq/。 */
+    public static boolean downloadAndInstall(Context c, Progress p) {
         File work = new File(c.getFilesDir(), "xray_dl");
         try {
             if (!work.exists()) work.mkdirs();
@@ -85,8 +95,8 @@ public class XrayCore {
         File bin = new File(work, BIN_NAME);
         File shaFile = new File(work, BIN_NAME + ".sha256");
 
-        // 核心下载时 xray 通常还没起来，走「手动代理 → 直连」，避免自我依赖。
-        if (!httpToFile(c, REPO_RAW + BIN_NAME + ".sha256", shaFile)) {
+        if (p != null) p.onStage("读取核心校验值...");
+        if (!httpToFile(c, REPO_RAW + BIN_NAME + ".sha256", shaFile, null, p)) {
             lastError = "下载校验文件失败";
             return false;
         }
@@ -101,12 +111,13 @@ public class XrayCore {
         try {
             if (bin.exists() && bin.length() > 1024 && expect.equals(sha256(bin))) {
                 reuse = true;
+                if (p != null) p.onStage("核心已存在，跳过下载");
             }
         } catch (Throwable ignored) {
         }
 
         if (!reuse) {
-            if (!httpToFile(c, REPO_RAW + BIN_NAME, bin)) {
+            if (!httpToFile(c, REPO_RAW + BIN_NAME, bin, "下载核心", p)) {
                 lastError = "下载核心失败";
                 return false;
             }
@@ -114,6 +125,7 @@ public class XrayCore {
                 lastError = "核心文件过小";
                 return false;
             }
+            if (p != null) p.onStage("校验核心...");
             String actual = sha256(bin);
             if (!actual.equals(expect)) {
                 bin.delete();
@@ -122,6 +134,7 @@ public class XrayCore {
             }
         }
 
+        if (p != null) p.onStage("安装核心...");
         String local = RootUtil.shellQuote(bin.getAbsolutePath());
         String script = "mkdir -p " + REMOTE_DIR + "\n"
                 + "cp " + local + " " + REMOTE_DIR + "/" + BIN_NAME + "\n"
@@ -169,14 +182,8 @@ public class XrayCore {
         return true;
     }
 
-    /**
-     * 启动核心。
-     *
-     * 成功判定改为探测端口：xray 由 su -c 启动会脱离 Java 进程树，
-     * Process 对象的状态不能代表它是否在工作。
-     */
+    /** 启动核心。成功判定改为探测端口，最多等 3 秒。 */
     public static boolean start(Context c) {
-        // 已经在监听就直接复用
         if (probePort()) {
             Net.invalidateCoreProbe();
             return true;
@@ -199,7 +206,6 @@ public class XrayCore {
             return false;
         }
 
-        // 最多等 3 秒，每 200ms 探一次端口
         for (int i = 0; i < 15; i++) {
             try {
                 Thread.sleep(200);
@@ -232,7 +238,6 @@ public class XrayCore {
         return false;
     }
 
-    /** 探测 SOCKS 端口是否可连。 */
     private static boolean probePort() {
         Socket s = null;
         try {
@@ -251,7 +256,6 @@ public class XrayCore {
         return start(c);
     }
 
-    /** 仅供诊断显示。端口探测才是可靠依据。 */
     public static boolean isAlive() {
         return probePort();
     }
@@ -262,7 +266,6 @@ public class XrayCore {
             try { p.destroy(); } catch (Throwable ignored) {}
             proc = null;
         }
-        // 兜底清理，避免端口占用导致下次起不来
         try {
             runSu("pkill -f " + REMOTE_DIR + "/" + BIN_NAME + "\n");
         } catch (Throwable ignored) {
@@ -270,7 +273,6 @@ public class XrayCore {
         Net.invalidateCoreProbe();
     }
 
-    /** 彻底卸载：删二进制、配置与状态，下次会重新下载。 */
     public static void uninstall(Context c) {
         stop();
         runSu("rm -rf " + REMOTE_DIR + "\n");
@@ -303,8 +305,11 @@ public class XrayCore {
         }
     }
 
-    /** 下载文件，走「手动代理 → 直连」。 */
-    private static boolean httpToFile(Context c, String url, File dst) {
+    /**
+     * 下载文件，走「手动代理 → 直连」。
+     * label 非空时会把进度回调出去，让界面显示「下载核心 62%」。
+     */
+    private static boolean httpToFile(Context c, String url, File dst, String label, Progress p) {
         HttpURLConnection conn = null;
         InputStream in = null;
         FileOutputStream out = null;
@@ -313,16 +318,33 @@ public class XrayCore {
             conn = (manual != null)
                     ? (HttpURLConnection) new java.net.URL(url).openConnection(manual)
                     : (HttpURLConnection) new java.net.URL(url).openConnection();
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(60000);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(90000);
             conn.setInstanceFollowRedirects(true);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0");
             if (conn.getResponseCode() != 200) return false;
+
+            long total = conn.getContentLength();
             in = conn.getInputStream();
             out = new FileOutputStream(dst, false);
             byte[] buf = new byte[65536];
             int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            long got = 0;
+            long lastReport = 0;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                got += n;
+                // 每 1MB 报一次进度，避免过于频繁刷新界面
+                if (p != null && label != null && got - lastReport > 1048576L) {
+                    lastReport = got;
+                    if (total > 0) {
+                        p.onStage(label + " " + (got * 100 / total) + "% "
+                                + (got / 1048576L) + "/" + (total / 1048576L) + "MB");
+                    } else {
+                        p.onStage(label + " " + (got / 1048576L) + "MB");
+                    }
+                }
+            }
             out.flush();
             return dst.length() > 0;
         } catch (Exception e) {

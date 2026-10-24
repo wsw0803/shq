@@ -34,18 +34,29 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 多线程分片下载 + 断点续传 + 安装。
  *
- * 本次修复的几处卡住问题：
+ * 本次修复：
  *
- * 1) 代理准备最多等 10 秒，超时按当前线路继续，不阻塞。
- * 2) 探测阶段失败时明确提示原因（原来只是静默返回失败，
- *    界面文字停在「探测文件」，看起来就是卡死）。
- * 3) 所有阶段都会更新提示文字，任何一步都能看出走到哪里。
+ * 1) 首次更新必然失败的问题
+ *    第一次要下载 31MB 的 xray 核心，原来只给 10 秒等待，根本下不完，
+ *    于是用直连去探测 github → 不通 → 失败。
+ *    而核心其实还在后台下载、最终会成功，表现就是「卡在探测文件随后失败」。
+ *    现在：核心未安装时给足 180 秒，并把下载进度显示在弹窗上；
+ *    核心已安装时只等 10 秒（启动很快）。
+ *
+ * 2) 探测失败但核心随后就绪时自动重试一次
+ *    避免「刚好在探测超时那一刻核心才好」的偶然失败。
+ *
+ * 3) 探测失败原因会明确显示（超时/连接失败/大小不符），
+ *    不再静默停留。
  */
 public class Updater {
 
     private static final int THREADS = 8;
     private static final long MIN_SIZE = 500000L;
-    private static final long CORE_WAIT_MS = 10000L;
+    /** 核心已安装时，启动等待上限。 */
+    private static final long CORE_WAIT_READY_MS = 10000L;
+    /** 核心未安装时，需要下载 31MB，给足时间。 */
+    private static final long CORE_WAIT_DOWNLOAD_MS = 180000L;
     private static final long PROBE_WAIT_MS = 12000L;
 
     private static final int OK = 0;
@@ -121,38 +132,59 @@ public class Updater {
 
         new Thread(new Runnable() {
             public void run() {
-                // 阶段一：并行准备代理核心，最多等 10 秒
-                stage(tip, "准备网络（最多等 10 秒）...");
+                boolean installed = XrayCore.isInstalled(act);
+                long waitMs = installed ? CORE_WAIT_READY_MS : CORE_WAIT_DOWNLOAD_MS;
+                stage(tip, installed
+                        ? "启动代理（最多等 " + (CORE_WAIT_READY_MS / 1000) + " 秒）..."
+                        : "首次需下载代理核心（约 31MB），请稍候...");
+
                 Thread coreThread = new Thread(new Runnable() {
                     public void run() {
                         try {
-                            if (XrayCore.ensureReady(act)) {
+                            XrayCore.Progress cb = new XrayCore.Progress() {
+                                public void onStage(String text) {
+                                    stage(tip, text);
+                                }
+                            };
+                            if (XrayCore.ensureReady(act, cb)) {
                                 boolean ok = XrayCore.start(act);
                                 if (!ok) {
                                     LoginDiag.add("PROXY", "核心启动失败: " + XrayCore.lastError);
+                                } else {
+                                    LoginDiag.add("PROXY", "核心已就绪");
                                 }
                             } else {
                                 LoginDiag.add("PROXY", "核心准备失败: " + XrayCore.lastError);
                             }
-                        } catch (Throwable ignored) {
+                        } catch (Throwable t) {
+                            LoginDiag.add("PROXY", "核心线程异常: " + t);
                         }
                     }
                 });
                 coreThread.start();
                 try {
-                    coreThread.join(CORE_WAIT_MS);
+                    coreThread.join(waitMs);
                 } catch (InterruptedException ignored) {
                 }
-
-                // 阶段二：探测
-                stage(tip, "探测文件...· " + Net.routeName(act));
 
                 File dir = act.getExternalFilesDir(null);
                 final File out = new File(dir, "update.apk");
                 final File part = new File(dir, "update.apk.part");
                 final File state = new File(dir, "update.apk.state");
 
+                // 第一轮
+                stage(tip, "探测文件...· " + Net.routeName(act));
                 int result = fetch(act, job, bar, tip, buildUrls(url), expectSize, part, state, out);
+
+                // 若失败且此时核心刚好就绪，换代理重试一次
+                if (result != OK && Net.invalidateAndCheck()) {
+                    LoginDiag.add("PROXY", "探测失败，核心此时已就绪，切换到代理重试");
+                    job.failReason = "";
+                    job.total.set(0);
+                    job.got.set(0);
+                    stage(tip, "切换到代理重试...· " + Net.routeName(act));
+                    result = fetch(act, job, bar, tip, buildUrls(url), expectSize, part, state, out);
+                }
 
                 boolean signOk = false;
                 if (result == OK) {
@@ -225,10 +257,7 @@ public class Updater {
         try { return new java.net.URL(url).getHost(); } catch (Exception e) { return ""; }
     }
 
-    /**
-     * 探测文件大小。
-     * 失败时把原因写进 job.failReason，避免静默失败让界面看起来卡住。
-     */
+    /** 探测文件大小。失败时把原因写进 job.failReason，避免静默失败。 */
     private static boolean probe(final Job job, final java.util.List<String> urls, final long expectSize) {
         final Object foundLock = new Object();
         final boolean[] found = new boolean[1];
@@ -250,7 +279,7 @@ public class Updater {
                             t = c.getContentLength();
                         }
                         if (t <= MIN_SIZE) {
-                            job.failReason = "文件大小异常(" + t + ")";
+                            job.failReason = "文件大小异常(" + t + ") HTTP" + code;
                             return;
                         }
                         if (expectSize > 0 && t != expectSize) {
@@ -266,8 +295,7 @@ public class Updater {
                             job.curHost = hostOf(u);
                         }
                     } catch (Exception e) {
-                        String m = String.valueOf(e.getMessage());
-                        job.failReason = "连接失败: " + m;
+                        job.failReason = "连接失败: " + e.getMessage();
                     } finally {
                         if (c != null) c.disconnect();
                     }
@@ -386,7 +414,6 @@ public class Updater {
         }
 
         if (!job.rangeOk) {
-            // single() 成功时已完成 part -> out，必须直接返回
             return single(act, job, bar, tip, src, expectSize, part, out) ? OK : FAIL_DOWNLOAD;
         }
 

@@ -21,12 +21,11 @@ import java.net.URL;
  * 原来用 XrayCore.isAlive() 判断，但那只反映 Java 侧的 Process 对象状态。
  * xray 由 su -c 启动，会脱离 Java 进程树；App 重启后 proc 为 null，
  * 即使核心其实正常运行，也会被判成「未运行」而退回直连。
- * 现在直接探测 127.0.0.1:10808 是否可连，这才是判断核心是否可用的可靠依据。
+ * 现在直接探测 127.0.0.1:10808 是否可连，这才是可靠依据。
  */
 public class Net {
 
     public static final String PREF = "net_pref";
-    /** 手动代理，格式 host:port，为空表示不用。 */
     public static final String KEY_MANUAL_PROXY = "manual_proxy";
 
     private static volatile Proxy manualProxy = null;
@@ -50,16 +49,24 @@ public class Net {
             String s = c.getSharedPreferences(PREF, Context.MODE_PRIVATE)
                     .getString(KEY_MANUAL_PROXY, "");
             if (s == null) return;
-            s = s.trim();
-            if (s.isEmpty()) return;
+            manualProxy = buildProxy(s);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static Proxy buildProxy(String hostPort) {
+        try {
+            if (hostPort == null) return null;
+            String s = hostPort.trim();
+            if (s.isEmpty()) return null;
             int i = s.lastIndexOf(':');
-            if (i <= 0) return;
+            if (i <= 0) return null;
             String host = s.substring(0, i).trim();
             int port = Integer.parseInt(s.substring(i + 1).trim());
-            if (host.length() > 0 && port > 0 && port < 65536) {
-                manualProxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress(host, port));
-            }
-        } catch (Throwable ignored) {
+            if (host.length() == 0 || port <= 0 || port >= 65536) return null;
+            return new Proxy(Proxy.Type.SOCKS, new InetSocketAddress(host, port));
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -75,35 +82,24 @@ public class Net {
         return manualProxy;
     }
 
+    /**
+     * 设置手动代理。
+     * 注意：原来先 apply()（异步写盘）再 reload()（立刻读），会读到旧值，
+     * 刚设置的代理不生效。这里直接按新值重建对象，不依赖磁盘。
+     */
     public static void setManualProxy(Context c, String hostPort) {
         if (c == null) return;
+        String saved = hostPort == null ? "" : hostPort.trim();
         SharedPreferences.Editor e = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit();
-        if (hostPort == null || hostPort.trim().isEmpty()) {
+        if (saved.isEmpty()) {
             e.remove(KEY_MANUAL_PROXY);
         } else {
-            e.putString(KEY_MANUAL_PROXY, hostPort.trim());
+            e.putString(KEY_MANUAL_PROXY, saved);
         }
-        // 先同步读回确认值，避免 apply() 异步写盘导致 reload 读到旧值
-        String saved = hostPort == null ? "" : hostPort.trim();
-        e.putString(KEY_MANUAL_PROXY, saved);
         e.apply();
 
-        // 直接按新值重建，不依赖从磁盘重读
         synchronized (Net.class) {
-            manualProxy = null;
-            try {
-                if (!saved.isEmpty()) {
-                    int i = saved.lastIndexOf(':');
-                    if (i > 0) {
-                        String host = saved.substring(0, i).trim();
-                        int port = Integer.parseInt(saved.substring(i + 1).trim());
-                        if (host.length() > 0 && port > 0 && port < 65536) {
-                            manualProxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress(host, port));
-                        }
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
+            manualProxy = buildProxy(saved);
             manualLoaded = true;
         }
     }
@@ -114,10 +110,7 @@ public class Net {
                 .getString(KEY_MANUAL_PROXY, "");
     }
 
-    /**
-     * 探测 xray 的 SOCKS 端口是否真的能连上。
-     * 这才是「核心是否可用」的可靠依据，比看 Process 对象准。
-     */
+    /** 探测 xray 的 SOCKS 端口是否真的能连上。 */
     public static boolean isCoreUp() {
         long now = System.currentTimeMillis();
         if (now - coreCheckedAt < CORE_PROBE_TTL) return coreUp;
@@ -140,6 +133,12 @@ public class Net {
     /** 强制下一次重新探测。 */
     public static void invalidateCoreProbe() {
         coreCheckedAt = 0L;
+    }
+
+    /** 清缓存并立刻重新探测，返回最新结果。用于探测失败后判断是否值得重试。 */
+    public static boolean invalidateAndCheck() {
+        coreCheckedAt = 0L;
+        return isCoreUp();
     }
 
     /** 打开连接。优先 xray（端口探测），其次手动代理，最后直连。 */
