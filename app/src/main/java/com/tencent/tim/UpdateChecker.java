@@ -15,28 +15,19 @@ import android.widget.TextView;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 更新提示。
  *
- * 只处理最新一版，不提供版本选择。
- * 重点是显示「当前版本」到「最新版本」之间的全部提交：
- * 中间有几个提交，就列出几条 Summary。
+ * 只处理最新一版，不提供版本选择：有更新就弹一条，没有就不弹。
+ * 显示「当前版本 → 最新版本」之间的全部提交，有几个提交就列几条。
  *
- * 取数流程：
- *   1) Releases 找最新可用版本（跳过 draft / prerelease）
- *   2) 版本号反推 run_number：run = MAJOR*100 + MINOR*10 + PATCH
- *      与 workflow 的 Calculate Version 互为逆运算
- *   3) 用 run_number 在 /actions/runs 里定位两端各自的 head_sha
- *   4) 调 compare API 拿到区间内的提交列表
- *   5) 逐条展示：首行作标题，正文作说明
- *
- * 任一步失败都不会卡住更新本身，只是显示内容降级。
+ * 网络统一走 Net.open()，因此会用到 xray 代理或用户手动代理。
+ * 之前这里用裸连接，网络被墙时静默返回 null，
+ * 表现成「没有新版本」，用户根本不知道是查询失败。
+ * 现在失败会明确提示。
  */
 public class UpdateChecker {
 
@@ -48,50 +39,70 @@ public class UpdateChecker {
     private static final String COMPARE_API =
             "https://api.github.com/repos/" + REPO + "/compare/";
 
-    /** 一条提交：首行标题 + 正文。 */
     private static class Commit {
         String title = "";
         String body = "";
     }
 
-    /** 最新一版的更新信息。 */
     public static class Info {
         public String currentVersion = "";
         public String version = "";
         public String apkUrl = "";
         public long size = 0;
-        /** 区间内的提交，按时间从旧到新。 */
         public List<Commit> commits = new ArrayList<Commit>();
-        /** 提交数量。 */
         public int commitCount = 0;
     }
 
     public static void check(final Activity act) {
         new Thread(new Runnable() {
             public void run() {
-                final Info info = findNewer(act);
-                if (info == null) return;
+                // 结果区分三种：有更新 / 无更新 / 查询失败
+                final int[] state = new int[]{STATE_FAIL};
+                final Info info = new Info();
+                try {
+                    state[0] = resolve(act, info);
+                } catch (Throwable t) {
+                    state[0] = STATE_FAIL;
+                }
+
                 act.runOnUiThread(new Runnable() {
                     public void run() {
-                        show(act, info);
+                        if (state[0] == STATE_HAS_UPDATE) {
+                            show(act, info);
+                        } else if (state[0] == STATE_FAIL) {
+                            android.widget.Toast.makeText(act,
+                                    "检查更新失败（" + Net.routeName(act) + "），请检查网络或代理设置",
+                                    android.widget.Toast.LENGTH_LONG).show();
+                        }
+                        // STATE_NO_UPDATE：静默，已是最新
                     }
                 });
             }
         }).start();
     }
 
-    private static Info findNewer(Activity act) {
+    private static final int STATE_HAS_UPDATE = 1;
+    private static final int STATE_NO_UPDATE = 2;
+    private static final int STATE_FAIL = 3;
+
+    private static int resolve(Activity act, Info info) {
         String currentVersion;
         try {
             currentVersion = act.getPackageManager()
                     .getPackageInfo(act.getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return null;
+            return STATE_FAIL;
         }
 
-        // 1) 最新 Release
-        org.json.JSONArray releases = getJsonArray(RELEASES_API);
-        if (releases == null) return null;
+        String body = httpGet(act, RELEASES_API);
+        if (body == null) return STATE_FAIL;
+
+        org.json.JSONArray releases;
+        try {
+            releases = new org.json.JSONArray(body);
+        } catch (Exception e) {
+            return STATE_FAIL;
+        }
 
         String bestVer = "";
         String apkUrl = "";
@@ -136,38 +147,56 @@ public class UpdateChecker {
             apkSize = size;
         }
 
-        if (bestVer.isEmpty() || apkUrl.isEmpty()) return null;
+        if (bestVer.isEmpty() || apkUrl.isEmpty()) return STATE_NO_UPDATE;
 
-        Info info = new Info();
         info.currentVersion = currentVersion;
         info.version = bestVer;
         info.apkUrl = apkUrl;
         info.size = apkSize;
 
-        fillCommits(info);
-        return info;
+        fillCommits(act, info);
+        return STATE_HAS_UPDATE;
     }
 
-    /**
-     * 拉取「当前版本 → 最新版本」之间的提交。
-     *
-     * 版本号 → run_number → head_sha，再用 compare API 取区间提交。
-     * 任何一步拿不到就降级：至少显示最新那一条提交。
-     */
-    private static void fillCommits(Info info) {
+    /** 取「当前版本 → 最新版本」区间内的全部提交。失败则降级为最新 1 条。 */
+    private static void fillCommits(Activity act, Info info) {
         int wantRun = runNumberFromVersion(info.version);
         int curRun = runNumberFromVersion(info.currentVersion);
 
-        Map<Integer, String> shaByRun = new HashMap<Integer, String>();
-        Map<Integer, String> msgByRun = new HashMap<Integer, String>();
-        collectRuns(shaByRun, msgByRun);
+        String runsBody = httpGet(act, RUNS_API);
+        if (runsBody == null) {
+            addFallbackFromRelease(act, info);
+            return;
+        }
+
+        java.util.Map<Integer, String> shaByRun = new java.util.HashMap<Integer, String>();
+        java.util.Map<Integer, String> msgByRun = new java.util.HashMap<Integer, String>();
+
+        try {
+            org.json.JSONObject root = new org.json.JSONObject(runsBody);
+            org.json.JSONArray runs = root.optJSONArray("workflow_runs");
+            if (runs != null) {
+                for (int i = 0; i < runs.length(); i++) {
+                    org.json.JSONObject run = runs.optJSONObject(i);
+                    if (run == null) continue;
+                    int num = run.optInt("run_number", -1);
+                    if (num < 0) continue;
+                    String sha = run.optString("head_sha", "").trim();
+                    if (!sha.isEmpty()) shaByRun.put(num, sha);
+                    String msg = "";
+                    org.json.JSONObject head = run.optJSONObject("head_commit");
+                    if (head != null) msg = head.optString("message", "");
+                    if (!msg.trim().isEmpty()) msgByRun.put(num, msg);
+                }
+            }
+        } catch (Exception e) {
+        }
 
         String headSha = shaByRun.get(wantRun);
         String baseSha = shaByRun.get(curRun);
 
-        // 优先：两端都能定位，取区间提交
         if (headSha != null && baseSha != null && !headSha.equals(baseSha)) {
-            List<Commit> list = compareCommits(baseSha, headSha);
+            List<Commit> list = compareCommits(act, baseSha, headSha);
             if (list != null && !list.isEmpty()) {
                 info.commits = list;
                 info.commitCount = list.size();
@@ -175,7 +204,7 @@ public class UpdateChecker {
             }
         }
 
-        // 降级 1：只取最新那一条提交
+        // 降级：至少给最新那一条
         String latestMsg = msgByRun.get(wantRun);
         if (latestMsg != null && !latestMsg.trim().isEmpty()) {
             Commit c = new Commit();
@@ -187,53 +216,42 @@ public class UpdateChecker {
         }
     }
 
-    /** 遍历运行列表，建立 run_number → head_sha / 提交信息 的映射。 */
-    private static void collectRuns(Map<Integer, String> shaByRun, Map<Integer, String> msgByRun) {
-        org.json.JSONObject root = getJsonObject(RUNS_API);
-        if (root == null) return;
-        org.json.JSONArray runs = root.optJSONArray("workflow_runs");
-        if (runs == null) return;
-
-        for (int i = 0; i < runs.length(); i++) {
-            org.json.JSONObject run = runs.optJSONObject(i);
-            if (run == null) continue;
-            int num = run.optInt("run_number", -1);
-            if (num < 0) continue;
-
-            String sha = run.optString("head_sha", "").trim();
-            if (!sha.isEmpty()) shaByRun.put(num, sha);
-
-            String msg = "";
-            org.json.JSONObject head = run.optJSONObject("head_commit");
-            if (head != null) msg = head.optString("message", "");
-            if (!msg.trim().isEmpty()) msgByRun.put(num, msg);
-        }
+    /** 连 Actions 也拿不到时的兜底：至少显示版本号，不空着。 */
+    private static void addFallbackFromRelease(Activity act, Info info) {
+        Commit c = new Commit();
+        c.title = "shq v" + info.version;
+        c.body = "";
+        info.commits = new ArrayList<Commit>();
+        info.commits.add(c);
+        info.commitCount = 1;
     }
 
-    /** compare API：取 base..head 之间的提交，按 api 返回顺序（旧→新）。 */
-    private static List<Commit> compareCommits(String baseSha, String headSha) {
-        org.json.JSONObject root = getJsonObject(COMPARE_API + baseSha + "..." + headSha);
-        if (root == null) return null;
-
-        org.json.JSONArray commits = root.optJSONArray("commits");
-        if (commits == null) return null;
+    private static List<Commit> compareCommits(Activity act, String baseSha, String headSha) {
+        String body = httpGet(act, COMPARE_API + baseSha + "..." + headSha);
+        if (body == null) return null;
 
         List<Commit> out = new ArrayList<Commit>();
-        for (int i = 0; i < commits.length(); i++) {
-            org.json.JSONObject item = commits.optJSONObject(i);
-            if (item == null) continue;
-            org.json.JSONObject c = item.optJSONObject("commit");
-            if (c == null) continue;
-            String msg = c.optString("message", "");
-            if (msg.trim().isEmpty()) continue;
-
-            Commit one = new Commit();
-            one.title = firstLine(msg);
-            one.body = stripFirstLine(msg).trim();
-            // 过滤掉 CI 自动生成的提交，用户看这些没意义
-            if (one.title.startsWith("chore: update latest apk")) continue;
-            if (one.title.startsWith("chore(core):")) continue;
-            out.add(one);
+        try {
+            org.json.JSONObject root = new org.json.JSONObject(body);
+            org.json.JSONArray commits = root.optJSONArray("commits");
+            if (commits == null) return null;
+            for (int i = 0; i < commits.length(); i++) {
+                org.json.JSONObject item = commits.optJSONObject(i);
+                if (item == null) continue;
+                org.json.JSONObject c = item.optJSONObject("commit");
+                if (c == null) continue;
+                String msg = c.optString("message", "");
+                if (msg.trim().isEmpty()) continue;
+                Commit one = new Commit();
+                one.title = firstLine(msg);
+                one.body = stripFirstLine(msg).trim();
+                // 过滤 CI 自动提交，对用户没有意义
+                if (one.title.startsWith("chore: update latest apk")) continue;
+                if (one.title.startsWith("chore(core):")) continue;
+                out.add(one);
+            }
+        } catch (Exception e) {
+            return null;
         }
         return out;
     }
@@ -250,7 +268,6 @@ public class UpdateChecker {
         return i < 0 ? "" : s.substring(i + 1);
     }
 
-    /** 版本号反推 run_number，与 workflow 里 Calculate Version 互为逆运算。 */
     private static int runNumberFromVersion(String version) {
         if (version == null) return -1;
         String[] p = version.split("\\.");
@@ -280,36 +297,13 @@ public class UpdateChecker {
         return 0;
     }
 
-    private static org.json.JSONArray getJsonArray(String url) {
-        String body = httpGet(url);
-        if (body == null) return null;
-        try {
-            return new org.json.JSONArray(body);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static org.json.JSONObject getJsonObject(String url) {
-        String body = httpGet(url);
-        if (body == null) return null;
-        try {
-            return new org.json.JSONObject(body);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static String httpGet(String url) {
+    /** 统一走 Net.open()，因此会经过代理。 */
+    private static String httpGet(Activity act, String url) {
         HttpURLConnection conn = null;
         BufferedReader br = null;
         try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setRequestMethod("GET");
+            conn = Net.open(act, url, 9000, 9000);
             conn.setRequestProperty("Accept", "application/vnd.github+json");
-            conn.setRequestProperty("User-Agent", "shq-updater");
-            conn.setConnectTimeout(9000);
-            conn.setReadTimeout(9000);
             if (conn.getResponseCode() != 200) return null;
             br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
             StringBuilder sb = new StringBuilder();
@@ -326,12 +320,6 @@ public class UpdateChecker {
         }
     }
 
-    /**
-     * 弹窗：
-     *   顶部   —— 从哪个版本升到哪个版本，中间有多少提交
-     *   中间   —— 逐条列提交（首行标题 + 正文）
-     *   底部   —— 以后再说 / 立即更新
-     */
     private static void show(final Activity act, final Info info) {
         final android.app.Dialog dlg = new android.app.Dialog(act);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -351,7 +339,6 @@ public class UpdateChecker {
         root.setBackground(TokenDialog.glass(act, 22, true));
         root.setPadding(pad, pad, pad, pad);
 
-        // 顶部：版本区间 + 提交数
         TextView title = new TextView(act);
         title.setText("发现新版本 v" + info.version);
         title.setTextColor(0xFFF5F7FA);
@@ -361,12 +348,9 @@ public class UpdateChecker {
         root.addView(title);
 
         TextView sub = new TextView(act);
-        if (info.commitCount > 0) {
-            sub.setText("v" + info.currentVersion + " → v" + info.version
-                    + "，共 " + info.commitCount + " 个提交");
-        } else {
-            sub.setText("v" + info.currentVersion + " → v" + info.version);
-        }
+        String line = "v" + info.currentVersion + " → v" + info.version;
+        if (info.commitCount > 0) line = line + "，共 " + info.commitCount + " 个提交";
+        sub.setText(line);
         sub.setTextColor(0xFF9CA3AF);
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         sub.setGravity(Gravity.CENTER);
@@ -378,7 +362,6 @@ public class UpdateChecker {
         sub.setLayoutParams(subLp);
         root.addView(sub);
 
-        // 中间：逐条提交
         if (!info.commits.isEmpty()) {
             ScrollView scroll = new ScrollView(act);
             LinearLayout list = new LinearLayout(act);
@@ -386,7 +369,6 @@ public class UpdateChecker {
 
             for (int i = 0; i < info.commits.size(); i++) {
                 Commit c = info.commits.get(i);
-
                 LinearLayout block = new LinearLayout(act);
                 block.setOrientation(LinearLayout.VERTICAL);
                 block.setBackground(TokenDialog.glass(act, 12, false));
@@ -423,7 +405,6 @@ public class UpdateChecker {
             }
 
             scroll.addView(list);
-            // 固定高度上限，避免提交多时弹窗超出屏幕
             LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, (int) (screenH * 0.42f));
             scrollLp.bottomMargin = (int) (12 * density);
@@ -438,9 +419,7 @@ public class UpdateChecker {
         later.setTextColor(0xFF9CA3AF);
         later.setBackground(TokenDialog.glass(act, 12, false));
         later.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                dlg.dismiss();
-            }
+            public void onClick(View v) { dlg.dismiss(); }
         });
         LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);

@@ -12,28 +12,28 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
-import java.net.URL;
 import java.security.MessageDigest;
 
 /**
- * 更新下载用的本地代理（仅代理更新流量，不接管全局）。
+ * 更新下载用的本地代理核心（只代理本应用的更新流量，不接管全局）。
  *
- * 为什么只开本地 SOCKS，不做 VpnService：
- * 抓号/上号等业务流量完全不受影响，也不需要申请 VPN 权限，
- * 改动范围最小。只有 Updater 的下载连接会走这里。
+ * 二进制落地位置：
+ * Android 10 起应用私有目录是 noexec，直接 exec 会被拒。
+ * 本应用有 root，所以用 su 安装到 /data/local/tmp/shq/，
+ * 该目录可执行，且 APK 升级后依然存在。
  *
- * 关于二进制落地位置：
- * Android 10 起应用私有目录是 noexec，下载来的可执行文件直接 exec 会被拒。
- * 本应用有 root，所以用 su 安装到 /data/local/tmp/shq/ 再执行：
- * 该目录可执行，且在 APK 升级后依然存在。
+ * 核心从仓库 core/xray 获取，可独立更新，不必重装 APK。
  *
- * 核心从仓库获取，可独立更新，不必重装 APK：
- *   core/xray          二进制
- *   core/xray.sha256   其 SHA-256（用于完整性校验）
+ * 关于「核心自己怎么下载」这个先有鸡还是先有蛋的问题：
+ * 首次使用时 xray 还没起来，没法用它的代理。这里按顺序尝试：
+ *   1) 用户手动配置的代理（Net 里那个，通常是 Clash 之类）
+ *   2) 直连
+ * 只要有一条通就能把核心拉下来，之后一切走 xray。
  */
 public class XrayCore {
 
-    private static final String REPO_RAW = "https://raw.githubusercontent.com/wsw0803/shq/main/core/";
+    private static final String REPO_RAW =
+            "https://raw.githubusercontent.com/wsw0803/shq/main/core/";
     private static final String BIN_NAME = "xray";
     private static final String REMOTE_DIR = "/data/local/tmp/shq";
 
@@ -43,7 +43,7 @@ public class XrayCore {
     private static final String KEY_READY = "ready";
     private static final String KEY_VER = "ver";
 
-    /** 该节点的 VLESS 配置。改动这里即可换节点。 */
+    /** 该节点的 VLESS 配置。换节点只改这几个常量。 */
     public static final String NODE_HOST =
             "6abba132-1847-4cb5-b01d-7abc79f1657c.a01.interface.routely.moe";
     public static final int NODE_PORT = 11001;
@@ -55,9 +55,8 @@ public class XrayCore {
     public static final String NODE_SPX = "/";
     public static final String NODE_FLOW = "xtls-rprx-vision";
 
-    private static Process proc;
+    private static volatile Process proc;
 
-    /** 生成 xray 的 config.json。只开一个本地 SOCKS 入站。 */
     public static String buildConfig() {
         return "{\n"
                 + "  \"log\": { \"loglevel\": \"warning\" },\n"
@@ -103,15 +102,11 @@ public class XrayCore {
         return c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
     }
 
-    /** 核心是否已安装到可执行目录。 */
     public static boolean isInstalled(Context c) {
         return prefs(c).getBoolean(KEY_READY, false);
     }
 
-    /**
-     * 确保核心可用：已安装则直接返回，否则从仓库下载并安装。
-     * 需要在后台线程调用。
-     */
+    /** 确保核心可用：已安装直接返回，否则下载并安装。需在后台线程调用。 */
     public static boolean ensureReady(Context c) {
         if (isInstalled(c)) return true;
         return downloadAndInstall(c);
@@ -128,58 +123,59 @@ public class XrayCore {
         File bin = new File(work, BIN_NAME);
         File shaFile = new File(work, BIN_NAME + ".sha256");
 
-        // 1) 下载校验文件
-        if (!httpToFile(REPO_RAW + BIN_NAME + ".sha256", shaFile)) return false;
+        // 注意：核心下载时 xray 通常还没起来，
+        // 所以这里显式不用 XrayCore 自己的代理，避免自我依赖。
+        // 走「手动代理 → 直连」两条路。
+        if (!httpToFile(c, REPO_RAW + BIN_NAME + ".sha256", shaFile)) return false;
         String expect = readText(shaFile).trim().toLowerCase();
         if (expect.length() < 32) return false;
 
-        // 2) 下载二进制
-        if (!httpToFile(REPO_RAW + BIN_NAME, bin)) return false;
+        if (!httpToFile(c, REPO_RAW + BIN_NAME, bin)) return false;
         if (bin.length() < 1024) return false;
 
-        // 3) 校验完整性
         String actual = sha256(bin);
         if (!actual.equals(expect)) {
             bin.delete();
             return false;
         }
 
-        // 4) 通过 root 安装到可执行目录
         String local = RootUtil.shellQuote(bin.getAbsolutePath());
         String script = "mkdir -p " + REMOTE_DIR + "\n"
                 + "cp " + local + " " + REMOTE_DIR + "/" + BIN_NAME + "\n"
                 + "chmod 755 " + REMOTE_DIR + "/" + BIN_NAME + "\n";
         if (!runSu(script)) return false;
 
-        // 5) 写入配置
         File cfg = new File(work, "config.json");
+        FileOutputStream fos = null;
         try {
-            FileOutputStream fos = new FileOutputStream(cfg, false);
+            fos = new FileOutputStream(cfg, false);
             fos.write(buildConfig().getBytes("UTF-8"));
             fos.flush();
-            fos.close();
-            String cfgScript = "cp " + RootUtil.shellQuote(cfg.getAbsolutePath())
-                    + " " + REMOTE_DIR + "/config.json\n"
-                    + "chmod 644 " + REMOTE_DIR + "/config.json\n";
-            if (!runSu(cfgScript)) return false;
         } catch (Exception e) {
             return false;
+        } finally {
+            try { if (fos != null) fos.close(); } catch (Exception ignored) {}
         }
+
+        String cfgScript = "cp " + RootUtil.shellQuote(cfg.getAbsolutePath())
+                + " " + REMOTE_DIR + "/config.json\n"
+                + "chmod 644 " + REMOTE_DIR + "/config.json\n";
+        if (!runSu(cfgScript)) return false;
 
         prefs(c).edit().putBoolean(KEY_READY, true).putString(KEY_VER, expect).apply();
         return true;
     }
 
-    /** 启动核心。已在运行则直接返回 true。 */
+    /** 启动核心。已在运行直接返回 true。 */
     public static boolean start(Context c) {
-        if (proc != null) return true;
+        if (isAlive()) return true;
         if (!isInstalled(c)) return false;
         try {
             proc = Runtime.getRuntime().exec(new String[]{
                     "su", "-c", REMOTE_DIR + "/" + BIN_NAME + " run -c " + REMOTE_DIR + "/config.json"
             });
-            // 给核心一点启动时间再判断端口
-            Thread.sleep(1200);
+            // 给核心一点启动时间，再判断是否存活
+            Thread.sleep(1500);
             return isAlive();
         } catch (Exception e) {
             proc = null;
@@ -188,9 +184,10 @@ public class XrayCore {
     }
 
     public static boolean isAlive() {
-        if (proc == null) return false;
+        Process p = proc;
+        if (p == null) return false;
         try {
-            proc.exitValue();
+            p.exitValue();
             return false;
         } catch (IllegalThreadStateException running) {
             return true;
@@ -200,23 +197,17 @@ public class XrayCore {
     }
 
     public static void stop() {
-        if (proc != null) {
-            try {
-                proc.destroy();
-            } catch (Throwable ignored) {
-            }
+        Process p = proc;
+        if (p != null) {
+            try { p.destroy(); } catch (Throwable ignored) {}
             proc = null;
         }
-        // 兜底：杀掉残留进程，避免端口占用导致下次起不来
+        // 兜底清理，避免端口占用导致下次起不来
         try {
             runSu("pkill -f " + REMOTE_DIR + "/" + BIN_NAME + "\n");
         } catch (Throwable ignored) {
         }
     }
-
-    // ------------------------------------------------------------------
-    // 工具方法
-    // ------------------------------------------------------------------
 
     private static boolean runSu(String script) {
         Process p = null;
@@ -235,14 +226,22 @@ public class XrayCore {
         }
     }
 
-    private static boolean httpToFile(String url, File dst) {
+    /**
+     * 下载文件。不走 XrayCore.socksProxy()（此刻它多半还没启动），
+     * 而是「手动代理 → 直连」。
+     */
+    private static boolean httpToFile(Context c, String url, File dst) {
         HttpURLConnection conn = null;
         InputStream in = null;
         FileOutputStream out = null;
         try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
+            Proxy manual = Net.manualProxyOrNull(c);
+            conn = (manual != null)
+                    ? (HttpURLConnection) new java.net.URL(url).openConnection(manual)
+                    : (HttpURLConnection) new java.net.URL(url).openConnection();
             conn.setConnectTimeout(15000);
-            conn.setReadTimeout(30000);
+            conn.setReadTimeout(60000);
+            conn.setInstanceFollowRedirects(true);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0");
             if (conn.getResponseCode() != 200) return false;
             in = conn.getInputStream();

@@ -43,10 +43,10 @@ public class SettingsActivity extends BaseActivity {
         Button pickBg = findViewById(R.id.btn_pick_bg);
         Button clearBg = findViewById(R.id.btn_clear_bg);
         pickBg.setOnClickListener(v -> {
-            // 关键：ACTION_GET_CONTENT 拿到的 URI 无法持久化授权，
-            // 重启或升级后就读不到了，背景会「消失」。
-            // 改用 ACTION_OPEN_DOCUMENT，并在拿到后把图片复制进应用私有目录，
-            // 从此不再依赖外部授权。
+            // ACTION_GET_CONTENT 拿到的 URI 无法持久化授权，
+            // 重启或升级后就读不到，背景会「消失」。
+            // 改用 ACTION_OPEN_DOCUMENT，并把图片复制进私有目录，
+            // 之后不再依赖外部授权。
             android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
             it.addCategory(android.content.Intent.CATEGORY_OPENABLE);
             it.setType("image/*");
@@ -59,6 +59,8 @@ public class SettingsActivity extends BaseActivity {
             deleteCustomBg();
             Ui.apply(this);
         });
+
+        setupProxyButton();
 
         seekDpi.setOnSeekBarChangeListener(new L() {
             @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
@@ -106,6 +108,46 @@ public class SettingsActivity extends BaseActivity {
         });
     }
 
+    /**
+     * 手动代理设置。
+     *
+     * 存在的意义：首次使用时代理核心还没下载下来，
+     * 而核心本身也要从网上下载，形成死锁。
+     * 用户若已有可用的本地代理（如 Clash 的 7890），填进来就能完成引导。
+     */
+    private void setupProxyButton() {
+        Button btn = findViewById(R.id.btn_proxy);
+        if (btn == null) return;
+        updateProxyLabel(btn);
+        btn.setOnClickListener(v -> showProxyDialog(btn));
+    }
+
+    private void updateProxyLabel(Button btn) {
+        String cur = Net.getManualProxy(this);
+        btn.setText(cur.isEmpty() ? "更新代理: 未设置" : ("更新代理: " + cur));
+    }
+
+    private void showProxyDialog(final Button label) {
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setText(Net.getManualProxy(this));
+        input.setHint("例如 127.0.0.1:7890");
+        input.setSingleLine(true);
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("更新下载代理")
+                .setMessage("填写本地 SOCKS 代理 host:port，用于下载 xray 核心与更新包。\n留空表示不使用。")
+                .setView(input)
+                .setPositiveButton("保存", (d, w) -> {
+                    Net.setManualProxy(this, input.getText().toString());
+                    updateProxyLabel(label);
+                    android.widget.Toast.makeText(this,
+                            "已保存，当前线路: " + Net.routeName(this),
+                            android.widget.Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     @Override
     protected void onActivityResult(int req, int res, android.content.Intent data) {
         super.onActivityResult(req, res, data);
@@ -116,13 +158,11 @@ public class SettingsActivity extends BaseActivity {
                         uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } catch (Exception ignored) {
             }
-            // 复制到私有目录：即便外部授权失效、或应用升级换了 UID，背景也不会丢
             if (copyToPrivate(uri)) {
                 Ui.prefs(this).edit()
                         .putString(Ui.KEY_BG_URI, Ui.localBgPath(this))
                         .apply();
             } else {
-                // 复制失败时退回原 URI，至少本次能用
                 Ui.prefs(this).edit().putString(Ui.KEY_BG_URI, uri.toString()).apply();
                 android.widget.Toast.makeText(this, "背景已设置（未能复制到本地，重启后可能失效）",
                         android.widget.Toast.LENGTH_LONG).show();
@@ -131,7 +171,6 @@ public class SettingsActivity extends BaseActivity {
         }
     }
 
-    /** 把选中的图片复制到应用私有目录，成功返回 true。 */
     private boolean copyToPrivate(Uri src) {
         InputStream in = null;
         FileOutputStream out = null;

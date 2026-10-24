@@ -25,7 +25,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.security.MessageDigest;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,13 +33,12 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 多线程分片下载 + 断点续传 + 安装。
  *
- * 下载可走本地代理（见 XrayCore）：
- * 若核心已就绪并成功启动，下载连接会挂到 127.0.0.1:SOCKS_PORT；
- * 否则自动直连，不影响原有可用性。
- * 代理只作用于本类的更新下载，业务流量完全不经过它。
+ * 网络统一走 Net.open()：优先 xray 本地代理，其次手动代理，最后直连。
+ * 之前代理起不来时会静默退化为直连，用户看到的就是「下载卡住」。
+ * 现在进度条会显示实际走的线路，卡住时能立刻看出是不是在直连。
  *
- * 安装策略：有 root 时优先 su + pm install -r 静默安装。
- * 签名不一致只作为提示，不再阻断（已 root 且安装器去校验的设备可正常覆盖）。
+ * 安装：有 root 时优先 su + pm install -r 静默安装。
+ * 签名不一致只作提示，不再阻断。
  */
 public class Updater {
 
@@ -49,9 +47,6 @@ public class Updater {
 
     private static final int OK = 0;
     private static final int FAIL_DOWNLOAD = 1;
-
-    /** 本次下载是否使用代理。由 start() 决定，供 open() 读取。 */
-    private static volatile boolean useProxy = false;
 
     private static final class Job {
         final AtomicLong total = new AtomicLong(0);
@@ -69,6 +64,7 @@ public class Updater {
         volatile String curHost = "";
         volatile String pickUrl = "";
         volatile boolean rangeOk = false;
+        volatile Activity act = null;
     }
 
     public static void start(final Activity act, final String url) {
@@ -81,6 +77,7 @@ public class Updater {
 
     public static void start(final Activity act, final String url, final long expectSize, final Runnable onFail) {
         final Job job = new Job();
+        job.act = act;
 
         final Dialog dlg = new Dialog(act);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -103,7 +100,7 @@ public class Updater {
         root.addView(title);
 
         final TextView tip = new TextView(act);
-        tip.setText("正在选择线路...");
+        tip.setText("正在准备网络...");
         tip.setTextColor(0xFF9CA3AF);
         tip.setTextSize(13);
         tip.setGravity(Gravity.CENTER);
@@ -119,12 +116,9 @@ public class Updater {
 
         new Thread(new Runnable() {
             public void run() {
-                // 先尝试把本地代理准备好；失败就直连，不阻断更新
-                useProxy = false;
+                // 先把代理准备好。核心缺失时会去仓库下载（走手动代理或直连）。
                 try {
-                    if (XrayCore.ensureReady(act) && XrayCore.start(act)) {
-                        useProxy = true;
-                    }
+                    if (XrayCore.ensureReady(act)) XrayCore.start(act);
                 } catch (Throwable ignored) {
                 }
 
@@ -151,7 +145,8 @@ public class Updater {
                         if (r == OK) {
                             install(act, out, okSign);
                         } else {
-                            android.widget.Toast.makeText(act, "下载失败，请检查网络后重试",
+                            android.widget.Toast.makeText(act,
+                                    "下载失败（" + Net.routeName(act) + "），请检查网络或代理设置",
                                     android.widget.Toast.LENGTH_LONG).show();
                             if (onFail != null) onFail.run();
                         }
@@ -168,20 +163,13 @@ public class Updater {
         return list;
     }
 
-    private static HttpURLConnection open(String url, long from, long to, int ct, int rt) throws Exception {
-        HttpURLConnection c;
-        if (useProxy) {
-            c = (HttpURLConnection) new URL(url).openConnection(XrayCore.socksProxy());
-        } else {
-            c = (HttpURLConnection) new URL(url).openConnection();
-        }
-        c.setConnectTimeout(ct);
-        c.setReadTimeout(rt);
-        c.setInstanceFollowRedirects(true);
-        c.setRequestProperty("User-Agent", "Mozilla/5.0");
+    /** 统一走 Net.open()，因此会经过 xray 或手动代理。 */
+    private static HttpURLConnection open(Job job, String url, long from, long to, int ct, int rt) throws Exception {
+        HttpURLConnection c = Net.open(job.act, url, ct, rt);
         c.setRequestProperty("Accept-Encoding", "identity");
-        c.setRequestProperty("Cache-Control", "no-cache");
-        if (from >= 0) c.setRequestProperty("Range", "bytes=" + from + "-" + (to >= 0 ? String.valueOf(to) : ""));
+        if (from >= 0) {
+            c.setRequestProperty("Range", "bytes=" + from + "-" + (to >= 0 ? String.valueOf(to) : ""));
+        }
         return c;
     }
 
@@ -197,7 +185,7 @@ public class Updater {
     }
 
     private static String hostOf(String url) {
-        try { return new URL(url).getHost(); } catch (Exception e) { return ""; }
+        try { return new java.net.URL(url).getHost(); } catch (Exception e) { return ""; }
     }
 
     private static boolean probe(final Job job, final java.util.List<String> urls, final long expectSize) {
@@ -209,7 +197,7 @@ public class Updater {
                 public void run() {
                     HttpURLConnection c = null;
                     try {
-                        c = open(u, 0, 0, 8000, 12000);
+                        c = open(job, u, 0, 0, 8000, 12000);
                         int code = c.getResponseCode();
                         long t = -1;
                         boolean rg = false;
@@ -312,11 +300,14 @@ public class Updater {
         final int pct = t > 0 ? (int) (g * 1000 / t) : 0;
         final String sp = job.speed > 0 ? String.format("%.1f MB/s", job.speed / 1048576.0) : "0 MB/s";
         final String host = job.curHost;
-        final String route = useProxy ? "代理" : "直连";
+        final String route = Net.routeName(act);
         act.runOnUiThread(new Runnable() {
             public void run() {
                 if (bar != null) bar.setProgress(pct);
-                if (tip != null) tip.setText((pct / 10) + "." + (pct % 10) + "% · " + sp + " · " + route + " · " + host);
+                if (tip != null) {
+                    tip.setText((pct / 10) + "." + (pct % 10) + "% · " + sp
+                            + " · " + route + " · " + host);
+                }
             }
         });
     }
@@ -336,7 +327,7 @@ public class Updater {
         }
 
         if (!job.rangeOk) {
-            // single() 成功时已经完成 part -> out，必须直接返回，
+            // single() 成功时已完成 part -> out，必须直接返回，
             // 否则会落到下面的收尾逻辑把成品删掉。
             return single(act, job, bar, tip, src, expectSize, part, out) ? OK : FAIL_DOWNLOAD;
         }
@@ -412,7 +403,7 @@ public class Updater {
             RandomAccessFile raf = null;
             try {
                 long pos = job.segStart[idx] + job.segDone[idx];
-                c = open(src, pos, job.segEnd[idx], 10000, 20000);
+                c = open(job, src, pos, job.segEnd[idx], 12000, 25000);
                 int code = c.getResponseCode();
                 if (code != 206 && code != 200) throw new Exception("http " + code);
                 in = c.getInputStream();
@@ -450,7 +441,7 @@ public class Updater {
         InputStream in = null;
         FileOutputStream fos = null;
         try {
-            c = open(src, -1, -1, 10000, 25000);
+            c = open(job, src, -1, -1, 12000, 30000);
             if (c.getResponseCode() != 200) return false;
             long len = c.getContentLength();
             in = c.getInputStream();
@@ -480,7 +471,6 @@ public class Updater {
         }
     }
 
-    /** 判断 APK 与本应用签名是否一致。仅用于提示，不阻断安装。 */
     private static boolean signatureMatches(Activity act, File apk) {
         try {
             PackageManager pm = act.getPackageManager();
