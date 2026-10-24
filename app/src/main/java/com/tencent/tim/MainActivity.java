@@ -51,7 +51,7 @@ public class MainActivity extends BaseActivity {
     private static final String KEY_SYNCED_DATA = "synced_data";
     private static final String KEY_CLOUD_APPID_ENABLED = "cloud_appid_enabled";
     private static final String KEY_STORAGE_URI = "storage_uri";
-    
+
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
     private static final int REQUEST_STORAGE_PERMISSION = 200;
     private static final int REQUEST_MANAGE_STORAGE = 300;
@@ -85,10 +85,9 @@ public class MainActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
-        // 设置沉浸式效果（保留状态栏）
+
         setupImmersiveMode();
-        
+
         setContentView(R.layout.activity_main);
 
         initViews();
@@ -96,82 +95,59 @@ public class MainActivity extends BaseActivity {
         loadSavedMode();
         loadSelectedGame();
         loadStorageMethod();
-        
+
         addLog("[系统] WEI终端已启动");
         addLog("[系统] Android 版本: " + Build.VERSION.SDK_INT);
-        
+
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
-        
+
         refreshGameList();
         checkForUpdates();
     }
-    
-    /**
- * 设置沉浸式效果（保留状态栏）
- */
-private void setupImmersiveMode() {
-    mWindow = getWindow();
-    
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-        // 只设置内容延伸，不隐藏状态栏
-        mWindow.getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+
+    /** 设置沉浸式效果（保留状态栏）。 */
+    private void setupImmersiveMode() {
+        mWindow = getWindow();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            // 只设置内容延伸，不隐藏状态栏
+            mWindow.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mWindow.setStatusBarColor(Color.parseColor("#0A0F1A"));
+            mWindow.setNavigationBarColor(Color.parseColor("#0A0F1A"));
+        }
     }
-    
-    // 设置状态栏颜色（不透明）
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-        mWindow.setStatusBarColor(Color.parseColor("#0A0F1A"));
-        mWindow.setNavigationBarColor(Color.parseColor("#0A0F1A"));
-    }
-}
-    
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus && mWindow != null) {
-            // 保持沉浸式效果
             mWindow.getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         }
     }
-    
+
+    /**
+     * 追加一行日志。
+     *
+     * token 脱敏统一交给 LogScrubber：原来的 replaceToken 只处理了固定几种前缀，
+     * 且没有覆盖 GitHub token 等敏感串，容易在日志区明文暴露凭据。
+     */
     private void addLog(final String log) {
         runOnUiThread(() -> {
             String time = new SimpleDateFormat("HH:mm:ss").format(new Date());
-            String msg = log;
-            if (msg != null) {
-                msg = replaceToken(msg, "\"access_token\":\"");
-                msg = replaceToken(msg, "\"openid\":\"");
-                msg = replaceToken(msg, "\"pay_token\":\"");
-                msg = replaceToken(msg, "\"openkey\":\"");
-                msg = replaceToken(msg, "access_token=");
-                msg = replaceToken(msg, "openid=");
-            }
+            String msg = LogScrubber.scrub(log);
             String newLog = "[" + time + "] " + msg + "\n";
             if (tvLog != null) tvLog.append(newLog);
             if (scrollLog != null) scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
         });
     }
 
-    private String replaceToken(String s, String prefix) {
-        int start = 0;
-        while ((start = s.indexOf(prefix, start)) != -1) {
-            int valStart = start + prefix.length();
-            int valEnd = s.indexOf("\"", valStart);
-            if (valEnd == -1) valEnd = s.indexOf("&", valStart);
-            if (valEnd == -1) valEnd = s.indexOf(" ", valStart);
-            if (valEnd != -1) {
-                s = s.substring(0, valStart) + "****" + s.substring(valEnd);
-                start = valStart + 4;
-            } else {
-                break;
-            }
-        }
-        return s;
-    }
-    
     private void initViews() {
         modeRadioGroup = findViewById(R.id.mode_radio_group);
         radioCaptureMode = findViewById(R.id.radio_capture_mode);
@@ -202,8 +178,6 @@ private void setupImmersiveMode() {
         if (sb == null) return;
         sb.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));
     }
-    
-
 
     private void showCopyTokenMenu() {
         final java.util.List<TokenStore.Entry> list = selectedGameName.isEmpty()
@@ -253,7 +227,6 @@ private void setupImmersiveMode() {
         return sb.toString().trim();
     }
 
-
     public void startImportFilePicker() {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("*/*");
@@ -295,7 +268,7 @@ private void setupImmersiveMode() {
             useSaf = true;
         }
     }
-    
+
     private void saveStorageUri(Uri uri) {
         storageUri = uri;
         SharedPreferences.Editor editor = getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit();
@@ -304,7 +277,7 @@ private void setupImmersiveMode() {
         useSaf = true;
         updateStorageStatus();
     }
-    
+
     private void updateStorageStatus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (Environment.isExternalStorageManager()) {
@@ -335,16 +308,16 @@ private void setupImmersiveMode() {
             }
         }
     }
-    
+
     private boolean hasStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return ContextCompat.checkSelfPermission(this, 
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE) 
+            return ContextCompat.checkSelfPermission(this,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     == PackageManager.PERMISSION_GRANTED;
         }
         return true;
     }
-    
+
     private void requestStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             ActivityCompat.requestPermissions(this,
@@ -355,7 +328,7 @@ private void setupImmersiveMode() {
                     REQUEST_STORAGE_PERMISSION);
         }
     }
-    
+
     private void checkAndRequestAllPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
@@ -377,7 +350,7 @@ private void setupImmersiveMode() {
             }
         }
     }
-    
+
     private void createDataDirectory() {
         try {
             File dir = TokenStore.rootDir();
@@ -408,12 +381,12 @@ private void setupImmersiveMode() {
         });
 
         selectGameButton.setOnClickListener(v -> showGameSelectionDialog());
-        
+
         startButton.setOnClickListener(v -> {
             addLog("[启动] 开始执行任务");
             startAgentActivity();
         });
-        
+
         selectDirectoryButton.setOnClickListener(v -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -446,16 +419,16 @@ private void setupImmersiveMode() {
             }
         });
     }
-    
+
     private void requestDirectoryPermission() {
         addLog("[SAF] 请求目录访问权限");
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | 
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
                         Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_CODE_OPEN_DIRECTORY);
     }
-    
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -469,11 +442,11 @@ private void setupImmersiveMode() {
                 TokenDialog.showChooseGameForTokens(this, res);
             }
         }
-        
+
         if (requestCode == REQUEST_CODE_OPEN_DIRECTORY && resultCode == RESULT_OK && data != null) {
             Uri treeUri = data.getData();
             if (treeUri != null) {
-                final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION | 
+                final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION |
                                      Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
                 getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
                 saveStorageUri(treeUri);
@@ -482,7 +455,7 @@ private void setupImmersiveMode() {
                 Toast.makeText(this, "目录授权成功", Toast.LENGTH_SHORT).show();
             }
         }
-        
+
         if (requestCode == REQUEST_MANAGE_STORAGE) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 if (Environment.isExternalStorageManager()) {
@@ -496,7 +469,7 @@ private void setupImmersiveMode() {
                 }
             }
         }
-        
+
         if (requestCode == REQUEST_AGENT_ACTIVITY && resultCode == RESULT_OK && data != null) {
             String response = data.getStringExtra("key_response");
             if (response != null) {
@@ -505,10 +478,10 @@ private void setupImmersiveMode() {
             }
         }
     }
-    
+
     private void createSafDirectory() {
         if (storageUri == null) return;
-        
+
         try {
             DocumentFile rootDir = DocumentFile.fromTreeUri(this, storageUri);
             if (rootDir != null) {
@@ -525,11 +498,11 @@ private void setupImmersiveMode() {
             addLog("[错误] SAF目录创建失败: " + e.getMessage());
         }
     }
-    
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        
+
         if (requestCode == REQUEST_STORAGE_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 addLog("[权限] 存储权限已授予");
@@ -682,6 +655,7 @@ private void setupImmersiveMode() {
             loadGameList();
         }
     }
+
     private void refreshGameList() {
         gameList.clear();
         if (isCloudAppidEnabled()) {
@@ -691,6 +665,7 @@ private void setupImmersiveMode() {
             loadGameList();
         }
     }
+
     private void overwriteLocalFromList() {
         if (gameList.isEmpty()) { addLog("[local] 列表为空 保留原缓存"); return; }
         java.util.HashSet<String> seen = new java.util.HashSet<String>();
@@ -706,6 +681,7 @@ private void setupImmersiveMode() {
         try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
         addLog("[local] 缓存已覆盖: " + seen.size());
     }
+
     private String buildLocalUrl(String appid) {
         return String.format(PTLOGIN_BASE, appid, appid);
     }
@@ -725,6 +701,7 @@ private void setupImmersiveMode() {
         try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
         addLog("[sync] cache overwritten: " + seen.size());
     }
+
     private String extractAppid(String url) {
         if (url == null) return null;
         Matcher m = Pattern.compile("client_id=([0-9]+)").matcher(url);
@@ -787,7 +764,8 @@ private void setupImmersiveMode() {
         }
 
         Pattern pattern = Pattern.compile("图标：(.*?)；名称：(.*?)；链接：〖链接(.*?)〗；");
-        Matcher matcher = pattern.matcher(data); java.util.List<GameItem> cloudParsed = new java.util.ArrayList<GameItem>();
+        Matcher matcher = pattern.matcher(data);
+        java.util.List<GameItem> cloudParsed = new java.util.ArrayList<GameItem>();
 
         while (matcher.find()) {
             if (extractAppid(matcher.group(3).trim()) == null) continue;
@@ -860,11 +838,11 @@ private void setupImmersiveMode() {
             } else {
                 mode = "capture";
             }
-            
+
             saveMode(mode);
-            
+
             addLog("[启动] 启动上号界面，模式: " + mode);
-            
+
             Intent intent = new Intent(this, AgentActivity.class);
             intent.putExtra("mode", mode);
             startActivityForResult(intent, REQUEST_AGENT_ACTIVITY);
@@ -873,6 +851,7 @@ private void setupImmersiveMode() {
             Toast.makeText(this, "启动失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
+
     private void checkForUpdates() {
         new Thread(() -> {
             try {
@@ -933,7 +912,11 @@ private void setupImmersiveMode() {
     }
 
     private static int parseIntSafe(String v) {
-        try { return Integer.parseInt(v.trim()); } catch (Exception e) { return 0; }
+        try {
+            return Integer.parseInt(v.trim());
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private static int compareVersion(String a, String b) {
@@ -950,6 +933,12 @@ private void setupImmersiveMode() {
         return 0;
     }
 
+    /**
+     * 更新提示：不再强制。
+     *
+     * 原实现 setCancelable(false) + setCanceledOnTouchOutside(false)，且只有一个「立即更新」按钮，
+     * 用户除非杀掉应用否则无法继续使用。现改为可取消，并提供「以后再说」。
+     */
     private void showUpdateDialog(String newVersion, String url, long size) {
         final android.app.Dialog dlg = new android.app.Dialog(this);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
@@ -962,25 +951,40 @@ private void setupImmersiveMode() {
         root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
         int p = (int)(16 * getResources().getDisplayMetrics().density);
         root.setPadding(p, p, p, p);
+
         android.widget.TextView title = new android.widget.TextView(this);
         title.setText("发现新版本 " + newVersion);
         title.setTextColor(0xFFF5F7FA);
         title.setTextSize(17);
         title.setGravity(android.view.Gravity.CENTER);
         root.addView(title);
+
         android.widget.TextView tip = new android.widget.TextView(this);
-        tip.setText("此版本为强制更新，必须更新后才能继续使用");
+        tip.setText("可以立即更新，也可以稍后再更新，不影响当前使用");
         tip.setTextColor(0xFF9CA3AF);
         tip.setTextSize(13);
         tip.setGravity(android.view.Gravity.CENTER);
         android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int)(10 * getResources().getDisplayMetrics().density);
         lp.bottomMargin = (int)(16 * getResources().getDisplayMetrics().density);
         tip.setLayoutParams(lp);
         root.addView(tip);
+
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        android.widget.Button btnLater = new android.widget.Button(this);
+        btnLater.setText("以后再说");
+        btnLater.setTextColor(0xFF9CA3AF);
+        btnLater.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+        btnLater.setOnClickListener(v -> dlg.dismiss());
+        android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        lp1.rightMargin = (int)(6 * getResources().getDisplayMetrics().density);
+        btnRow.addView(btnLater, lp1);
+
         android.widget.Button btnOk = new android.widget.Button(this);
         btnOk.setText("立即更新");
         btnOk.setTextColor(0xFF000000);
@@ -989,13 +993,16 @@ private void setupImmersiveMode() {
             dlg.dismiss();
             Updater.start(MainActivity.this, url, size, () -> runOnUiThread(() -> showUpdateDialog(newVersion, url, size)));
         });
-        android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp2.leftMargin = (int)(6 * getResources().getDisplayMetrics().density);
         btnRow.addView(btnOk, lp2);
+
         root.addView(btnRow);
         dlg.setContentView(root);
-        dlg.setCancelable(false);
-        dlg.setCanceledOnTouchOutside(false);
+        // 关键：允许返回键 / 点击外部关闭，不再强制用户更新
+        dlg.setCancelable(true);
+        dlg.setCanceledOnTouchOutside(true);
         dlg.show();
     }
 }
