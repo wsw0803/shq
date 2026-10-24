@@ -33,17 +33,23 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 多线程分片下载 + 断点续传 + 安装。
  *
- * 网络统一走 Net.open()：优先 xray 本地代理，其次手动代理，最后直连。
- * 之前代理起不来时会静默退化为直连，用户看到的就是「下载卡住」。
- * 现在进度条会显示实际走的线路，卡住时能立刻看出是不是在直连。
+ * 关键修复（卡在「正在准备网络」）：
+ * 原来在下载 APK 之前同步调用 XrayCore.ensureReady()，
+ * 那是 31MB 的核心下载，且界面没有任何阶段反馈，
+ * 网络慢或 raw.githubusercontent.com 不通时会长时间停在该提示上。
  *
- * 安装：有 root 时优先 su + pm install -r 静默安装。
- * 签名不一致只作提示，不再阻断。
+ * 现在：
+ * 1) 核心准备放到独立线程，最多等 10 秒
+ * 2) 超时就直接按当前线路继续下载 APK，不再阻塞
+ * 3) 核心若在之后才就绪，Net.open() 每次都会重新判断，自动切到代理
+ * 4) 提示文字分阶段更新：准备网络 → 探测 → 下载 → 校验 → 安装
  */
 public class Updater {
 
     private static final int THREADS = 8;
     private static final long MIN_SIZE = 500000L;
+    /** 等待代理核心就绪的上限。超时不影响继续下载。 */
+    private static final long CORE_WAIT_MS = 10000L;
 
     private static final int OK = 0;
     private static final int FAIL_DOWNLOAD = 1;
@@ -100,7 +106,7 @@ public class Updater {
         root.addView(title);
 
         final TextView tip = new TextView(act);
-        tip.setText("正在准备网络...");
+        tip.setText("准备网络...");
         tip.setTextColor(0xFF9CA3AF);
         tip.setTextSize(13);
         tip.setGravity(Gravity.CENTER);
@@ -116,11 +122,24 @@ public class Updater {
 
         new Thread(new Runnable() {
             public void run() {
-                // 先把代理准备好。核心缺失时会去仓库下载（走手动代理或直连）。
+                // 阶段一：并行准备代理核心，最多等 CORE_WAIT_MS
+                stage(tip, "准备网络（最多等 10 秒）...");
+                Thread coreThread = new Thread(new Runnable() {
+                    public void run() {
+                        try {
+                            if (XrayCore.ensureReady(act)) XrayCore.start(act);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                });
+                coreThread.start();
                 try {
-                    if (XrayCore.ensureReady(act)) XrayCore.start(act);
-                } catch (Throwable ignored) {
+                    coreThread.join(CORE_WAIT_MS);
+                } catch (InterruptedException ignored) {
                 }
+
+                // 阶段二：开始下载 APK（核心即便没就绪也继续）
+                stage(tip, "探测文件...· " + Net.routeName(act));
 
                 File dir = act.getExternalFilesDir(null);
                 final File out = new File(dir, "update.apk");
@@ -131,6 +150,7 @@ public class Updater {
 
                 boolean signOk = false;
                 if (result == OK) {
+                    stage(tip, "校验安装包...");
                     try {
                         signOk = signatureMatches(act, out);
                     } catch (Throwable ignored) {
@@ -156,6 +176,16 @@ public class Updater {
         }).start();
     }
 
+    /** 后台线程更新提示文字。 */
+    private static void stage(final TextView tip, final String text) {
+        if (tip == null) return;
+        tip.post(new Runnable() {
+            public void run() {
+                tip.setText(text);
+            }
+        });
+    }
+
     private static java.util.List<String> buildUrls(String url) {
         java.util.List<String> list = new java.util.ArrayList<String>();
         if (url == null || url.length() == 0) return list;
@@ -163,7 +193,6 @@ public class Updater {
         return list;
     }
 
-    /** 统一走 Net.open()，因此会经过 xray 或手动代理。 */
     private static HttpURLConnection open(Job job, String url, long from, long to, int ct, int rt) throws Exception {
         HttpURLConnection c = Net.open(job.act, url, ct, rt);
         c.setRequestProperty("Accept-Encoding", "identity");
@@ -327,8 +356,7 @@ public class Updater {
         }
 
         if (!job.rangeOk) {
-            // single() 成功时已完成 part -> out，必须直接返回，
-            // 否则会落到下面的收尾逻辑把成品删掉。
+            // single() 成功时已完成 part -> out，必须直接返回
             return single(act, job, bar, tip, src, expectSize, part, out) ? OK : FAIL_DOWNLOAD;
         }
 
@@ -537,7 +565,6 @@ public class Updater {
         intentInstall(act, apk);
     }
 
-    /** su + pm install -r 静默安装。先复制到 /data/local/tmp，避免 shell 读不到应用目录。 */
     private static boolean rootInstall(File apk) {
         if (apk == null || !apk.exists()) return false;
         Process p = null;
