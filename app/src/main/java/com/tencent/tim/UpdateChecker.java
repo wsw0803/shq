@@ -1,7 +1,6 @@
 package com.tencent.tim;
 
 import android.app.Activity;
-import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -17,39 +16,56 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 更新提示。
  *
- * 只处理「最新一版」，不再提供版本选择。
- * 显示的是 GitHub Actions 该次运行的标题与 Summary（提交信息的标题与正文），
- * 而不是构建版本号。
+ * 只处理最新一版，不提供版本选择。
+ * 重点是显示「当前版本」到「最新版本」之间的全部提交：
+ * 中间有几个提交，就列出几条 Summary。
  *
- * 数据来源：
- *   1) Releases 拿最新可用的 APK 地址与大小
- *   2) workflow 的版本号由 GITHUB_RUN_NUMBER 推导：
- *        MAJOR = COUNT / 100, MINOR = (COUNT % 100) / 10, PATCH = COUNT % 10
- *      反推 run_number 后去 /actions/runs 查 display_title + head_commit.message
+ * 取数流程：
+ *   1) Releases 找最新可用版本（跳过 draft / prerelease）
+ *   2) 版本号反推 run_number：run = MAJOR*100 + MINOR*10 + PATCH
+ *      与 workflow 的 Calculate Version 互为逆运算
+ *   3) 用 run_number 在 /actions/runs 里定位两端各自的 head_sha
+ *   4) 调 compare API 拿到区间内的提交列表
+ *   5) 逐条展示：首行作标题，正文作说明
+ *
+ * 任一步失败都不会卡住更新本身，只是显示内容降级。
  */
 public class UpdateChecker {
 
+    private static final String REPO = "wsw0803/shq";
     private static final String RELEASES_API =
-            "https://api.github.com/repos/wsw0803/shq/releases?per_page=30";
+            "https://api.github.com/repos/" + REPO + "/releases?per_page=30";
     private static final String RUNS_API =
-            "https://api.github.com/repos/wsw0803/shq/actions/runs?per_page=60";
+            "https://api.github.com/repos/" + REPO + "/actions/runs?per_page=100";
+    private static final String COMPARE_API =
+            "https://api.github.com/repos/" + REPO + "/compare/";
+
+    /** 一条提交：首行标题 + 正文。 */
+    private static class Commit {
+        String title = "";
+        String body = "";
+    }
 
     /** 最新一版的更新信息。 */
     public static class Info {
+        public String currentVersion = "";
         public String version = "";
-        /** Actions 运行标题（提交信息首行）。 */
-        public String title = "";
-        /** Actions 运行 Summary（提交信息正文）。 */
-        public String summary = "";
         public String apkUrl = "";
         public long size = 0;
+        /** 区间内的提交，按时间从旧到新。 */
+        public List<Commit> commits = new ArrayList<Commit>();
+        /** 提交数量。 */
+        public int commitCount = 0;
     }
 
-    /** 检查是否有比当前更新的版本，有则弹窗；没有则什么都不做。 */
     public static void check(final Activity act) {
         new Thread(new Runnable() {
             public void run() {
@@ -73,7 +89,7 @@ public class UpdateChecker {
             return null;
         }
 
-        // 1) 找最新的 Release（跳过草稿与预发布）
+        // 1) 最新 Release
         org.json.JSONArray releases = getJsonArray(RELEASES_API);
         if (releases == null) return null;
 
@@ -123,33 +139,56 @@ public class UpdateChecker {
         if (bestVer.isEmpty() || apkUrl.isEmpty()) return null;
 
         Info info = new Info();
+        info.currentVersion = currentVersion;
         info.version = bestVer;
         info.apkUrl = apkUrl;
         info.size = apkSize;
 
-        // 2) 用版本号反推 run_number，取该次运行的标题与提交正文
-        fillFromActions(info);
-
-        // 兜底：拿不到就先显示版本号，避免空白
-        if (info.title.isEmpty()) info.title = "shq v" + bestVer;
+        fillCommits(info);
         return info;
     }
 
     /**
-     * 版本号反推 run_number：run = MAJOR*100 + MINOR*10 + PATCH。
-     * 与 workflow 里的 Calculate Version 步骤互为逆运算。
+     * 拉取「当前版本 → 最新版本」之间的提交。
+     *
+     * 版本号 → run_number → head_sha，再用 compare API 取区间提交。
+     * 任何一步拿不到就降级：至少显示最新那一条提交。
      */
-    private static int runNumberFromVersion(String version) {
-        if (version == null) return -1;
-        String[] p = version.split("\\.");
-        if (p.length < 3) return -1;
-        return parseIntSafe(p[0]) * 100 + parseIntSafe(p[1]) * 10 + parseIntSafe(p[2]);
+    private static void fillCommits(Info info) {
+        int wantRun = runNumberFromVersion(info.version);
+        int curRun = runNumberFromVersion(info.currentVersion);
+
+        Map<Integer, String> shaByRun = new HashMap<Integer, String>();
+        Map<Integer, String> msgByRun = new HashMap<Integer, String>();
+        collectRuns(shaByRun, msgByRun);
+
+        String headSha = shaByRun.get(wantRun);
+        String baseSha = shaByRun.get(curRun);
+
+        // 优先：两端都能定位，取区间提交
+        if (headSha != null && baseSha != null && !headSha.equals(baseSha)) {
+            List<Commit> list = compareCommits(baseSha, headSha);
+            if (list != null && !list.isEmpty()) {
+                info.commits = list;
+                info.commitCount = list.size();
+                return;
+            }
+        }
+
+        // 降级 1：只取最新那一条提交
+        String latestMsg = msgByRun.get(wantRun);
+        if (latestMsg != null && !latestMsg.trim().isEmpty()) {
+            Commit c = new Commit();
+            c.title = firstLine(latestMsg);
+            c.body = stripFirstLine(latestMsg).trim();
+            info.commits = new ArrayList<Commit>();
+            info.commits.add(c);
+            info.commitCount = 1;
+        }
     }
 
-    private static void fillFromActions(Info info) {
-        int want = runNumberFromVersion(info.version);
-        if (want < 0) return;
-
+    /** 遍历运行列表，建立 run_number → head_sha / 提交信息 的映射。 */
+    private static void collectRuns(Map<Integer, String> shaByRun, Map<Integer, String> msgByRun) {
         org.json.JSONObject root = getJsonObject(RUNS_API);
         if (root == null) return;
         org.json.JSONArray runs = root.optJSONArray("workflow_runs");
@@ -158,21 +197,45 @@ public class UpdateChecker {
         for (int i = 0; i < runs.length(); i++) {
             org.json.JSONObject run = runs.optJSONObject(i);
             if (run == null) continue;
-            if (run.optInt("run_number", -1) != want) continue;
+            int num = run.optInt("run_number", -1);
+            if (num < 0) continue;
 
-            String title = run.optString("display_title", "").trim();
+            String sha = run.optString("head_sha", "").trim();
+            if (!sha.isEmpty()) shaByRun.put(num, sha);
+
             String msg = "";
             org.json.JSONObject head = run.optJSONObject("head_commit");
             if (head != null) msg = head.optString("message", "");
-
-            if (title.isEmpty() && !msg.isEmpty()) {
-                title = firstLine(msg);
-            }
-            info.title = title;
-            // Summary 取提交信息里去掉首行的部分
-            info.summary = stripFirstLine(msg).trim();
-            return;
+            if (!msg.trim().isEmpty()) msgByRun.put(num, msg);
         }
+    }
+
+    /** compare API：取 base..head 之间的提交，按 api 返回顺序（旧→新）。 */
+    private static List<Commit> compareCommits(String baseSha, String headSha) {
+        org.json.JSONObject root = getJsonObject(COMPARE_API + baseSha + "..." + headSha);
+        if (root == null) return null;
+
+        org.json.JSONArray commits = root.optJSONArray("commits");
+        if (commits == null) return null;
+
+        List<Commit> out = new ArrayList<Commit>();
+        for (int i = 0; i < commits.length(); i++) {
+            org.json.JSONObject item = commits.optJSONObject(i);
+            if (item == null) continue;
+            org.json.JSONObject c = item.optJSONObject("commit");
+            if (c == null) continue;
+            String msg = c.optString("message", "");
+            if (msg.trim().isEmpty()) continue;
+
+            Commit one = new Commit();
+            one.title = firstLine(msg);
+            one.body = stripFirstLine(msg).trim();
+            // 过滤掉 CI 自动生成的提交，用户看这些没意义
+            if (one.title.startsWith("chore: update latest apk")) continue;
+            if (one.title.startsWith("chore(core):")) continue;
+            out.add(one);
+        }
+        return out;
     }
 
     private static String firstLine(String s) {
@@ -185,6 +248,14 @@ public class UpdateChecker {
         if (s == null) return "";
         int i = s.indexOf('\n');
         return i < 0 ? "" : s.substring(i + 1);
+    }
+
+    /** 版本号反推 run_number，与 workflow 里 Calculate Version 互为逆运算。 */
+    private static int runNumberFromVersion(String version) {
+        if (version == null) return -1;
+        String[] p = version.split("\\.");
+        if (p.length < 3) return -1;
+        return parseIntSafe(p[0]) * 100 + parseIntSafe(p[1]) * 10 + parseIntSafe(p[2]);
     }
 
     private static int parseIntSafe(String v) {
@@ -236,8 +307,9 @@ public class UpdateChecker {
             conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/vnd.github+json");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(8000);
+            conn.setRequestProperty("User-Agent", "shq-updater");
+            conn.setConnectTimeout(9000);
+            conn.setReadTimeout(9000);
             if (conn.getResponseCode() != 200) return null;
             br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
             StringBuilder sb = new StringBuilder();
@@ -255,8 +327,10 @@ public class UpdateChecker {
     }
 
     /**
-     * 弹窗：标题是 Actions 运行标题，正文是该次提交的 Summary。
-     * 只有一个「立即更新」按钮（附「以后再说」），不强制更新。
+     * 弹窗：
+     *   顶部   —— 从哪个版本升到哪个版本，中间有多少提交
+     *   中间   —— 逐条列提交（首行标题 + 正文）
+     *   底部   —— 以后再说 / 立即更新
      */
     private static void show(final Activity act, final Info info) {
         final android.app.Dialog dlg = new android.app.Dialog(act);
@@ -264,11 +338,12 @@ public class UpdateChecker {
         if (dlg.getWindow() != null) {
             dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             dlg.getWindow().setLayout(
-                    (int) (act.getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    (int) (act.getResources().getDisplayMetrics().widthPixels * 0.88f),
                     WindowManager.LayoutParams.WRAP_CONTENT);
         }
 
         float density = act.getResources().getDisplayMetrics().density;
+        int screenH = act.getResources().getDisplayMetrics().heightPixels;
         int pad = (int) (16 * density);
 
         LinearLayout root = new LinearLayout(act);
@@ -276,44 +351,81 @@ public class UpdateChecker {
         root.setBackground(TokenDialog.glass(act, 22, true));
         root.setPadding(pad, pad, pad, pad);
 
-        // 标题：Actions 运行标题
+        // 顶部：版本区间 + 提交数
         TextView title = new TextView(act);
-        title.setText(info.title);
+        title.setText("发现新版本 v" + info.version);
         title.setTextColor(0xFFF5F7FA);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
 
-        // 版本号单独小字标注，不与标题混在一起
-        TextView ver = new TextView(act);
-        ver.setText("v" + info.version);
-        ver.setTextColor(0xFF9CA3AF);
-        ver.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        ver.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams verLp = new LinearLayout.LayoutParams(
+        TextView sub = new TextView(act);
+        if (info.commitCount > 0) {
+            sub.setText("v" + info.currentVersion + " → v" + info.version
+                    + "，共 " + info.commitCount + " 个提交");
+        } else {
+            sub.setText("v" + info.currentVersion + " → v" + info.version);
+        }
+        sub.setTextColor(0xFF9CA3AF);
+        sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        sub.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        verLp.topMargin = (int) (4 * density);
-        verLp.bottomMargin = (int) (10 * density);
-        ver.setLayoutParams(verLp);
-        root.addView(ver);
+        subLp.topMargin = (int) (4 * density);
+        subLp.bottomMargin = (int) (10 * density);
+        sub.setLayoutParams(subLp);
+        root.addView(sub);
 
-        // Summary：可滚动，避免正文过长撑爆弹窗
-        if (info.summary != null && info.summary.length() > 0) {
+        // 中间：逐条提交
+        if (!info.commits.isEmpty()) {
             ScrollView scroll = new ScrollView(act);
-            TextView body = new TextView(act);
-            body.setText(info.summary);
-            body.setTextColor(0xFFD5DBDB);
-            body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            body.setLineSpacing((int) (2 * density), 1f);
-            body.setPadding((int) (10 * density), (int) (10 * density),
-                    (int) (10 * density), (int) (10 * density));
-            body.setBackground(TokenDialog.glass(act, 12, false));
-            scroll.addView(body);
+            LinearLayout list = new LinearLayout(act);
+            list.setOrientation(LinearLayout.VERTICAL);
 
+            for (int i = 0; i < info.commits.size(); i++) {
+                Commit c = info.commits.get(i);
+
+                LinearLayout block = new LinearLayout(act);
+                block.setOrientation(LinearLayout.VERTICAL);
+                block.setBackground(TokenDialog.glass(act, 12, false));
+                block.setPadding((int) (10 * density), (int) (8 * density),
+                        (int) (10 * density), (int) (8 * density));
+
+                TextView t = new TextView(act);
+                t.setText(c.title);
+                t.setTextColor(0xFF22D3EE);
+                t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                t.setTypeface(Typeface.DEFAULT_BOLD);
+                block.addView(t);
+
+                if (c.body != null && c.body.length() > 0) {
+                    TextView b = new TextView(act);
+                    b.setText(c.body);
+                    b.setTextColor(0xFFD5DBDB);
+                    b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                    b.setLineSpacing((int) (2 * density), 1f);
+                    LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT);
+                    bLp.topMargin = (int) (4 * density);
+                    b.setLayoutParams(bLp);
+                    block.addView(b);
+                }
+
+                LinearLayout.LayoutParams blockLp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                blockLp.bottomMargin = (int) (6 * density);
+                block.setLayoutParams(blockLp);
+                list.addView(block);
+            }
+
+            scroll.addView(list);
+            // 固定高度上限，避免提交多时弹窗超出屏幕
             LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+                    LinearLayout.LayoutParams.MATCH_PARENT, (int) (screenH * 0.42f));
             scrollLp.bottomMargin = (int) (12 * density);
             root.addView(scroll, scrollLp);
         }
