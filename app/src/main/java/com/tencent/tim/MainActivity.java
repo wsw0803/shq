@@ -37,9 +37,8 @@ import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -53,9 +52,6 @@ public class MainActivity extends BaseActivity {
     private static final String KEY_SYNCED_DATA = "synced_data";
     private static final String KEY_CLOUD_APPID_ENABLED = "cloud_appid_enabled";
     private static final String KEY_STORAGE_URI = "storage_uri";
-
-    private static final String RELEASES_API = "https://api.github.com/repos/wsw0803/shq/releases?per_page=100";
-    private static final String RUNS_API = "https://api.github.com/repos/wsw0803/shq/actions/runs?per_page=100";
 
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
     private static final int REQUEST_STORAGE_PERMISSION = 200;
@@ -87,15 +83,6 @@ public class MainActivity extends BaseActivity {
     private Uri storageUri = null;
     private boolean useSaf = false;
 
-    /** 一个可更新版本的下载信息。 */
-    private static class ReleaseInfo {
-        String version = "";
-        /** GitHub Actions 该次构建的运行标题（提交信息首行）。 */
-        String runTitle = "";
-        String apkUrl = "";
-        long size = 0;
-    }
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -116,7 +103,8 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
 
         refreshGameList();
-        checkForUpdates();
+        // 更新检查交给 UpdateChecker：只提示最新一版，显示 Actions 的标题与 Summary
+        UpdateChecker.check(this);
     }
 
     private void setupImmersiveMode() {
@@ -691,7 +679,7 @@ public class MainActivity extends BaseActivity {
 
     private void syncToLocal(java.util.List<GameItem> items) {
         if (items == null || items.isEmpty()) return;
-        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        HashSet<String> seen = new HashSet<String>();
         StringBuilder sb = new StringBuilder();
         for (GameItem it : items) {
             String appid = extractAppid(it.url);
@@ -715,7 +703,7 @@ public class MainActivity extends BaseActivity {
         SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         gameList.clear();
         String synced = p.getString(KEY_SYNCED_DATA, "");
-        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        HashSet<String> seen = new HashSet<>();
         for (String line : synced.split(";")) {
             int i = line.indexOf("|");
             if (i <= 0) continue;
@@ -777,7 +765,7 @@ public class MainActivity extends BaseActivity {
         }
         syncToLocal(cloudParsed);
         gameList.clear();
-        java.util.HashSet<String> seenIds = new java.util.HashSet<String>();
+        HashSet<String> seenIds = new HashSet<String>();
         for (GameItem it : cloudParsed) {
             String aid = extractAppid(it.url);
             if (aid != null && !seenIds.add(aid)) continue;
@@ -843,289 +831,5 @@ public class MainActivity extends BaseActivity {
             addLog("[错误] 启动失败 " + e.getMessage());
             Toast.makeText(this, "启动失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
-    }
-
-    // ------------------------------------------------------------------
-    // 更新检查
-    // ------------------------------------------------------------------
-
-    /**
-     * 从版本号反推 GitHub Actions 的 run_number。
-     *
-     * workflow 里的算法是：
-     *   MAJOR = COUNT / 100，MINOR = (COUNT % 100) / 10，PATCH = COUNT % 10
-     * 所以 run_number = MAJOR * 100 + MINOR * 10 + PATCH。
-     */
-    private static int runNumberFromVersion(String version) {
-        if (version == null) return -1;
-        String[] p = version.split("\\.");
-        if (p.length < 3) return -1;
-        int major = parseIntSafe(p[0]);
-        int minor = parseIntSafe(p[1]);
-        int patch = parseIntSafe(p[2]);
-        return major * 100 + minor * 10 + patch;
-    }
-
-    /** 拉取 Actions 运行列表，建立 run_number -> 运行标题 的映射。 */
-    private Map<Integer, String> fetchRunTitles() {
-        Map<Integer, String> map = new HashMap<>();
-        HttpURLConnection conn = null;
-        try {
-            conn = (HttpURLConnection) new URL(RUNS_API).openConnection();
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("Accept", "application/vnd.github+json");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(8000);
-            if (conn.getResponseCode() != 200) return map;
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
-            reader.close();
-
-            org.json.JSONObject root = new org.json.JSONObject(sb.toString());
-            org.json.JSONArray runs = root.optJSONArray("workflow_runs");
-            if (runs == null) return map;
-
-            for (int i = 0; i < runs.length(); i++) {
-                org.json.JSONObject run = runs.optJSONObject(i);
-                if (run == null) continue;
-                int num = run.optInt("run_number", -1);
-                if (num < 0) continue;
-                String title = run.optString("display_title", "").trim();
-                if (title.isEmpty()) {
-                    title = run.optString("name", "").trim();
-                }
-                if (!title.isEmpty()) map.put(num, title);
-            }
-        } catch (Exception e) {
-            // 拿不到标题不影响更新本身，调用方会退回 Release 名称
-        } finally {
-            if (conn != null) conn.disconnect();
-        }
-        return map;
-    }
-
-    /**
-     * 检查更新：收集所有高于当前版本的 Release，
-     * 并用 Actions 的运行标题作为显示名称（而不是构建版本号）。
-     */
-    private void checkForUpdates() {
-        new Thread(() -> {
-            HttpURLConnection conn = null;
-            try {
-                conn = (HttpURLConnection) new URL(RELEASES_API).openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("Accept", "application/vnd.github+json");
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(8000);
-                if (conn.getResponseCode() != 200) return;
-
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close();
-
-                String currentVersion = getPackageManager()
-                        .getPackageInfo(getPackageName(), 0).versionName;
-
-                org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
-                List<ReleaseInfo> newer = new ArrayList<>();
-
-                for (int i = 0; i < arr.length(); i++) {
-                    org.json.JSONObject rel = arr.getJSONObject(i);
-                    if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
-
-                    String tag = rel.optString("tag_name", "");
-                    String ver = tag.startsWith("v") ? tag.substring(1) : tag;
-                    if (ver.isEmpty()) continue;
-                    if (compareVersion(ver, currentVersion) <= 0) continue;
-
-                    org.json.JSONArray assets = rel.optJSONArray("assets");
-                    if (assets == null || assets.length() == 0) continue;
-
-                    String apkUrl = "";
-                    long apkSize = 0;
-                    for (int a = 0; a < assets.length(); a++) {
-                        org.json.JSONObject as = assets.optJSONObject(a);
-                        if (as == null) continue;
-                        String nm = as.optString("name", "").toLowerCase();
-                        String u2 = as.optString("browser_download_url", "");
-                        if (u2.isEmpty()) continue;
-                        if (nm.endsWith(".apk")) {
-                            apkUrl = u2;
-                            apkSize = as.optLong("size", 0);
-                            break;
-                        }
-                        if (apkUrl.isEmpty()) {
-                            apkUrl = u2;
-                            apkSize = as.optLong("size", 0);
-                        }
-                    }
-                    if (apkUrl.isEmpty()) continue;
-
-                    ReleaseInfo info = new ReleaseInfo();
-                    info.version = ver;
-                    info.apkUrl = apkUrl;
-                    info.size = apkSize;
-                    newer.add(info);
-                }
-
-                if (newer.isEmpty()) return;
-
-                // 用 Actions 运行标题替换版本号显示
-                Map<Integer, String> titles = fetchRunTitles();
-                for (ReleaseInfo info : newer) {
-                    int num = runNumberFromVersion(info.version);
-                    String t = titles.get(num);
-                    info.runTitle = (t == null || t.isEmpty()) ? ("shq v" + info.version) : t;
-                }
-
-                // 按版本从新到旧
-                java.util.Collections.sort(newer, (x, y) -> -compareVersion(x.version, y.version));
-
-                final List<ReleaseInfo> list = newer;
-                runOnUiThread(() -> showUpdateDialog(list));
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                if (conn != null) conn.disconnect();
-            }
-        }).start();
-    }
-
-    private static int parseIntSafe(String v) {
-        try {
-            return Integer.parseInt(v.trim());
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    private static int compareVersion(String a, String b) {
-        if (a == null) a = "";
-        if (b == null) b = "";
-        String[] x = a.split("\\.");
-        String[] y = b.split("\\.");
-        int n = Math.max(x.length, y.length);
-        for (int i = 0; i < n; i++) {
-            int va = i < x.length ? parseIntSafe(x[i]) : 0;
-            int vb = i < y.length ? parseIntSafe(y[i]) : 0;
-            if (va != vb) return va < vb ? -1 : 1;
-        }
-        return 0;
-    }
-
-    /**
-     * 更新弹窗：列出所有可更新的版本，显示各自的 Actions 运行标题。
-     * 不再显示「可以立即更新，也可以稍后再更新」这类说明文案。
-     */
-    private void showUpdateDialog(List<ReleaseInfo> releases) {
-        final android.app.Dialog dlg = new android.app.Dialog(this);
-        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.86f),
-                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
-        }
-
-        float density = getResources().getDisplayMetrics().density;
-        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
-        root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
-        int p = (int)(16 * density);
-        root.setPadding(p, p, p, p);
-
-        android.widget.TextView title = new android.widget.TextView(this);
-        title.setText("发现 " + releases.size() + " 个新版本");
-        title.setTextColor(0xFFF5F7FA);
-        title.setTextSize(17);
-        title.setGravity(android.view.Gravity.CENTER);
-        android.widget.LinearLayout.LayoutParams titleLp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-        titleLp.bottomMargin = (int)(12 * density);
-        title.setLayoutParams(titleLp);
-        root.addView(title);
-
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        android.widget.LinearLayout list = new android.widget.LinearLayout(this);
-        list.setOrientation(android.widget.LinearLayout.VERTICAL);
-
-        final ReleaseInfo[] chosen = new ReleaseInfo[]{ releases.get(0) };
-
-        for (int i = 0; i < releases.size(); i++) {
-            final int index = i;
-            final ReleaseInfo info = releases.get(i);
-
-            android.widget.TextView row = new android.widget.TextView(this);
-            String label = info.runTitle;
-            if (i == 0) label = "★ " + label;
-            row.setText(label);
-            row.setTextSize(14);
-            row.setTextColor(i == 0 ? 0xFF22D3EE : 0xFFD5DBDB);
-            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            row.setPadding((int)(10 * density), (int)(10 * density),
-                    (int)(10 * density), (int)(10 * density));
-            row.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
-
-            android.widget.LinearLayout.LayoutParams rowLp = new android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-            rowLp.bottomMargin = (int)(6 * density);
-            row.setLayoutParams(rowLp);
-
-            row.setOnClickListener(v -> {
-                chosen[0] = info;
-                for (int k = 0; k < list.getChildCount(); k++) {
-                    android.view.View c = list.getChildAt(k);
-                    if (c instanceof android.widget.TextView) {
-                        ((android.widget.TextView) c).setTextColor(k == index ? 0xFF22D3EE : 0xFFD5DBDB);
-                    }
-                }
-            });
-            list.addView(row);
-        }
-
-        scroll.addView(list);
-        android.widget.LinearLayout.LayoutParams scrollLp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        scrollLp.bottomMargin = (int)(12 * density);
-        root.addView(scroll, scrollLp);
-
-        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
-        btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-
-        android.widget.Button btnLater = new android.widget.Button(this);
-        btnLater.setText("以后再说");
-        btnLater.setTextColor(0xFF9CA3AF);
-        btnLater.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
-        btnLater.setOnClickListener(v -> dlg.dismiss());
-        android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(
-                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        lp1.rightMargin = (int)(6 * density);
-        btnRow.addView(btnLater, lp1);
-
-        android.widget.Button btnOk = new android.widget.Button(this);
-        btnOk.setText("更新所选版本");
-        btnOk.setTextColor(0xFF000000);
-        btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
-        btnOk.setOnClickListener(v -> {
-            final ReleaseInfo target = chosen[0];
-            dlg.dismiss();
-            Updater.start(MainActivity.this, target.apkUrl, target.size, null);
-        });
-        android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(
-                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        lp2.leftMargin = (int)(6 * density);
-        btnRow.addView(btnOk, lp2);
-
-        root.addView(btnRow);
-        dlg.setContentView(root);
-        dlg.setCancelable(true);
-        dlg.setCanceledOnTouchOutside(true);
-        dlg.show();
     }
 }
