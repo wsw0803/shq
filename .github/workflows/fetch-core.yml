@@ -1,0 +1,96 @@
+name: Fetch xray core
+
+# 从 XTLS 官方 Release 拉取 Linux arm64 版 xray，
+# 解压后连同 SHA-256 一起提交到 core/，供 App 更新时下载使用。
+#
+# 为什么在 CI 里做：二进制无法在本地生成（需要 Go 全量编译），
+# 直接在 CI 下载官方预编译产物，省事且可复现。
+# 升级 xray 只需要再点一次 Run workflow。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'xray 版本号，留空则用最新版（例如 1.8.24）'
+        required: false
+        default: ''
+  schedule:
+    # 每月 1 号自动检查一次
+    - cron: '0 3 1 * *'
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest \
+              | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "无法确定版本号" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "将拉取 xray $VERSION"
+
+      - name: Download linux arm64
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          URL="https://github.com/XTLS/Xray-core/releases/download/${VERSION}/Xray-linux-arm64-v8a.zip"
+          echo "下载 $URL"
+          curl -fL --retry 3 --retry-delay 2 -o xray.zip "$URL"
+          ls -l xray.zip
+          unzip -o xray.zip -d extracted
+          ls -l extracted
+
+      - name: Stage core files
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p core
+          cp extracted/xray core/xray
+          chmod 755 core/xray
+          # 校验：确认是可执行的 ELF（arm64），不是文本或空文件
+          if ! file core/xray | grep -q 'ELF'; then
+            echo "core/xray 不是 ELF 可执行文件" >&2
+            file core/xray >&2
+            exit 1
+          fi
+          SIZE=$(stat -c%s core/xray)
+          echo "xray 大小: $SIZE 字节"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "文件过小，可能下载失败" >&2
+            exit 1
+          fi
+          # 生成校验值，App 端用它做完整性校验
+          sha256sum core/xray | awk '{print $1}' > core/xray.sha256
+          echo "版本: $VERSION" > core/xray.version
+          echo "SHA-256: $(cat core/xray.sha256)"
+
+      - name: Commit core files
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add core/xray core/xray.sha256 core/xray.version
+          if git diff --staged --quiet; then
+            echo "core 无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore(core): 更新 xray 至 $VERSION [skip ci]"
+          git push
