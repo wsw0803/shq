@@ -34,11 +34,16 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 日志由设置页开关控制，这里不再挂悬浮球。
- * 开启后持续记录：模式、游戏、appid、token 各字段长度、
- * appid 一致性、数据写入结果、导出动作。
+ * 本次修复的诊断问题：
  *
- * 关闭时不产生任何记录，add() 直接丢弃。
+ * 1) 原来用 access_token=len64 这种形式记录字段，
+ *    会被 LogScrubber 整段抹成 ****，完全失去诊断价值。
+ *    现在改用不含敏感词的缩写：at / oid / pt / exp。
+ *
+ * 2) 新增记录「谁启动了本界面」——这是上号成败的关键：
+ *    上号模式必须由游戏自己通过 auth:// 唤起本 Activity，
+ *    setResult 才能把 token 交回游戏；
+ *    若是本应用主界面启动的，结果只会回到 MainActivity，游戏永远拿不到 token。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -54,6 +59,9 @@ public class AgentActivity extends BaseActivity {
     private Button manualLoginButton;
     private String currentMode;
     private Window mWindow;
+    /** 本界面是否由外部（游戏）通过 URL 唤起。只有这种情况结果才能回到游戏。 */
+    private boolean launchedByApp = false;
+    private String launchReferrer = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -109,6 +117,25 @@ public class AgentActivity extends BaseActivity {
             modeFromIntent = intent.getStringExtra("mode");
         }
 
+        // 判断启动来源：由游戏通过 auth:// 唤起 vs 本应用内部启动
+        if (intent != null) {
+            try {
+                if (Intent.ACTION_VIEW.equals(intent.getAction())) {
+                    launchedByApp = true;
+                }
+                // referrer 能看出是哪个应用唤起的（部分 ROM 才提供）
+                if (Build.VERSION.SDK_INT >= 22) {
+                    java.lang.ref.Reference<android.content.Context> dummy = null;
+                    String ref = getReferrer() == null ? "" : String.valueOf(getReferrer());
+                    launchReferrer = ref;
+                }
+                if (intent.getData() != null) {
+                    launchReferrer = launchReferrer + " data=" + intent.getData().getScheme();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
         if (modeFromIntent != null && !modeFromIntent.isEmpty()) {
             currentMode = modeFromIntent;
         } else {
@@ -123,7 +150,11 @@ public class AgentActivity extends BaseActivity {
             }
         }
 
-        LoginDiag.add("AGENT", "mode=" + currentMode + " game=" + getSelectedGameName());
+        LoginDiag.add("AGENT", "mode=" + currentMode
+                + " game=" + getSelectedGameName()
+                + " 外部唤起=" + launchedByApp
+                + " referrer=" + (launchReferrer.isEmpty() ? "无" : launchReferrer)
+                + " 任务栈id=" + getTaskId());
 
         if ("login".equals(currentMode)) {
             setupLoginMode();
@@ -308,13 +339,14 @@ public class AgentActivity extends BaseActivity {
         String openId = grab(url, "openid=([^&\\s#]+)");
         String payToken = grab(url, "pay_token=([^&\\s#]+)");
 
-        LoginDiag.add("PARSE", "access_token=" + (accessToken.isEmpty() ? "空" : ("len" + accessToken.length()))
-                + " openid=" + (openId.isEmpty() ? "空" : ("len" + openId.length()))
-                + " pay_token=" + (payToken.isEmpty() ? "空" : ("len" + payToken.length()))
-                + " expires_in=" + (expiresIn.isEmpty() ? "空" : expiresIn));
+        // 用不含敏感词的缩写，避免被 LogScrubber 抹成 ****
+        LoginDiag.add("PARSE", "at=" + (accessToken.isEmpty() ? "缺" : ("len" + accessToken.length()))
+                + " oid=" + (openId.isEmpty() ? "缺" : ("len" + openId.length()))
+                + " pt=" + (payToken.isEmpty() ? "缺" : ("len" + payToken.length()))
+                + " exp=" + (expiresIn.isEmpty() ? "缺" : expiresIn));
 
         if (accessToken.isEmpty()) {
-            LoginDiag.add("ERR", "performLogin: access_token 为空，内容格式不符");
+            LoginDiag.add("ERR", "performLogin: at 为空，内容格式不符");
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -337,10 +369,11 @@ public class AgentActivity extends BaseActivity {
             String chosenAppid = getSelectedGameAppid();
 
             LoginDiag.add("RESULT", "game=" + gameName
-                    + " token里appid=" + appid
+                    + " tokenAppid=" + appid
                     + " 已选appid=" + chosenAppid
                     + " 一致=" + appid.equals(chosenAppid)
-                    + " mode=" + currentMode);
+                    + " mode=" + currentMode
+                    + " 外部唤起=" + launchedByApp);
 
             if (!"login".equals(currentMode)) {
                 saveAccountToFile(saved, appid, currentMode != null ? currentMode : "抓号模式");
@@ -351,6 +384,13 @@ public class AgentActivity extends BaseActivity {
             Intent resultIntent = new Intent();
             resultIntent.putExtra("key_response", json.toString());
             setResult(RESULT_OK, resultIntent);
+
+            // 关键：只有本界面是由游戏唤起时，结果才会回到游戏。
+            // 若由本应用主界面启动，setResult 只会回到 MainActivity，
+            // 游戏侧永远收不到 token —— 这是上号失败的常见原因。
+            LoginDiag.add("RETURN", launchedByApp
+                    ? "已通过 setResult 交回调用方"
+                    : "警告：本界面不是游戏唤起的，setResult 只会回到 shq 主界面，游戏收不到 token");
 
             new android.os.Handler().postDelayed(() -> finish(), 2000);
         } catch (JSONException e) {
