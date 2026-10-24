@@ -12,21 +12,23 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
+import java.net.Socket;
 import java.security.MessageDigest;
 
 /**
  * 更新下载用的本地代理核心（只代理本应用的更新流量，不接管全局）。
  *
- * 节点参数在 NodeConfig 里。换节点不需要重新下载二进制，
- * 只要配置指纹变了，ensureConfig() 会自动重写 config.json。
- *
  * 二进制落地位置：
  * Android 10 起应用私有目录是 noexec，直接 exec 会被拒。
- * 本应用有 root，所以用 su 安装到 /data/local/tmp/shq/，
- * 该目录可执行，且 APK 升级后依然存在。
+ * 本应用有 root，用 su 安装到 /data/local/tmp/shq/，该目录可执行、升级后保留。
  *
- * 核心从仓库 core/xray 获取，可独立更新，不必重装 APK。
- * 首次引导时 xray 还没起来，下载核心走「手动代理 → 直连」。
+ * 关键修复：
+ * 1) 启动是否成功，改为探测 127.0.0.1:10808 能否连上。
+ *    原来靠 Process.exitValue() 抛异常来判断「还活着」，
+ *    但 xray 由 su -c 启动会脱离 Java 进程树，这个判断既可能误判成功
+ *    也可能误判失败（App 重启后 proc 为 null）。
+ * 2) 启动失败时把 xray 的 stderr 记进 lastError，便于定位配置错误。
+ * 3) 下载核心时若已存在同 SHA 的文件则跳过下载。
  */
 public class XrayCore {
 
@@ -40,6 +42,9 @@ public class XrayCore {
     private static final String PREF = "xray_pref";
     private static final String KEY_READY = "ready";
     private static final String KEY_VER = "ver";
+
+    /** 最近一次失败原因，供诊断显示。 */
+    public static volatile String lastError = "";
 
     private static volatile Process proc;
 
@@ -59,16 +64,11 @@ public class XrayCore {
         return prefs(c).getBoolean(KEY_READY, false);
     }
 
-    /**
-     * 确保核心与配置都可用。
-     * 二进制缺失则下载；配置指纹变了则重写 config.json。
-     * 需在后台线程调用。
-     */
+    /** 确保核心与配置都可用。二进制缺失则下载；配置指纹变了只重写 config。 */
     public static boolean ensureReady(Context c) {
         if (!isInstalled(c)) {
             if (!downloadAndInstall(c)) return false;
         } else if (!NodeConfig.isApplied(c)) {
-            // 换了节点：只重写配置，不重新下载 31MB 二进制
             if (!writeConfig(c)) return false;
         }
         return true;
@@ -85,30 +85,53 @@ public class XrayCore {
         File bin = new File(work, BIN_NAME);
         File shaFile = new File(work, BIN_NAME + ".sha256");
 
-        // 核心下载时 xray 通常还没起来，所以这里不用它自己的代理，
-        // 走「手动代理 → 直连」两条路，避免自我依赖。
-        if (!httpToFile(c, REPO_RAW + BIN_NAME + ".sha256", shaFile)) return false;
-        String expect = readText(shaFile).trim().toLowerCase();
-        if (expect.length() < 32) return false;
-
-        if (!httpToFile(c, REPO_RAW + BIN_NAME, bin)) return false;
-        if (bin.length() < 1024) return false;
-
-        String actual = sha256(bin);
-        if (!actual.equals(expect)) {
-            bin.delete();
+        // 核心下载时 xray 通常还没起来，走「手动代理 → 直连」，避免自我依赖。
+        if (!httpToFile(c, REPO_RAW + BIN_NAME + ".sha256", shaFile)) {
+            lastError = "下载校验文件失败";
             return false;
+        }
+        String expect = readText(shaFile).trim().toLowerCase();
+        if (expect.length() < 32) {
+            lastError = "校验文件内容异常";
+            return false;
+        }
+
+        // 本地已有同 SHA 的文件就不重复下载
+        boolean reuse = false;
+        try {
+            if (bin.exists() && bin.length() > 1024 && expect.equals(sha256(bin))) {
+                reuse = true;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        if (!reuse) {
+            if (!httpToFile(c, REPO_RAW + BIN_NAME, bin)) {
+                lastError = "下载核心失败";
+                return false;
+            }
+            if (bin.length() < 1024) {
+                lastError = "核心文件过小";
+                return false;
+            }
+            String actual = sha256(bin);
+            if (!actual.equals(expect)) {
+                bin.delete();
+                lastError = "核心校验不匹配";
+                return false;
+            }
         }
 
         String local = RootUtil.shellQuote(bin.getAbsolutePath());
         String script = "mkdir -p " + REMOTE_DIR + "\n"
                 + "cp " + local + " " + REMOTE_DIR + "/" + BIN_NAME + "\n"
                 + "chmod 755 " + REMOTE_DIR + "/" + BIN_NAME + "\n";
-        if (!runSu(script)) return false;
+        if (!runSu(script)) {
+            lastError = "安装核心失败（root 不可用或复制失败）";
+            return false;
+        }
 
         prefs(c).edit().putBoolean(KEY_READY, true).putString(KEY_VER, expect).apply();
-
-        // 二进制就绪后立刻写配置
         return writeConfig(c);
     }
 
@@ -127,6 +150,7 @@ public class XrayCore {
             fos.write(buildConfig().getBytes("UTF-8"));
             fos.flush();
         } catch (Exception e) {
+            lastError = "写配置失败: " + e;
             return false;
         } finally {
             try { if (fos != null) fos.close(); } catch (Exception ignored) {}
@@ -136,50 +160,100 @@ public class XrayCore {
                 + "cp " + RootUtil.shellQuote(cfg.getAbsolutePath())
                 + " " + REMOTE_DIR + "/config.json\n"
                 + "chmod 644 " + REMOTE_DIR + "/config.json\n";
-        if (!runSu(script)) return false;
+        if (!runSu(script)) {
+            lastError = "复制配置失败";
+            return false;
+        }
 
         NodeConfig.markApplied(c);
         return true;
     }
 
-    /** 启动核心。已在运行直接返回 true。 */
+    /**
+     * 启动核心。
+     *
+     * 成功判定改为探测端口：xray 由 su -c 启动会脱离 Java 进程树，
+     * Process 对象的状态不能代表它是否在工作。
+     */
     public static boolean start(Context c) {
-        if (isAlive()) return true;
-        if (!isInstalled(c)) return false;
+        // 已经在监听就直接复用
+        if (probePort()) {
+            Net.invalidateCoreProbe();
+            return true;
+        }
+        if (!isInstalled(c)) {
+            lastError = "核心未安装";
+            return false;
+        }
+
+        // 先清掉可能残留的实例，避免端口占用
+        stop();
+
         try {
             proc = Runtime.getRuntime().exec(new String[]{
                     "su", "-c", REMOTE_DIR + "/" + BIN_NAME + " run -c " + REMOTE_DIR + "/config.json"
             });
-            // 给核心一点启动时间，再判断是否存活
-            Thread.sleep(1500);
-            return isAlive();
         } catch (Exception e) {
             proc = null;
+            lastError = "启动失败: " + e;
             return false;
         }
-    }
 
-    /** 停止后重新启动，用于换节点后让新配置生效。 */
-    public static boolean restart(Context c) {
+        // 最多等 3 秒，每 200ms 探一次端口
+        for (int i = 0; i < 15; i++) {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException ignored) {
+            }
+            if (probePort()) {
+                Net.invalidateCoreProbe();
+                lastError = "";
+                return true;
+            }
+        }
+
+        // 没起来：把 stderr 读出来，多半是配置错误
+        try {
+            StringBuilder sb = new StringBuilder();
+            BufferedReader er = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
+            String ln;
+            int n = 0;
+            while ((ln = er.readLine()) != null && n < 20) {
+                sb.append(ln).append(' ');
+                n++;
+            }
+            er.close();
+            lastError = "核心未监听 " + SOCKS_PORT + (sb.length() > 0 ? (": " + sb) : "");
+        } catch (Throwable t) {
+            lastError = "核心未监听 " + SOCKS_PORT;
+        }
+
         stop();
-        try {
-            Thread.sleep(300);
-        } catch (Exception ignored) {
-        }
-        return start(c);
+        return false;
     }
 
-    public static boolean isAlive() {
-        Process p = proc;
-        if (p == null) return false;
+    /** 探测 SOCKS 端口是否可连。 */
+    private static boolean probePort() {
+        Socket s = null;
         try {
-            p.exitValue();
-            return false;
-        } catch (IllegalThreadStateException running) {
+            s = new Socket();
+            s.connect(new InetSocketAddress("127.0.0.1", SOCKS_PORT), 300);
             return true;
         } catch (Throwable t) {
             return false;
+        } finally {
+            try { if (s != null) s.close(); } catch (Throwable ignored) {}
         }
+    }
+
+    public static boolean restart(Context c) {
+        stop();
+        return start(c);
+    }
+
+    /** 仅供诊断显示。端口探测才是可靠依据。 */
+    public static boolean isAlive() {
+        return probePort();
     }
 
     public static void stop() {
@@ -193,6 +267,7 @@ public class XrayCore {
             runSu("pkill -f " + REMOTE_DIR + "/" + BIN_NAME + "\n");
         } catch (Throwable ignored) {
         }
+        Net.invalidateCoreProbe();
     }
 
     /** 彻底卸载：删二进制、配置与状态，下次会重新下载。 */

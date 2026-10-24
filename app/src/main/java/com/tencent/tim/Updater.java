@@ -28,28 +28,25 @@ import java.net.HttpURLConnection;
 import java.security.MessageDigest;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 多线程分片下载 + 断点续传 + 安装。
  *
- * 关键修复（卡在「正在准备网络」）：
- * 原来在下载 APK 之前同步调用 XrayCore.ensureReady()，
- * 那是 31MB 的核心下载，且界面没有任何阶段反馈，
- * 网络慢或 raw.githubusercontent.com 不通时会长时间停在该提示上。
+ * 本次修复的几处卡住问题：
  *
- * 现在：
- * 1) 核心准备放到独立线程，最多等 10 秒
- * 2) 超时就直接按当前线路继续下载 APK，不再阻塞
- * 3) 核心若在之后才就绪，Net.open() 每次都会重新判断，自动切到代理
- * 4) 提示文字分阶段更新：准备网络 → 探测 → 下载 → 校验 → 安装
+ * 1) 代理准备最多等 10 秒，超时按当前线路继续，不阻塞。
+ * 2) 探测阶段失败时明确提示原因（原来只是静默返回失败，
+ *    界面文字停在「探测文件」，看起来就是卡死）。
+ * 3) 所有阶段都会更新提示文字，任何一步都能看出走到哪里。
  */
 public class Updater {
 
     private static final int THREADS = 8;
     private static final long MIN_SIZE = 500000L;
-    /** 等待代理核心就绪的上限。超时不影响继续下载。 */
     private static final long CORE_WAIT_MS = 10000L;
+    private static final long PROBE_WAIT_MS = 12000L;
 
     private static final int OK = 0;
     private static final int FAIL_DOWNLOAD = 1;
@@ -58,6 +55,7 @@ public class Updater {
         final AtomicLong total = new AtomicLong(0);
         final AtomicLong got = new AtomicLong(0);
         final AtomicBoolean aborted = new AtomicBoolean(false);
+        final AtomicInteger lastCode = new AtomicInteger(0);
         final long[] segStart = new long[THREADS];
         final long[] segEnd = new long[THREADS];
         final long[] segDone = new long[THREADS];
@@ -70,6 +68,7 @@ public class Updater {
         volatile String curHost = "";
         volatile String pickUrl = "";
         volatile boolean rangeOk = false;
+        volatile String failReason = "";
         volatile Activity act = null;
     }
 
@@ -122,12 +121,19 @@ public class Updater {
 
         new Thread(new Runnable() {
             public void run() {
-                // 阶段一：并行准备代理核心，最多等 CORE_WAIT_MS
+                // 阶段一：并行准备代理核心，最多等 10 秒
                 stage(tip, "准备网络（最多等 10 秒）...");
                 Thread coreThread = new Thread(new Runnable() {
                     public void run() {
                         try {
-                            if (XrayCore.ensureReady(act)) XrayCore.start(act);
+                            if (XrayCore.ensureReady(act)) {
+                                boolean ok = XrayCore.start(act);
+                                if (!ok) {
+                                    LoginDiag.add("PROXY", "核心启动失败: " + XrayCore.lastError);
+                                }
+                            } else {
+                                LoginDiag.add("PROXY", "核心准备失败: " + XrayCore.lastError);
+                            }
                         } catch (Throwable ignored) {
                         }
                     }
@@ -138,7 +144,7 @@ public class Updater {
                 } catch (InterruptedException ignored) {
                 }
 
-                // 阶段二：开始下载 APK（核心即便没就绪也继续）
+                // 阶段二：探测
                 stage(tip, "探测文件...· " + Net.routeName(act));
 
                 File dir = act.getExternalFilesDir(null);
@@ -159,14 +165,17 @@ public class Updater {
 
                 final int r = result;
                 final boolean okSign = signOk;
+                final String reason = job.failReason;
                 act.runOnUiThread(new Runnable() {
                     public void run() {
                         dlg.dismiss();
                         if (r == OK) {
                             install(act, out, okSign);
                         } else {
-                            android.widget.Toast.makeText(act,
-                                    "下载失败（" + Net.routeName(act) + "），请检查网络或代理设置",
+                            String msg = "下载失败";
+                            if (reason != null && reason.length() > 0) msg = msg + ": " + reason;
+                            msg = msg + "（" + Net.routeName(act) + "）";
+                            android.widget.Toast.makeText(act, msg,
                                     android.widget.Toast.LENGTH_LONG).show();
                             if (onFail != null) onFail.run();
                         }
@@ -176,7 +185,6 @@ public class Updater {
         }).start();
     }
 
-    /** 后台线程更新提示文字。 */
     private static void stage(final TextView tip, final String text) {
         if (tip == null) return;
         tip.post(new Runnable() {
@@ -217,6 +225,10 @@ public class Updater {
         try { return new java.net.URL(url).getHost(); } catch (Exception e) { return ""; }
     }
 
+    /**
+     * 探测文件大小。
+     * 失败时把原因写进 job.failReason，避免静默失败让界面看起来卡住。
+     */
     private static boolean probe(final Job job, final java.util.List<String> urls, final long expectSize) {
         final Object foundLock = new Object();
         final boolean[] found = new boolean[1];
@@ -228,6 +240,7 @@ public class Updater {
                     try {
                         c = open(job, u, 0, 0, 8000, 12000);
                         int code = c.getResponseCode();
+                        job.lastCode.set(code);
                         long t = -1;
                         boolean rg = false;
                         if (code == 206) {
@@ -236,8 +249,14 @@ public class Updater {
                         } else if (code == 200) {
                             t = c.getContentLength();
                         }
-                        if (t <= MIN_SIZE) return;
-                        if (expectSize > 0 && t != expectSize) return;
+                        if (t <= MIN_SIZE) {
+                            job.failReason = "文件大小异常(" + t + ")";
+                            return;
+                        }
+                        if (expectSize > 0 && t != expectSize) {
+                            job.failReason = "大小与预期不符(实际" + t + " 预期" + expectSize + ")";
+                            return;
+                        }
                         synchronized (foundLock) {
                             if (found[0]) return;
                             found[0] = true;
@@ -247,18 +266,26 @@ public class Updater {
                             job.curHost = hostOf(u);
                         }
                     } catch (Exception e) {
+                        String m = String.valueOf(e.getMessage());
+                        job.failReason = "连接失败: " + m;
                     } finally {
                         if (c != null) c.disconnect();
                     }
                 }
             }).start();
         }
-        long deadline = System.currentTimeMillis() + 15000L;
+        long deadline = System.currentTimeMillis() + PROBE_WAIT_MS;
         while (System.currentTimeMillis() < deadline) {
             synchronized (foundLock) { if (found[0]) return true; }
             try { Thread.sleep(120L); } catch (Exception e) {}
         }
-        synchronized (foundLock) { return found[0]; }
+        synchronized (foundLock) {
+            if (found[0]) return true;
+        }
+        if (job.failReason == null || job.failReason.length() == 0) {
+            job.failReason = "探测超时（" + PROBE_WAIT_MS / 1000 + "秒）";
+        }
+        return false;
     }
 
     private static long loadState(Job job, File state, long t) {
@@ -344,7 +371,10 @@ public class Updater {
     private static int fetch(Activity act, Job job, ProgressBar bar, TextView tip,
                              java.util.List<String> urls, long expectSize,
                              File part, File state, File out) {
-        if (urls == null || urls.isEmpty()) return FAIL_DOWNLOAD;
+        if (urls == null || urls.isEmpty()) {
+            job.failReason = "下载地址为空";
+            return FAIL_DOWNLOAD;
+        }
         if (!probe(job, urls, expectSize)) return FAIL_DOWNLOAD;
 
         final String src = job.pickUrl;
@@ -384,6 +414,7 @@ public class Updater {
             if (raf.length() != total) raf.setLength(total);
             raf.close();
         } catch (Exception e) {
+            job.failReason = "创建临时文件失败: " + e.getMessage();
             return FAIL_DOWNLOAD;
         }
         ui(act, job, bar, tip, true);
@@ -405,18 +436,37 @@ public class Updater {
         try {
             latch.await();
         } catch (Exception e) {
+            job.failReason = "下载线程被中断";
             return FAIL_DOWNLOAD;
         }
         saveState(job, state, 0);
-        if (job.aborted.get() || job.got.get() < total) return FAIL_DOWNLOAD;
+        if (job.aborted.get()) {
+            job.failReason = "下载已取消";
+            return FAIL_DOWNLOAD;
+        }
+        if (job.got.get() < total) {
+            long done = job.got.get();
+            job.failReason = "未下完(" + (done * 100 / (total > 0 ? total : 1)) + "%)";
+            return FAIL_DOWNLOAD;
+        }
 
         try {
-            if (out.exists() && !out.delete()) return FAIL_DOWNLOAD;
-            if (!part.renameTo(out)) return FAIL_DOWNLOAD;
-            if (out.length() != total) return FAIL_DOWNLOAD;
+            if (out.exists() && !out.delete()) {
+                job.failReason = "删除旧文件失败";
+                return FAIL_DOWNLOAD;
+            }
+            if (!part.renameTo(out)) {
+                job.failReason = "重命名失败";
+                return FAIL_DOWNLOAD;
+            }
+            if (out.length() != total) {
+                job.failReason = "大小校验失败";
+                return FAIL_DOWNLOAD;
+            }
             state.delete();
             return OK;
         } catch (Exception e) {
+            job.failReason = "收尾失败: " + e.getMessage();
             return FAIL_DOWNLOAD;
         }
     }
@@ -470,7 +520,10 @@ public class Updater {
         FileOutputStream fos = null;
         try {
             c = open(job, src, -1, -1, 12000, 30000);
-            if (c.getResponseCode() != 200) return false;
+            if (c.getResponseCode() != 200) {
+                job.failReason = "单线程下载返回非 200";
+                return false;
+            }
             long len = c.getContentLength();
             in = c.getInputStream();
             fos = new FileOutputStream(part);
@@ -484,13 +537,23 @@ public class Updater {
                 ui(act, job, bar, tip, false);
             }
             fos.flush();
-            if (g <= MIN_SIZE) return false;
-            if (expectSize > 0 && g != expectSize) return false;
-            if (len > 0 && g != len) return false;
+            if (g <= MIN_SIZE) {
+                job.failReason = "文件过小(" + g + ")";
+                return false;
+            }
+            if (expectSize > 0 && g != expectSize) {
+                job.failReason = "大小不符(实际" + g + " 预期" + expectSize + ")";
+                return false;
+            }
+            if (len > 0 && g != len) {
+                job.failReason = "长度不符(实际" + g + " 声明" + len + ")";
+                return false;
+            }
             job.total.set(g);
             if (out.exists()) out.delete();
             return part.renameTo(out);
         } catch (Exception e) {
+            job.failReason = "下载异常: " + e.getMessage();
             return false;
         } finally {
             try { if (fos != null) fos.close(); } catch (Exception e1) {}
