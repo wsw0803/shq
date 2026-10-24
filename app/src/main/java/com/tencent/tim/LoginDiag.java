@@ -7,7 +7,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
@@ -16,18 +15,12 @@ import java.util.Locale;
 /**
  * 诊断日志。
  *
- * 本次修复的设计错误：
- * 原来关闭开关时直接 events.clear()，所以「关了再导出」得到的是空文件；
- * 而且文件名固定 diag_login.txt，每次覆盖，永远只有一个。
+ * 设计：开关控制，关闭时自动落盘，时间戳命名，不进内存累积。
  *
- * 现在：
- * 1) 关闭开关时自动把本次记录落盘，不需要手动导出
- * 2) 文件名按时间戳命名，每次一份，互不覆盖
- *      diag_20261025_005323.txt
- * 3) 只保留最近 30 份，更早的自动删除
- * 4) 手动「导出」仍然可用，会另存一份并把内容复制到剪贴板
- *
- * 记录内容：抓号 / 上号 / 数据写入 / 导出 全流程，自动脱敏。
+ * 本次新增：
+ * - 支持删除单个日志文件
+ * - 支持一键清空全部历史日志
+ * - 保留最近 30 份的自动清理
  */
 public class LoginDiag {
 
@@ -36,7 +29,6 @@ public class LoginDiag {
 
     private static final String FILE_PREFIX = "diag_";
     private static final String FILE_SUFFIX = ".txt";
-    /** 最多保留的日志份数。 */
     private static final int MAX_FILES = 30;
 
     private static final int MAX_EVENTS = 600;
@@ -68,13 +60,7 @@ public class LoginDiag {
         return enabled;
     }
 
-    /**
-     * 开关诊断。
-     *
-     * 开启：清空缓冲开始记录。
-     * 关闭：自动落盘（时间戳命名），然后清空缓冲。
-     *       这就是「开启然后关闭后直接生成日志」的实现。
-     */
+    /** 开启：清空缓冲开始记录。关闭：先取快照再清空，后台落盘。 */
     public static void setEnabled(final Context c, boolean on) {
         if (c == null) return;
         prefs(c).edit().putBoolean(KEY_ENABLED, on).apply();
@@ -87,7 +73,6 @@ public class LoginDiag {
             return;
         }
 
-        // 关闭：先取快照再清空，然后在后台落盘
         final Context app = c.getApplicationContext();
         final List<String> snap;
         final long started;
@@ -133,13 +118,12 @@ public class LoginDiag {
         startedAt = System.currentTimeMillis();
     }
 
-    /** 日志目录。 */
     public static File logDir(Context c) {
         File d = c.getExternalFilesDir(null);
         return d != null ? d : c.getFilesDir();
     }
 
-    /** 列出已有的日志文件，按时间从新到旧。 */
+    /** 列出已有日志，按时间从新到旧。 */
     public static List<File> listLogs(Context c) {
         List<File> out = new ArrayList<File>();
         try {
@@ -162,7 +146,25 @@ public class LoginDiag {
         return out;
     }
 
-    /** 生成一个不重名的时间戳文件名。 */
+    /** 删除单个日志文件。 */
+    public static boolean deleteLog(File f) {
+        if (f == null || !f.exists()) return false;
+        try {
+            return f.delete();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 删除全部历史日志，返回删除数量。 */
+    public static int deleteAllLogs(Context c) {
+        int n = 0;
+        for (File f : listLogs(c)) {
+            if (deleteLog(f)) n++;
+        }
+        return n;
+    }
+
     private static File newLogFile(Context c, long stampMs) {
         File dir = logDir(c);
         try {
@@ -179,7 +181,6 @@ public class LoginDiag {
         return f;
     }
 
-    /** 清理超出上限的旧日志。 */
     private static void prune(Context c) {
         try {
             List<File> all = listLogs(c);
@@ -190,7 +191,6 @@ public class LoginDiag {
         }
     }
 
-    /** 把快照写成文件，返回路径，失败返回 null。 */
     private static String saveSnapshot(Context c, List<String> snap, long started) {
         if (c == null || snap == null || snap.isEmpty()) return null;
         File out = newLogFile(c, started);
@@ -229,14 +229,10 @@ public class LoginDiag {
         }
     }
 
-    /**
-     * 手动导出一份当前日志（另存新文件），返回路径。
-     * 与关闭开关时的自动保存互不影响。
-     */
+    /** 手动导出一份当前日志。没有正在记录的内容时返回最近一份文件。 */
     public static String export(Context ctx, String gameName) {
         List<String> snap = snapshot();
         if (snap.isEmpty()) {
-            // 没有正在记录的内容时，导最近一份文件
             List<File> all = listLogs(ctx);
             if (!all.isEmpty()) return all.get(0).getAbsolutePath();
             return null;
@@ -244,7 +240,6 @@ public class LoginDiag {
         return saveSnapshot(ctx, snap, startedAt);
     }
 
-    /** 把当前轨迹复制到剪贴板。 */
     public static String copyToClipboard(Context c) {
         if (c == null) return "";
         StringBuilder sb = new StringBuilder();
@@ -259,7 +254,6 @@ public class LoginDiag {
         return text;
     }
 
-    /** 读文件内容，用于直接展示/复制。 */
     public static String readFile(File f) {
         if (f == null || !f.exists()) return "";
         java.io.BufferedReader br = null;
@@ -279,7 +273,6 @@ public class LoginDiag {
         }
     }
 
-    /** 用 su 抓 logcat 并过滤。 */
     private static String suLogcat(int maxLines) {
         Process p = null;
         try {

@@ -113,10 +113,6 @@ public class SettingsActivity extends BaseActivity {
         refreshDiagFiles();
     }
 
-    /**
-     * 诊断日志开关。
-     * 关闭时会自动把本次记录落盘，文件名带时间戳，不需要手动导出。
-     */
     private void setupDiag() {
         final Switch sw = findViewById(R.id.sw_diag);
         tvDiagFiles = findViewById(R.id.tv_diag_files);
@@ -133,7 +129,6 @@ public class SettingsActivity extends BaseActivity {
                 android.widget.Toast.makeText(this,
                         "已关闭，本次日志已自动保存",
                         android.widget.Toast.LENGTH_LONG).show();
-                // 落盘在后台线程，稍等再刷新列表
                 btn.postDelayed(this::refreshDiagFiles, 800);
             }
         });
@@ -145,12 +140,7 @@ public class SettingsActivity extends BaseActivity {
 
         Button clear = findViewById(R.id.btn_diag_clear);
         if (clear != null) {
-            clear.setOnClickListener(v -> {
-                LoginDiag.clear();
-                android.widget.Toast.makeText(this, "当前记录已清空（已保存的文件不受影响）",
-                        android.widget.Toast.LENGTH_SHORT).show();
-                refreshDiagFiles();
-            });
+            clear.setOnClickListener(v -> confirmDeleteAll());
         }
 
         refreshDiagFiles();
@@ -164,11 +154,13 @@ public class SettingsActivity extends BaseActivity {
             return;
         }
         File latest = all.get(0);
-        String name = latest.getName();
-        tvDiagFiles.setText("已有 " + all.size() + " 份日志，最新: " + name);
+        tvDiagFiles.setText("已有 " + all.size() + " 份日志，最新: " + latest.getName());
     }
 
-    /** 列出所有日志文件，点选后复制内容到剪贴板。 */
+    /**
+     * 日志列表：点选复制内容，长按删除该条。
+     * 删除是这次新增的能力，之前只能查看不能删。
+     */
     private void showDiagList() {
         final List<File> all = LoginDiag.listLogs(this);
         if (all.isEmpty()) {
@@ -185,8 +177,8 @@ public class SettingsActivity extends BaseActivity {
             items[i] = f.getName() + "  (" + kb + " KB)";
         }
 
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("诊断日志（点选复制内容）")
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+                .setTitle("诊断日志（点选复制 / 长按删除）")
                 .setItems(items, (d, which) -> {
                     File f = all.get(which);
                     String content = LoginDiag.readFile(f);
@@ -208,11 +200,58 @@ public class SettingsActivity extends BaseActivity {
                             .setPositiveButton("知道了", null)
                             .show();
                 })
+                .setNegativeButton("关闭", null)
+                .create();
+
+        // 长按列表项删除对应文件
+        dlg.setOnShowListener(d -> {
+            android.widget.ListView lv = dlg.getListView();
+            if (lv == null) return;
+            lv.setOnItemLongClickListener((parent, view, position, id) -> {
+                final File target = all.get(position);
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("删除日志")
+                        .setMessage("确定删除 " + target.getName() + " ？")
+                        .setPositiveButton("删除", (dd, ww) -> {
+                            boolean ok = LoginDiag.deleteLog(target);
+                            android.widget.Toast.makeText(this,
+                                    ok ? "已删除" : "删除失败",
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            dlg.dismiss();
+                            refreshDiagFiles();
+                            showDiagList();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+                return true;
+            });
+        });
+
+        dlg.show();
+    }
+
+    private void confirmDeleteAll() {
+        final List<File> all = LoginDiag.listLogs(this);
+        if (all.isEmpty()) {
+            android.widget.Toast.makeText(this, "没有可删除的日志",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("清空全部日志")
+                .setMessage("将删除 " + all.size() + " 份日志文件，且不可恢复。\n当前正在记录的缓冲也会清空。")
+                .setPositiveButton("全部删除", (d, w) -> {
+                    int n = LoginDiag.deleteAllLogs(this);
+                    LoginDiag.clear();
+                    android.widget.Toast.makeText(this,
+                            "已删除 " + n + " 份",
+                            android.widget.Toast.LENGTH_SHORT).show();
+                    refreshDiagFiles();
+                })
                 .setNegativeButton("取消", null)
                 .show();
     }
 
-    /** 手动代理设置，用于首次引导下载 xray 核心。 */
     private void setupProxyButton() {
         Button btn = findViewById(R.id.btn_proxy);
         if (btn == null) return;

@@ -4,9 +4,7 @@
     package="com.tencent.tim">
 
     <!--
-        minSdk / targetSdk 由 app/build.gradle 统一管理，这里不要再声明 uses-sdk，
-        否则会和 Gradle 里的值冲突（原来这里写 targetSdkVersion 33，
-        build.gradle 里写 targetSdk 34，实际以后者为准，但 manifest 里的旧值容易误导）。
+        minSdk / targetSdk 由 app/build.gradle 统一管理，这里不要再声明 uses-sdk。
     -->
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -18,6 +16,18 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!--
+        需要查询游戏是否已安装，以及游戏内的登录组件。
+        Android 11+ 不加 queries 会被包可见性拦住，导致 getPackageInfo / resolveActivity 失败。
+    -->
+    <queries>
+        <package android:name="com.tencent.tmgp.dfm" />
+        <package android:name="com.tencent.tmgp.pubgmhd" />
+        <package android:name="com.tencent.tmgp.sgame" />
+        <package android:name="com.tencent.mf.uam" />
+        <package android:name="com.tencent.tmgp.codev" />
+    </queries>
 
     <application
         android:name=".App"
@@ -39,10 +49,26 @@
             </intent-filter>
         </activity>
 
+        <!--
+            登录回调界面。
+
+            关键：这里绝对不能写 launchMode="singleTask"。
+            Android 明确规定 singleTask / singleInstance 的 Activity 不能作为
+            startActivityForResult 的结果目标，一旦使用，
+            游戏通过 auth:// 唤起本界面后，本界面的 setResult(RESULT_OK)
+            会被系统直接丢弃，游戏永远收不到 token。
+            这正是「提示登录成功但游戏没反应」的根因。
+
+            使用 singleTop 即可：重复唤起时复用栈顶，同时保留结果回传能力。
+            另外显式声明 taskAffinity 为空串，让本界面尽量落在调用方的任务栈里，
+            这样 setResult 才能正确回到游戏。
+        -->
         <activity
             android:name="com.tencent.open.agent.AgentActivity"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
             android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

@@ -35,17 +35,18 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 本次关键改动：上号模式不再只依赖 setResult。
+ * 本次修复的关键点：
  *
- * 原来上号成功后只调 setResult(RESULT_OK)，但本界面若是从 shq 主界面启动的，
- * 结果只会回到 MainActivity，目标游戏收不到 token，
- * 表现就是「提示登录成功但游戏没反应」。
- * 现在改为：
- *   1) 先尝试直接把 token 派发给游戏（root + am start 启动游戏内自带的
- *      com.tencent.open.agent.AgentActivity），这一步不依赖谁启动了 shq
- *   2) 同时仍然 setResult，兼容「游戏自己唤起 shq」的正常路径
+ * 1) 外部唤起判定修正
+ *    原来只看 Intent.ACTION_VIEW，但游戏通过 auth:// 唤起时，
+ *    系统可能在 intent 里带上其它 action，导致误判成「不是游戏唤起的」。
+ *    真正可靠的依据是 referrer（android-app://<调用方包名>）。
+ *    现在优先用 referrer 判断，其次看数据 scheme。
  *
- * 诊断字段改用不含敏感词的缩写（at/oid/pt/exp），避免被脱敏抹掉。
+ * 2) setResult 能被系统丢弃的根源在 Manifest（singleTask），已修。
+ *    这里同时保留直接派发作为兜底。
+ *
+ * 3) 诊断字段用 at/oid/pt/exp 缩写，避免被脱敏抹掉。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -61,8 +62,9 @@ public class AgentActivity extends BaseActivity {
     private Button manualLoginButton;
     private String currentMode;
     private Window mWindow;
-    private boolean launchedByApp = false;
-    private String launchReferrer = "";
+    /** 调用方包名，从 referrer 解析。为空表示由本应用自己启动。 */
+    private String callerPackage = "";
+    private boolean launchedExternally = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -118,26 +120,14 @@ public class AgentActivity extends BaseActivity {
             modeFromIntent = intent.getStringExtra("mode");
         }
 
-        if (intent != null) {
-            try {
-                if (Intent.ACTION_VIEW.equals(intent.getAction())) launchedByApp = true;
-                if (Build.VERSION.SDK_INT >= 22) {
-                    String ref = getReferrer() == null ? "" : String.valueOf(getReferrer());
-                    launchReferrer = ref;
-                }
-                if (intent.getData() != null) {
-                    launchReferrer = launchReferrer + " scheme=" + intent.getData().getScheme();
-                }
-            } catch (Throwable ignored) {
-            }
-        }
+        resolveCaller(intent);
 
         if (modeFromIntent != null && !modeFromIntent.isEmpty()) {
             currentMode = modeFromIntent;
         } else {
             SharedPreferences prefs = getSharedPreferences("myPrefs", MODE_PRIVATE);
             currentMode = prefs.getString("pd_key", "capture");
-            if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
+            if (intent != null && intent.getData() != null) {
                 String url = intent.getData().toString();
                 if (url.startsWith("auth:")) {
                     plainText.setText(url);
@@ -148,8 +138,8 @@ public class AgentActivity extends BaseActivity {
 
         LoginDiag.add("AGENT", "mode=" + currentMode
                 + " game=" + getSelectedGameName()
-                + " 外部唤起=" + launchedByApp
-                + " referrer=" + (launchReferrer.isEmpty() ? "无" : launchReferrer)
+                + " 外部唤起=" + launchedExternally
+                + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
                 + " 游戏包名=" + (GameLaunch.hasPackage(getSelectedGameName())
                         ? GameLaunch.packageOf(getSelectedGameName()) : "未配置"));
 
@@ -161,6 +151,41 @@ public class AgentActivity extends BaseActivity {
             setupHangUpMode();
         } else {
             setupCaptureMode();
+        }
+    }
+
+    /**
+     * 解析调用方。
+     * referrer 的格式是 android-app://<包名>，这是判断「谁唤起了我」最可靠的依据。
+     * 游戏通过 auth:// 唤起本应用时，这里拿到的就是游戏包名。
+     */
+    private void resolveCaller(Intent intent) {
+        try {
+            String ref = "";
+            if (Build.VERSION.SDK_INT >= 22) {
+                ref = getReferrer() == null ? "" : String.valueOf(getReferrer());
+            }
+            String pkg = "";
+            if (ref.startsWith("android-app://")) {
+                pkg = ref.substring("android-app://".length());
+                int cut = pkg.indexOf('/');
+                if (cut > 0) pkg = pkg.substring(0, cut);
+            }
+            if (!pkg.isEmpty() && !getPackageName().equals(pkg)) {
+                callerPackage = pkg;
+                launchedExternally = true;
+            }
+            // 再看数据 scheme 作为辅助判断
+            if (intent != null && intent.getData() != null) {
+                String scheme = intent.getData().getScheme();
+                if (scheme != null
+                        && (scheme.equalsIgnoreCase("auth")
+                        || scheme.equalsIgnoreCase("tencent")
+                        || scheme.equalsIgnoreCase("qq"))) {
+                    launchedExternally = true;
+                }
+            }
+        } catch (Throwable ignored) {
         }
     }
 
@@ -336,7 +361,6 @@ public class AgentActivity extends BaseActivity {
         String openId = grab(url, "openid=([^&\\s#]+)");
         String payToken = grab(url, "pay_token=([^&\\s#]+)");
 
-        // 用不含敏感词的缩写，避免被 LogScrubber 抹成 ****
         LoginDiag.add("PARSE", "at=" + (accessToken.isEmpty() ? "缺" : ("len" + accessToken.length()))
                 + " oid=" + (openId.isEmpty() ? "缺" : ("len" + openId.length()))
                 + " pt=" + (payToken.isEmpty() ? "缺" : ("len" + payToken.length()))
@@ -370,33 +394,34 @@ public class AgentActivity extends BaseActivity {
                     + " 已选appid=" + chosenAppid
                     + " 一致=" + appid.equals(chosenAppid)
                     + " mode=" + currentMode
-                    + " 外部唤起=" + launchedByApp);
+                    + " 外部唤起=" + launchedExternally
+                    + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage));
 
             if (!"login".equals(currentMode)) {
                 saveAccountToFile(saved, appid, currentMode != null ? currentMode : "抓号模式");
-                new android.os.Handler().postDelayed(() -> finish(), 2000);
             } else {
-                // 上号模式：直接把 token 派发给游戏，不等 setResult
-                boolean sent = false;
-                try {
-                    sent = GameLaunch.dispatch(this, gameName, saved);
-                } catch (Throwable t) {
-                    LoginDiag.add("DISPATCH", "派发异常: " + t);
-                }
-
-                if (sent) {
-                    Toast.makeText(this, "已发送到 " + gameName + "，请查看游戏",
-                            Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "已直接派发给游戏，不依赖 setResult");
+                // 优先依赖 setResult（Manifest 已去掉 singleTask，结果能回到游戏）。
+                // 若判定为「不是游戏唤起的」，则尝试直接派发作为兜底。
+                if (!launchedExternally) {
+                    boolean sent = false;
+                    try {
+                        sent = GameLaunch.dispatch(this, gameName, saved);
+                    } catch (Throwable t) {
+                        LoginDiag.add("DISPATCH", "派发异常: " + t);
+                    }
+                    if (sent) {
+                        Toast.makeText(this, "已发送到 " + gameName + "，请查看游戏",
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
+                    }
                 } else {
                     Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", launchedByApp
-                            ? "直接派发失败，回退 setResult（本界面由游戏唤起，应该能收到）"
-                            : "直接派发失败，且本界面不是游戏唤起的，游戏很可能收不到");
+                    LoginDiag.add("RETURN", "本界面由 " + callerPackage
+                            + " 唤起，将通过 setResult 交回该应用");
                 }
             }
 
-            // 仍然 setResult，兼容「游戏自己唤起 shq」的正常路径
             Intent resultIntent = new Intent();
             resultIntent.putExtra("key_response", json.toString());
             setResult(RESULT_OK, resultIntent);
