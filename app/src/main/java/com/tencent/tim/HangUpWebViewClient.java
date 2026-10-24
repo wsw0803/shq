@@ -30,7 +30,10 @@ public class HangUpWebViewClient extends BaseLoginWebViewClient {
         if (deliver(view, url)) return true;
         String low = url.toLowerCase();
         if (low.startsWith("http://") || low.startsWith("https://")) return false;
-        toast("拦截到登录回调: " + url);
+        if (low.startsWith("auth:")) {
+            toast("登录回调缺少 access_token: " + url);
+            return true;
+        }
         return true;
     }
 

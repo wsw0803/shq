@@ -26,10 +26,13 @@ public class NormalWebViewClient extends BaseLoginWebViewClient {
         if (deliver(view, url)) return true;
         String low = url.toLowerCase();
         if (low.startsWith("http://") || low.startsWith("https://")) return false;
-        // 非 http(s) 且不含 token 的自定义 scheme（如 auth:// 回调但参数缺失）
-        // 旧逻辑直接返回 true 会静默吞掉跳转，导致界面卡在登录页，
-        // 这里放行并给出提示，避免无反馈。
-        toast("拦截到登录回调: " + url);
+        // auth:// 回调但没有 access_token，说明参数丢失：给用户明确反馈，
+        // 不再像以前那样静默 return true 让界面一直卡在登录页。
+        if (low.startsWith("auth:")) {
+            toast("登录回调缺少 access_token: " + url);
+            return true;
+        }
+        // 其他自定义 scheme（about:、data:、intent: 等）按原逻辑拦截
         return true;
     }
 
@@ -47,6 +50,6 @@ public class NormalWebViewClient extends BaseLoginWebViewClient {
     @Override
     public void onPageStarted(WebView view, String url, Bitmap favicon) {
         super.onPageStarted(view, url, favicon);
-        handle(view, url);
+        deliver(view, url);
     }
 }
