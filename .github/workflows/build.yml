@@ -23,6 +23,20 @@ jobs:
           echo sdk.dir=$ANDROID_HOME > local.properties
           echo no | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools" || true
+      - name: Restore signing key
+        # 密钥不再提交到仓库。在 Settings > Secrets 配置 WEI_STORE_FILE_B64（keystore 的 base64）
+        # 以及 WEI_STORE_PASSWORD / WEI_KEY_ALIAS / WEI_KEY_PASSWORD。
+        # 未配置时构建照常进行，只是回退到 debug 签名。
+        env:
+          WEI_STORE_FILE_B64: ${{ secrets.WEI_STORE_FILE_B64 }}
+        run: |
+          if [ -n "$WEI_STORE_FILE_B64" ]; then
+            echo "$WEI_STORE_FILE_B64" | base64 -d > "$RUNNER_TEMP/wei-release.jks"
+            echo "WEI_STORE_FILE=$RUNNER_TEMP/wei-release.jks" >> $GITHUB_ENV
+            echo "签名密钥已从 Secrets 恢复"
+          else
+            echo "未配置 WEI_STORE_FILE_B64，本次使用 debug 签名"
+          fi
       - name: Calculate Version
         id: version
         run: |
@@ -34,6 +48,10 @@ jobs:
           echo "vName=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "vCode=$COUNT" >> $GITHUB_OUTPUT
       - name: Build release
+        env:
+          WEI_STORE_PASSWORD: ${{ secrets.WEI_STORE_PASSWORD }}
+          WEI_KEY_ALIAS: ${{ secrets.WEI_KEY_ALIAS }}
+          WEI_KEY_PASSWORD: ${{ secrets.WEI_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace -PvCode=${{ steps.version.outputs.vCode }} -PvName=${{ steps.version.outputs.vName }}

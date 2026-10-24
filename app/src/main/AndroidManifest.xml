@@ -3,16 +3,18 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.tencent.tim">
 
-    <uses-sdk
-        android:minSdkVersion="21"
-        android:targetSdkVersion="33" />
+    <!--
+        minSdk / targetSdk 由 app/build.gradle 统一管理，这里不要再声明 uses-sdk，
+        否则会和 Gradle 里的值冲突（原来这里写 targetSdkVersion 33，
+        build.gradle 里写 targetSdk 34，实际以后者为准，但 manifest 里的旧值容易误导）。
+    -->
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -26,7 +28,7 @@
         android:resizeableActivity="true"
         android:requestLegacyExternalStorage="true"
         tools:ignore="UnusedAttribute">
-        
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -36,7 +38,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
+
         <activity
             android:name="com.tencent.open.agent.AgentActivity"
             android:exported="true"
@@ -52,9 +54,13 @@
                 <data android:host="*" />
             </intent-filter>
         </activity>
-            
-            <activity android:name=".SettingsActivity" android:exported="false" android:screenOrientation="portrait" />
-            <provider
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"

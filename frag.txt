@@ -1,5 +1,0 @@
-        String accessToken = grab(url, "access_token=([^&\\s]+)");
-        String expiresIn = grab(url, "expires_in=([^&\\s]+)");
-        String openId = grab(url, "openid=([^&\\s]+)");
-        String payToken = grab(url, "pay_token=([^&\\s]+)");
-        if (!accessToken.isEmpty()) {

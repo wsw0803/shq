@@ -6,7 +6,9 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
@@ -19,8 +21,12 @@ public class Ui {
     public static final String KEY_GLASS = "ui_glass";
     public static final String KEY_BRIGHT = "ui_bright";
     public static final String KEY_BG = "ui_bg";
-    public static final String KEY_BG_URI = "ui_bg_uri"; public static final String KEY_THEME = "ui_theme";
+    public static final String KEY_BG_URI = "ui_bg_uri";
+    public static final String KEY_THEME = "ui_theme";
     public static final String KEY_BASE_DPI = "ui_base_dpi";
+
+    /** 玻璃控件的基础底色，API < 24 时拿不到 ColorStateList，用它兜底。 */
+    private static final int GLASS_BASE = 0x33FFFFFF;
 
     public static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
@@ -32,8 +38,12 @@ public class Ui {
         if (pct > 200) pct = 200;
         if (pct == 100) return base;
         Configuration cfg = new Configuration(base.getResources().getConfiguration());
-        int baseDpi = base.getResources().getDisplayMetrics().densityDpi;
-        if (prefs(base).getInt(KEY_BASE_DPI, 0) <= 0) {
+        // 基准 DPI 只在首次计算时写入一次，之后始终读同一个值。
+        // 原来是在这里面反复 apply()，和 applyDpi() 抢写，导致每次改 DPI 都拿上一次的结果当基准，
+        // 缩放会逐次漂移。
+        int baseDpi = prefs(base).getInt(KEY_BASE_DPI, 0);
+        if (baseDpi <= 0) {
+            baseDpi = base.getResources().getDisplayMetrics().densityDpi;
             prefs(base).edit().putInt(KEY_BASE_DPI, baseDpi).apply();
         }
         cfg.densityDpi = (int) (baseDpi * (pct / 100f));
@@ -57,10 +67,10 @@ public class Ui {
         if (custom != null) {
             String uriStr = p.getString(KEY_BG_URI, "");
             if (!uriStr.isEmpty()) {
+                InputStream in = null;
                 try {
-                    InputStream in = a.getContentResolver().openInputStream(Uri.parse(uriStr));
+                    in = a.getContentResolver().openInputStream(Uri.parse(uriStr));
                     Drawable d = Drawable.createFromStream(in, "bg");
-                    if (in != null) in.close();
                     if (d != null) {
                         custom.setImageDrawable(d);
                         custom.setVisibility(View.VISIBLE);
@@ -69,6 +79,11 @@ public class Ui {
                     }
                 } catch (Exception e) {
                     custom.setVisibility(View.GONE);
+                } finally {
+                    try {
+                        if (in != null) in.close();
+                    } catch (Exception ignored) {
+                    }
                 }
             } else {
                 custom.setVisibility(View.GONE);
@@ -78,27 +93,38 @@ public class Ui {
         View content = a.findViewById(android.R.id.content);
         if (content instanceof ViewGroup) {
             View root = ((ViewGroup) content).getChildAt(0);
-            int th = p.getInt(KEY_THEME, 0); boolean lt = th == 1 || (th == 0 && (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES); if (root != null) root.setBackgroundResource(lt ? R.drawable.bg_light : bgRes(p.getInt(KEY_BG, 0)));
+            int th = p.getInt(KEY_THEME, 0);
+            boolean lt = th == 1 || (th == 0 && (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES);
+            if (root != null) root.setBackgroundResource(lt ? R.drawable.bg_light : bgRes(p.getInt(KEY_BG, 0)));
         }
     }
 
-
+    /**
+     * 递归调整带 tag="glass" 的控件透明度。
+     *
+     * 原实现调用 getBackground().mutate() 却没有把返回值设回 View：
+     * mutate() 只是返回一份可安全修改的副本，不写回就不会生效；
+     * 而多个控件共享同一个 drawable 时，直接改原对象又会互相污染。
+     * 这里改为 mutate() 后显式 setBackground()。
+     */
     public static void applyGlass(View v, int glass) {
         if (v == null) return;
-        if ("glass".equals(v.getTag()) && v.getBackground() instanceof android.graphics.drawable.GradientDrawable) {
+        if ("glass".equals(v.getTag()) && v.getBackground() instanceof GradientDrawable) {
             try {
-                android.graphics.drawable.GradientDrawable gd =
-                        (android.graphics.drawable.GradientDrawable) v.getBackground().mutate();
+                GradientDrawable src = (GradientDrawable) v.getBackground();
+                GradientDrawable gd = (GradientDrawable) src.mutate();
                 int alpha = 25 + glass * 2;
                 if (alpha < 25) alpha = 25;
                 if (alpha > 235) alpha = 235;
-                int base = 0x33FFFFFF;
-                if (android.os.Build.VERSION.SDK_INT >= 24) {
+                int base = GLASS_BASE;
+                if (Build.VERSION.SDK_INT >= 24) {
                     android.content.res.ColorStateList csl = gd.getColor();
                     if (csl != null) base = csl.getDefaultColor();
                 }
                 gd.setColor(Color.argb(alpha, Color.red(base), Color.green(base), Color.blue(base)));
-            } catch (Throwable ignored) {}
+                v.setBackground(gd);
+            } catch (Throwable ignored) {
+            }
         }
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
@@ -123,8 +149,8 @@ public class Ui {
                 else if (r + g + b > 300) t.setTextColor(0xFF51637A);
             }
         }
-        if (v instanceof android.view.ViewGroup) {
-            android.view.ViewGroup gp = (android.view.ViewGroup) v;
+        if (v instanceof ViewGroup) {
+            ViewGroup gp = (ViewGroup) v;
             for (int i = 0; i < gp.getChildCount(); i++) tint(gp.getChildAt(i), light);
         }
     }
@@ -134,6 +160,7 @@ public class Ui {
         View content = a.findViewById(android.R.id.content);
         if (content != null) tint(content, light);
     }
+
     public static int bgRes(int idx) {
         switch (idx) {
             case 1: return R.drawable.bg_style_1;
@@ -143,16 +170,18 @@ public class Ui {
         }
     }
 
+    /**
+     * 修改 DPI 后重启界面。
+     *
+     * 直接改 Activity 的 resources.displayMetrics 是无效的（Resources 内部已缓存），
+     * 真正的缩放靠 attachBaseContext 里 createConfigurationContext 实现，
+     * 所以这里只需要落盘配置并重启，不要再手动改 densityDpi 制造假象。
+     */
     public static void applyDpi(Activity a) {
-        int pct = prefs(a).getInt(KEY_DPI, 100);
-        int base = prefs(a).getInt(KEY_BASE_DPI, 0);
-        if (base <= 0) {
-            base = a.getResources().getDisplayMetrics().densityDpi;
-            prefs(a).edit().putInt(KEY_BASE_DPI, base).apply();
-        }
-        int target = (int) (base * pct / 100f);
-        a.getResources().getDisplayMetrics().densityDpi = target;
-        a.getResources().getConfiguration().densityDpi = target;
-        android.content.Intent i=new android.content.Intent(a,MainActivity.class);i.setFlags(0x10000000|0x04000000);a.startActivity(i);a.finish();
+        if (a == null) return;
+        android.content.Intent i = new android.content.Intent(a, MainActivity.class);
+        i.setFlags(0x10000000 | 0x04000000);
+        a.startActivity(i);
+        a.finish();
     }
 }

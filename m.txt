@@ -1,9 +1,0 @@
-    private void showPickToken() {
-        com.tencent.tim.TokenDialog.show(this, getSelectedGameName(), e -> {
-            String url2 = com.tencent.tim.TokenStore.rebuildUrl(e);
-            plainText.setText(url2);
-            updateAutoGameHint(url2);
-            performLogin(url2);
-        });
-    }
-
