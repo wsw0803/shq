@@ -34,25 +34,13 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 多线程分片下载 + 断点续传 + 安装。
  *
- * 下载部分的修复：
-fetch() 探测到服务器不支持 Range 时走 single() 分支，
-single() 成功时已经完成 part -> out 的转换并 return true，
-原代码没有立即返回，继续执行收尾逻辑：
-    if (out.exists() && !out.delete()) return false;
-    if (!part.renameTo(out)) return false;
-第一行把刚下好的成品删掉，第二行因 part 已不存在必然失败，
-于是每次下载成功都会自我销毁，表现为「下载失败」。现已直接返回。
+ * 下载可走本地代理（见 XrayCore）：
+ * 若核心已就绪并成功启动，下载连接会挂到 127.0.0.1:SOCKS_PORT；
+ * 否则自动直连，不影响原有可用性。
+ * 代理只作用于本类的更新下载，业务流量完全不经过它。
  *
- * 安装策略（有 root 时）：
- * 优先用 su + pm install -r 静默安装。这样即使系统安装器仍带签名校验，
- * 只要设备已 root 也能完成覆盖安装。
- *
- * 签名校验不再阻断安装：
- * 原来 signatureMatches() 为 false 就直接放弃安装，
- * 这对「已 root 且改装过安装器（去签名校验）」的设备是误伤——
- * 真正拦人的是这段 Java 校验，而不是系统。
- * 现在签名不一致只在日志里记一条警告，然后照常尝试安装，
- * 装不成再由系统报错，不会在应用层提前挡掉。
+ * 安装策略：有 root 时优先 su + pm install -r 静默安装。
+ * 签名不一致只作为提示，不再阻断（已 root 且安装器去校验的设备可正常覆盖）。
  */
 public class Updater {
 
@@ -61,6 +49,9 @@ public class Updater {
 
     private static final int OK = 0;
     private static final int FAIL_DOWNLOAD = 1;
+
+    /** 本次下载是否使用代理。由 start() 决定，供 open() 读取。 */
+    private static volatile boolean useProxy = false;
 
     private static final class Job {
         final AtomicLong total = new AtomicLong(0);
@@ -112,7 +103,7 @@ public class Updater {
         root.addView(title);
 
         final TextView tip = new TextView(act);
-        tip.setText("正在选择最快线路...");
+        tip.setText("正在选择线路...");
         tip.setTextColor(0xFF9CA3AF);
         tip.setTextSize(13);
         tip.setGravity(Gravity.CENTER);
@@ -128,6 +119,15 @@ public class Updater {
 
         new Thread(new Runnable() {
             public void run() {
+                // 先尝试把本地代理准备好；失败就直连，不阻断更新
+                useProxy = false;
+                try {
+                    if (XrayCore.ensureReady(act) && XrayCore.start(act)) {
+                        useProxy = true;
+                    }
+                } catch (Throwable ignored) {
+                }
+
                 File dir = act.getExternalFilesDir(null);
                 final File out = new File(dir, "update.apk");
                 final File part = new File(dir, "update.apk.part");
@@ -135,17 +135,21 @@ public class Updater {
 
                 int result = fetch(act, job, bar, tip, buildUrls(url), expectSize, part, state, out);
 
-                // 签名只作为提示，不再阻断安装。
-                // 已 root 且安装器已去校验的设备可以正常覆盖安装，
-                // 强行在这里拦截反而让这类设备永远更新不了。
-                final boolean signOk = (result == OK) && signatureMatches(act, out);
+                boolean signOk = false;
+                if (result == OK) {
+                    try {
+                        signOk = signatureMatches(act, out);
+                    } catch (Throwable ignored) {
+                    }
+                }
 
                 final int r = result;
+                final boolean okSign = signOk;
                 act.runOnUiThread(new Runnable() {
                     public void run() {
                         dlg.dismiss();
                         if (r == OK) {
-                            install(act, out, signOk);
+                            install(act, out, okSign);
                         } else {
                             android.widget.Toast.makeText(act, "下载失败，请检查网络后重试",
                                     android.widget.Toast.LENGTH_LONG).show();
@@ -165,7 +169,12 @@ public class Updater {
     }
 
     private static HttpURLConnection open(String url, long from, long to, int ct, int rt) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection c;
+        if (useProxy) {
+            c = (HttpURLConnection) new URL(url).openConnection(XrayCore.socksProxy());
+        } else {
+            c = (HttpURLConnection) new URL(url).openConnection();
+        }
         c.setConnectTimeout(ct);
         c.setReadTimeout(rt);
         c.setInstanceFollowRedirects(true);
@@ -303,10 +312,11 @@ public class Updater {
         final int pct = t > 0 ? (int) (g * 1000 / t) : 0;
         final String sp = job.speed > 0 ? String.format("%.1f MB/s", job.speed / 1048576.0) : "0 MB/s";
         final String host = job.curHost;
+        final String route = useProxy ? "代理" : "直连";
         act.runOnUiThread(new Runnable() {
             public void run() {
                 if (bar != null) bar.setProgress(pct);
-                if (tip != null) tip.setText((pct / 10) + "." + (pct % 10) + "% · " + sp + " · " + host);
+                if (tip != null) tip.setText((pct / 10) + "." + (pct % 10) + "% · " + sp + " · " + route + " · " + host);
             }
         });
     }
@@ -470,19 +480,14 @@ public class Updater {
         }
     }
 
-    /**
-     * 判断 APK 与本应用签名是否一致。仅用于提示，不再阻断安装。
-     */
+    /** 判断 APK 与本应用签名是否一致。仅用于提示，不阻断安装。 */
     private static boolean signatureMatches(Activity act, File apk) {
         try {
             PackageManager pm = act.getPackageManager();
-
             Signature[] mine = readSignatures(pm, act.getPackageName(), null);
             if (mine == null || mine.length == 0) return false;
-
             Signature[] theirs = readSignatures(pm, null, apk.getAbsolutePath());
             if (theirs == null || theirs.length == 0) return false;
-
             for (Signature a : mine) {
                 String fa = digest(a.toByteArray());
                 for (Signature b : theirs) {
@@ -495,7 +500,6 @@ public class Updater {
         }
     }
 
-    /** API 28+ 用 GET_SIGNING_CERTIFICATES，旧版本退回 GET_SIGNATURES。 */
     @SuppressWarnings("deprecation")
     private static Signature[] readSignatures(PackageManager pm, String pkg, String apkPath) {
         try {
@@ -530,18 +534,11 @@ public class Updater {
         }
     }
 
-    /**
-     * 安装。有 root 时优先静默安装，否则交给系统安装器。
-     */
     private static void install(Activity act, File apk, boolean signOk) {
-        // 1) root 静默安装：pm install -r 会直接覆盖安装，
-        //    不受「系统安装器是否带签名校验」影响。
         if (rootInstall(apk)) {
             android.widget.Toast.makeText(act, "更新完成", android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
-
-        // 2) 退回系统安装器（适配器若已去校验，这里也能装）
         if (!signOk) {
             android.widget.Toast.makeText(act,
                     "root 安装未成功，转交系统安装器（签名与当前版本不同）",
@@ -550,12 +547,7 @@ public class Updater {
         intentInstall(act, apk);
     }
 
-    /**
-     * 用 su 执行 pm install -r。
-     *
-     * 先把 APK 复制到 /data/local/tmp 再装：应用外部目录在 Android 11+ 上
-     * 对 shell 用户不一定可读，直接 pm install 原始路径容易失败。
-     */
+    /** su + pm install -r 静默安装。先复制到 /data/local/tmp，避免 shell 读不到应用目录。 */
     private static boolean rootInstall(File apk) {
         if (apk == null || !apk.exists()) return false;
         Process p = null;
@@ -576,7 +568,6 @@ public class Updater {
             String ln;
             while ((ln = br.readLine()) != null) sb.append(ln).append('\n');
             br.close();
-
             BufferedReader er = new BufferedReader(new InputStreamReader(p.getErrorStream()));
             while ((ln = er.readLine()) != null) sb.append(ln).append('\n');
             er.close();
@@ -584,7 +575,6 @@ public class Updater {
             int code = p.waitFor();
             String out = sb.toString();
             if (out.contains("Success")) return true;
-            // 部分 ROM 的 pm 只回显 exception，按退出码兜底判断
             return code == 0 && !out.contains("Failure");
         } catch (Throwable t) {
             return false;
