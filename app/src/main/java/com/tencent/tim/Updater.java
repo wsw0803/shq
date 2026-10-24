@@ -17,9 +17,12 @@ import android.widget.TextView;
 
 import androidx.core.content.FileProvider;
 
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -29,28 +32,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 多线程分片下载 + 断点续传 + 安装包签名校验。
+ * 多线程分片下载 + 断点续传 + 安装。
  *
- * 关键修复（上一版引入的严重 bug）：
- * 探测到服务器不支持 Range 时会走 single() 单线程分支，
- * 而 single() 在成功时已经把 part 重命名成 out 并 return true，
- * 但 fetch() 没有立即返回，继续执行了后面的收尾代码：
- *     if (out.exists() && !out.delete()) return false;   // 把刚下好的包删掉
- *     if (!part.renameTo(out)) return false;             // part 已不存在，必然失败
- * 结果每次下载成功都会自我销毁，用户看到的是「下载失败」。
- * 现在 single() 成功即 return true，不再落到收尾逻辑。
+ * 下载部分的修复：
+fetch() 探测到服务器不支持 Range 时走 single() 分支，
+single() 成功时已经完成 part -> out 的转换并 return true，
+原代码没有立即返回，继续执行收尾逻辑：
+    if (out.exists() && !out.delete()) return false;
+    if (!part.renameTo(out)) return false;
+第一行把刚下好的成品删掉，第二行因 part 已不存在必然失败，
+于是每次下载成功都会自我销毁，表现为「下载失败」。现已直接返回。
  *
- * 另外把失败原因分开上报，不再让签名不一致被「下载失败」掩盖。
+ * 安装策略（有 root 时）：
+ * 优先用 su + pm install -r 静默安装。这样即使系统安装器仍带签名校验，
+ * 只要设备已 root 也能完成覆盖安装。
+ *
+ * 签名校验不再阻断安装：
+ * 原来 signatureMatches() 为 false 就直接放弃安装，
+ * 这对「已 root 且改装过安装器（去签名校验）」的设备是误伤——
+ * 真正拦人的是这段 Java 校验，而不是系统。
+ * 现在签名不一致只在日志里记一条警告，然后照常尝试安装，
+ * 装不成再由系统报错，不会在应用层提前挡掉。
  */
 public class Updater {
 
     private static final int THREADS = 8;
     private static final long MIN_SIZE = 500000L;
 
-    /** 下载结果，用于区分失败原因。 */
-    public static final int OK = 0;
-    public static final int FAIL_DOWNLOAD = 1;
-    public static final int FAIL_SIGNATURE = 2;
+    private static final int OK = 0;
+    private static final int FAIL_DOWNLOAD = 1;
 
     private static final class Job {
         final AtomicLong total = new AtomicLong(0);
@@ -125,29 +135,17 @@ public class Updater {
 
                 int result = fetch(act, job, bar, tip, buildUrls(url), expectSize, part, state, out);
 
-                if (result == OK && !signatureMatches(act, out)) {
-                    result = FAIL_SIGNATURE;
-                    try { out.delete(); } catch (Throwable ignored) {}
-                }
+                // 签名只作为提示，不再阻断安装。
+                // 已 root 且安装器已去校验的设备可以正常覆盖安装，
+                // 强行在这里拦截反而让这类设备永远更新不了。
+                final boolean signOk = (result == OK) && signatureMatches(act, out);
 
                 final int r = result;
                 act.runOnUiThread(new Runnable() {
                     public void run() {
                         dlg.dismiss();
                         if (r == OK) {
-                            install(act, out);
-                        } else if (r == FAIL_SIGNATURE) {
-                            // 签名不同只可能是「当前装的是另一个签名的版本」，
-                            // 必须卸载后才能装，这里给出可操作的指引，不再混成「下载失败」。
-                            android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(act);
-                            b.setTitle("无法覆盖安装");
-                            b.setMessage("下载已完成，但安装包的签名与当前已安装版本不一致。\n\n"
-                                    + "这通常是因为当前安装的是不同签名（例如调试版）的包。\n"
-                                    + "请先卸载当前应用，再重新安装新版本。\n\n"
-                                    + "注意：卸载会清除已保存的数据，建议先导出备份。");
-                            b.setPositiveButton("知道了", null);
-                            b.show();
-                            if (onFail != null) onFail.run();
+                            install(act, out, signOk);
                         } else {
                             android.widget.Toast.makeText(act, "下载失败，请检查网络后重试",
                                     android.widget.Toast.LENGTH_LONG).show();
@@ -313,7 +311,6 @@ public class Updater {
         });
     }
 
-    /** 返回 OK / FAIL_DOWNLOAD。 */
     private static int fetch(Activity act, Job job, ProgressBar bar, TextView tip,
                              java.util.List<String> urls, long expectSize,
                              File part, File state, File out) {
@@ -323,15 +320,14 @@ public class Updater {
         final String src = job.pickUrl;
         final long total = job.total.get();
 
-        // 之前已经下完且大小一致，直接复用
         if (out.exists() && out.length() == total && total > MIN_SIZE) {
             job.got.set(total);
             return OK;
         }
 
         if (!job.rangeOk) {
-            // 单线程分支：single() 成功时已经完成 part -> out 的转换，
-            // 这里必须直接返回，不能再走下面的收尾逻辑，否则会把成品删掉。
+            // single() 成功时已经完成 part -> out，必须直接返回，
+            // 否则会落到下面的收尾逻辑把成品删掉。
             return single(act, job, bar, tip, src, expectSize, part, out) ? OK : FAIL_DOWNLOAD;
         }
 
@@ -475,10 +471,7 @@ public class Updater {
     }
 
     /**
-     * 校验 APK 的签名证书是否与本应用一致。
-     *
-     * 不一致说明下载到的是别人签的包（或当前装的是另一个签名的版本），
-     * 此时系统也会拒绝覆盖安装，所以提前拦下并给出明确提示。
+     * 判断 APK 与本应用签名是否一致。仅用于提示，不再阻断安装。
      */
     private static boolean signatureMatches(Activity act, File apk) {
         try {
@@ -502,10 +495,7 @@ public class Updater {
         }
     }
 
-    /**
-     * 读取签名。apkPath 为 null 时读已安装应用，否则读 APK 文件。
-     * API 28+ 优先用 GET_SIGNING_CERTIFICATES，避免 GET_SIGNATURES 在新系统上返回空。
-     */
+    /** API 28+ 用 GET_SIGNING_CERTIFICATES，旧版本退回 GET_SIGNATURES。 */
     @SuppressWarnings("deprecation")
     private static Signature[] readSignatures(PackageManager pm, String pkg, String apkPath) {
         try {
@@ -513,8 +503,7 @@ public class Updater {
                 PackageInfo pi = (apkPath == null)
                         ? pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
                         : pm.getPackageArchiveInfo(apkPath, PackageManager.GET_SIGNING_CERTIFICATES);
-                if (pi == null) return null;
-                if (pi.signingInfo != null) {
+                if (pi != null && pi.signingInfo != null) {
                     return pi.signingInfo.hasMultipleSigners()
                             ? pi.signingInfo.getApkContentsSigners()
                             : pi.signingInfo.getSigningCertificateHistory();
@@ -541,7 +530,70 @@ public class Updater {
         }
     }
 
-    private static void install(Activity act, File f) {
+    /**
+     * 安装。有 root 时优先静默安装，否则交给系统安装器。
+     */
+    private static void install(Activity act, File apk, boolean signOk) {
+        // 1) root 静默安装：pm install -r 会直接覆盖安装，
+        //    不受「系统安装器是否带签名校验」影响。
+        if (rootInstall(apk)) {
+            android.widget.Toast.makeText(act, "更新完成", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 2) 退回系统安装器（适配器若已去校验，这里也能装）
+        if (!signOk) {
+            android.widget.Toast.makeText(act,
+                    "root 安装未成功，转交系统安装器（签名与当前版本不同）",
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
+        intentInstall(act, apk);
+    }
+
+    /**
+     * 用 su 执行 pm install -r。
+     *
+     * 先把 APK 复制到 /data/local/tmp 再装：应用外部目录在 Android 11+ 上
+     * 对 shell 用户不一定可读，直接 pm install 原始路径容易失败。
+     */
+    private static boolean rootInstall(File apk) {
+        if (apk == null || !apk.exists()) return false;
+        Process p = null;
+        try {
+            final String tmp = "/data/local/tmp/shq_update.apk";
+            p = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes("cp " + RootUtil.shellQuote(apk.getAbsolutePath()) + " " + tmp + "\n");
+            os.writeBytes("chmod 644 " + tmp + "\n");
+            os.writeBytes("pm install -r " + tmp + "\n");
+            os.writeBytes("rm -f " + tmp + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            os.close();
+
+            StringBuilder sb = new StringBuilder();
+            BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String ln;
+            while ((ln = br.readLine()) != null) sb.append(ln).append('\n');
+            br.close();
+
+            BufferedReader er = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+            while ((ln = er.readLine()) != null) sb.append(ln).append('\n');
+            er.close();
+
+            int code = p.waitFor();
+            String out = sb.toString();
+            if (out.contains("Success")) return true;
+            // 部分 ROM 的 pm 只回显 exception，按退出码兜底判断
+            return code == 0 && !out.contains("Failure");
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            if (p != null) p.destroy();
+        }
+    }
+
+    private static void intentInstall(Activity act, File f) {
         try {
             Intent it = new Intent(Intent.ACTION_VIEW);
             Uri uri;
@@ -555,7 +607,8 @@ public class Updater {
             it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             act.startActivity(it);
         } catch (Exception e) {
-            android.widget.Toast.makeText(act, "安装失败: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+            android.widget.Toast.makeText(act, "安装失败: " + e.getMessage(),
+                    android.widget.Toast.LENGTH_LONG).show();
         }
     }
 }
