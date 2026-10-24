@@ -37,7 +37,9 @@ import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -51,6 +53,9 @@ public class MainActivity extends BaseActivity {
     private static final String KEY_SYNCED_DATA = "synced_data";
     private static final String KEY_CLOUD_APPID_ENABLED = "cloud_appid_enabled";
     private static final String KEY_STORAGE_URI = "storage_uri";
+
+    private static final String RELEASES_API = "https://api.github.com/repos/wsw0803/shq/releases?per_page=100";
+    private static final String RUNS_API = "https://api.github.com/repos/wsw0803/shq/actions/runs?per_page=100";
 
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
     private static final int REQUEST_STORAGE_PERMISSION = 200;
@@ -82,11 +87,11 @@ public class MainActivity extends BaseActivity {
     private Uri storageUri = null;
     private boolean useSaf = false;
 
-    /** 一个 GitHub Release 的下载信息。 */
+    /** 一个可更新版本的下载信息。 */
     private static class ReleaseInfo {
         String version = "";
-        String title = "";
-        String body = "";
+        /** GitHub Actions 该次构建的运行标题（提交信息首行）。 */
+        String runTitle = "";
         String apkUrl = "";
         long size = 0;
     }
@@ -114,16 +119,13 @@ public class MainActivity extends BaseActivity {
         checkForUpdates();
     }
 
-    /** 设置沉浸式效果（保留状态栏）。 */
     private void setupImmersiveMode() {
         mWindow = getWindow();
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             mWindow.getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             mWindow.setStatusBarColor(Color.parseColor("#0A0F1A"));
             mWindow.setNavigationBarColor(Color.parseColor("#0A0F1A"));
@@ -484,7 +486,6 @@ public class MainActivity extends BaseActivity {
 
     private void createSafDirectory() {
         if (storageUri == null) return;
-
         try {
             DocumentFile rootDir = DocumentFile.fromTreeUri(this, storageUri);
             if (rootDir != null) {
@@ -505,7 +506,6 @@ public class MainActivity extends BaseActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
         if (requestCode == REQUEST_STORAGE_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 addLog("[权限] 存储权限已授予");
@@ -739,7 +739,6 @@ public class MainActivity extends BaseActivity {
                 connection.setRequestMethod("GET");
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(5000);
-
                 BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -753,7 +752,6 @@ public class MainActivity extends BaseActivity {
             } catch (Exception e) {
                 addLog("[错误] 加载游戏列表失败: " + e.getMessage());
             }
-
             final String finalResponse = response;
             runOnUiThread(() -> parseGameData(finalResponse));
         }).start();
@@ -765,11 +763,9 @@ public class MainActivity extends BaseActivity {
             loadGameList();
             return;
         }
-
         Pattern pattern = Pattern.compile("图标：(.*?)；名称：(.*?)；链接：〖链接(.*?)〗；");
         Matcher matcher = pattern.matcher(data);
         java.util.List<GameItem> cloudParsed = new java.util.ArrayList<GameItem>();
-
         while (matcher.find()) {
             if (extractAppid(matcher.group(3).trim()) == null) continue;
             GameItem item = new GameItem(
@@ -779,7 +775,6 @@ public class MainActivity extends BaseActivity {
             );
             cloudParsed.add(item);
         }
-
         syncToLocal(cloudParsed);
         gameList.clear();
         java.util.HashSet<String> seenIds = new java.util.HashSet<String>();
@@ -790,12 +785,10 @@ public class MainActivity extends BaseActivity {
         }
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
         addLog("[游戏] 云端解析: " + cloudParsed.size());
-
         if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
             GameItem first = gameList.get(0);
             saveSelectedGame(first.name, first.url);
         }
-
         if (gameList.isEmpty()) {
             Toast.makeText(this, "未找到游戏数据", Toast.LENGTH_SHORT).show();
         }
@@ -841,11 +834,8 @@ public class MainActivity extends BaseActivity {
             } else {
                 mode = "capture";
             }
-
             saveMode(mode);
-
             addLog("[启动] 启动上号界面，模式: " + mode);
-
             Intent intent = new Intent(this, AgentActivity.class);
             intent.putExtra("mode", mode);
             startActivityForResult(intent, REQUEST_AGENT_ACTIVITY);
@@ -855,23 +845,81 @@ public class MainActivity extends BaseActivity {
         }
     }
 
+    // ------------------------------------------------------------------
+    // 更新检查
+    // ------------------------------------------------------------------
+
     /**
-     * 检查更新。
+     * 从版本号反推 GitHub Actions 的 run_number。
      *
-     * 原实现只保留「最高的一个版本」（bestVer），所以用户只能看到最新一条，
-     * 从 0.0.1 到 0.0.3 之间的版本完全看不到。
-     * 现在收集所有高于当前版本的 Release，并在弹窗里逐条列出。
+     * workflow 里的算法是：
+     *   MAJOR = COUNT / 100，MINOR = (COUNT % 100) / 10，PATCH = COUNT % 10
+     * 所以 run_number = MAJOR * 100 + MINOR * 10 + PATCH。
+     */
+    private static int runNumberFromVersion(String version) {
+        if (version == null) return -1;
+        String[] p = version.split("\\.");
+        if (p.length < 3) return -1;
+        int major = parseIntSafe(p[0]);
+        int minor = parseIntSafe(p[1]);
+        int patch = parseIntSafe(p[2]);
+        return major * 100 + minor * 10 + patch;
+    }
+
+    /** 拉取 Actions 运行列表，建立 run_number -> 运行标题 的映射。 */
+    private Map<Integer, String> fetchRunTitles() {
+        Map<Integer, String> map = new HashMap<>();
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(RUNS_API).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Accept", "application/vnd.github+json");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            if (conn.getResponseCode() != 200) return map;
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) sb.append(line);
+            reader.close();
+
+            org.json.JSONObject root = new org.json.JSONObject(sb.toString());
+            org.json.JSONArray runs = root.optJSONArray("workflow_runs");
+            if (runs == null) return map;
+
+            for (int i = 0; i < runs.length(); i++) {
+                org.json.JSONObject run = runs.optJSONObject(i);
+                if (run == null) continue;
+                int num = run.optInt("run_number", -1);
+                if (num < 0) continue;
+                String title = run.optString("display_title", "").trim();
+                if (title.isEmpty()) {
+                    title = run.optString("name", "").trim();
+                }
+                if (!title.isEmpty()) map.put(num, title);
+            }
+        } catch (Exception e) {
+            // 拿不到标题不影响更新本身，调用方会退回 Release 名称
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return map;
+    }
+
+    /**
+     * 检查更新：收集所有高于当前版本的 Release，
+     * 并用 Actions 的运行标题作为显示名称（而不是构建版本号）。
      */
     private void checkForUpdates() {
         new Thread(() -> {
             HttpURLConnection conn = null;
             try {
-                URL url = new URL("https://api.github.com/repos/wsw0803/shq/releases?per_page=100");
-                conn = (HttpURLConnection) url.openConnection();
+                conn = (HttpURLConnection) new URL(RELEASES_API).openConnection();
                 conn.setRequestMethod("GET");
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
-                conn.setConnectTimeout(6000);
-                conn.setReadTimeout(6000);
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
                 if (conn.getResponseCode() != 200) return;
 
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -884,7 +932,7 @@ public class MainActivity extends BaseActivity {
                         .getPackageInfo(getPackageName(), 0).versionName;
 
                 org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
-                java.util.List<ReleaseInfo> newer = new java.util.ArrayList<>();
+                List<ReleaseInfo> newer = new ArrayList<>();
 
                 for (int i = 0; i < arr.length(); i++) {
                     org.json.JSONObject rel = arr.getJSONObject(i);
@@ -920,9 +968,6 @@ public class MainActivity extends BaseActivity {
 
                     ReleaseInfo info = new ReleaseInfo();
                     info.version = ver;
-                    info.title = rel.optString("name", "");
-                    if (info.title.isEmpty()) info.title = "shq v" + ver;
-                    info.body = rel.optString("body", "");
                     info.apkUrl = apkUrl;
                     info.size = apkSize;
                     newer.add(info);
@@ -930,10 +975,18 @@ public class MainActivity extends BaseActivity {
 
                 if (newer.isEmpty()) return;
 
-                // 按版本号从新到旧排序，弹窗里最新在最上面
+                // 用 Actions 运行标题替换版本号显示
+                Map<Integer, String> titles = fetchRunTitles();
+                for (ReleaseInfo info : newer) {
+                    int num = runNumberFromVersion(info.version);
+                    String t = titles.get(num);
+                    info.runTitle = (t == null || t.isEmpty()) ? ("shq v" + info.version) : t;
+                }
+
+                // 按版本从新到旧
                 java.util.Collections.sort(newer, (x, y) -> -compareVersion(x.version, y.version));
 
-                final java.util.List<ReleaseInfo> list = newer;
+                final List<ReleaseInfo> list = newer;
                 runOnUiThread(() -> showUpdateDialog(list));
             } catch (Exception e) {
                 e.printStackTrace();
@@ -966,11 +1019,10 @@ public class MainActivity extends BaseActivity {
     }
 
     /**
-     * 更新弹窗：列出所有可更新的版本（各自的 GitHub 标题），非强制。
-     *
-     * 用户点某一条即下载该版本；默认高亮最新版。
+     * 更新弹窗：列出所有可更新的版本，显示各自的 Actions 运行标题。
+     * 不再显示「可以立即更新，也可以稍后再更新」这类说明文案。
      */
-    private void showUpdateDialog(java.util.List<ReleaseInfo> releases) {
+    private void showUpdateDialog(List<ReleaseInfo> releases) {
         final android.app.Dialog dlg = new android.app.Dialog(this);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         if (dlg.getWindow() != null) {
@@ -991,22 +1043,13 @@ public class MainActivity extends BaseActivity {
         title.setTextColor(0xFFF5F7FA);
         title.setTextSize(17);
         title.setGravity(android.view.Gravity.CENTER);
-        root.addView(title);
-
-        android.widget.TextView tip = new android.widget.TextView(this);
-        tip.setText("可以立即更新，也可以稍后再更新，不影响当前使用");
-        tip.setTextColor(0xFF9CA3AF);
-        tip.setTextSize(12);
-        tip.setGravity(android.view.Gravity.CENTER);
-        android.widget.LinearLayout.LayoutParams tipLp = new android.widget.LinearLayout.LayoutParams(
+        android.widget.LinearLayout.LayoutParams titleLp = new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                 android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-        tipLp.topMargin = (int)(8 * density);
-        tipLp.bottomMargin = (int)(12 * density);
-        tip.setLayoutParams(tipLp);
-        root.addView(tip);
+        titleLp.bottomMargin = (int)(12 * density);
+        title.setLayoutParams(titleLp);
+        root.addView(title);
 
-        // 版本列表：每条显示 GitHub Release 的标题 + 版本号
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         android.widget.LinearLayout list = new android.widget.LinearLayout(this);
         list.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -1018,10 +1061,7 @@ public class MainActivity extends BaseActivity {
             final ReleaseInfo info = releases.get(i);
 
             android.widget.TextView row = new android.widget.TextView(this);
-            String label = info.title;
-            if (!label.contains(info.version)) {
-                label = label + "  (" + info.version + ")";
-            }
+            String label = info.runTitle;
             if (i == 0) label = "★ " + label;
             row.setText(label);
             row.setTextSize(14);
@@ -1053,7 +1093,6 @@ public class MainActivity extends BaseActivity {
         android.widget.LinearLayout.LayoutParams scrollLp = new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
         scrollLp.bottomMargin = (int)(12 * density);
-        scroll.setLayoutParams(scrollLp);
         root.addView(scroll, scrollLp);
 
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
@@ -1076,10 +1115,7 @@ public class MainActivity extends BaseActivity {
         btnOk.setOnClickListener(v -> {
             final ReleaseInfo target = chosen[0];
             dlg.dismiss();
-            Updater.start(MainActivity.this, target.apkUrl, target.size,
-                    () -> runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "更新失败，请稍后重试", Toast.LENGTH_SHORT).show();
-                    }));
+            Updater.start(MainActivity.this, target.apkUrl, target.size, null);
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(
                 0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
@@ -1088,7 +1124,6 @@ public class MainActivity extends BaseActivity {
 
         root.addView(btnRow);
         dlg.setContentView(root);
-        // 允许返回键 / 点击外部关闭，不强制更新
         dlg.setCancelable(true);
         dlg.setCanceledOnTouchOutside(true);
         dlg.show();
