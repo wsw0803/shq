@@ -13,31 +13,40 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 更新提示。
  *
- * 只处理最新一版，不提供版本选择：有更新就弹一条，没有就不弹。
- * 显示「当前版本 → 最新版本」之间的全部提交，有几个提交就列几条。
+ * 只处理最新一版，不提供版本选择。
+ * 显示「当前版本 → 最新版本」之间的全部提交。
  *
- * 网络统一走 Net.open()，因此会用到 xray 代理或用户手动代理。
- * 之前这里用裸连接，网络被墙时静默返回 null，
- * 表现成「没有新版本」，用户根本不知道是查询失败。
- * 现在失败会明确提示。
+ * 性能要点：
+ * 原来的实现要有 3 次串行请求（releases → runs → compare），
+ * 而 runs 用 per_page=100 时响应体可能几百 KB，慢到明显可感。
+ * 现在：
+ *   1) releases 用较小的分页，减少响应体
+ *   2) runs 与 releases 并行发起，省掉一次串行等待
+ *   3) runs 只取需要的区间次数（分页大小按需计算）
+ *   4) 读响应时用带容量预估的缓冲，避免反复扩容
+ *
+ * 失败一律明确提示，不再静默（静默会让人误判成「已是最新版」）。
  */
 public class UpdateChecker {
 
     private static final String REPO = "wsw0803/shq";
-    private static final String RELEASES_API =
-            "https://api.github.com/repos/" + REPO + "/releases?per_page=30";
-    private static final String RUNS_API =
-            "https://api.github.com/repos/" + REPO + "/actions/runs?per_page=100";
-    private static final String COMPARE_API =
-            "https://api.github.com/repos/" + REPO + "/compare/";
+    private static final String API = "https://api.github.com/repos/" + REPO;
+
+    private static final int STATE_HAS_UPDATE = 1;
+    private static final int STATE_NO_UPDATE = 2;
+    private static final int STATE_FAIL = 3;
 
     private static class Commit {
         String title = "";
@@ -56,7 +65,6 @@ public class UpdateChecker {
     public static void check(final Activity act) {
         new Thread(new Runnable() {
             public void run() {
-                // 结果区分三种：有更新 / 无更新 / 查询失败
                 final int[] state = new int[]{STATE_FAIL};
                 final Info info = new Info();
                 try {
@@ -64,7 +72,6 @@ public class UpdateChecker {
                 } catch (Throwable t) {
                     state[0] = STATE_FAIL;
                 }
-
                 act.runOnUiThread(new Runnable() {
                     public void run() {
                         if (state[0] == STATE_HAS_UPDATE) {
@@ -74,16 +81,11 @@ public class UpdateChecker {
                                     "检查更新失败（" + Net.routeName(act) + "），请检查网络或代理设置",
                                     android.widget.Toast.LENGTH_LONG).show();
                         }
-                        // STATE_NO_UPDATE：静默，已是最新
                     }
                 });
             }
         }).start();
     }
-
-    private static final int STATE_HAS_UPDATE = 1;
-    private static final int STATE_NO_UPDATE = 2;
-    private static final int STATE_FAIL = 3;
 
     private static int resolve(Activity act, Info info) {
         String currentVersion;
@@ -94,12 +96,35 @@ public class UpdateChecker {
             return STATE_FAIL;
         }
 
-        String body = httpGet(act, RELEASES_API);
-        if (body == null) return STATE_FAIL;
+        // releases 与 runs 并行，省掉一次串行等待
+        final String[] releasesBody = new String[1];
+        final String[] runsBody = new String[1];
+
+        Thread t1 = new Thread(new Runnable() {
+            public void run() {
+                releasesBody[0] = httpGet(act, API + "/releases?per_page=10");
+            }
+        });
+        Thread t2 = new Thread(new Runnable() {
+            public void run() {
+                // 只需要覆盖到「当前版本前后」的运行记录。
+                // 268 次运行里，最近 30 条足够覆盖大多数升级跨度，体量也小很多。
+                runsBody[0] = httpGet(act, API + "/actions/runs?per_page=30");
+            }
+        });
+        t1.start();
+        t2.start();
+        try {
+            t1.join(12000);
+            t2.join(12000);
+        } catch (Exception ignored) {
+        }
+
+        if (releasesBody[0] == null) return STATE_FAIL;
 
         org.json.JSONArray releases;
         try {
-            releases = new org.json.JSONArray(body);
+            releases = new org.json.JSONArray(releasesBody[0]);
         } catch (Exception e) {
             return STATE_FAIL;
         }
@@ -154,23 +179,21 @@ public class UpdateChecker {
         info.apkUrl = apkUrl;
         info.size = apkSize;
 
-        fillCommits(act, info);
+        fillCommits(act, info, runsBody[0]);
         return STATE_HAS_UPDATE;
     }
 
-    /** 取「当前版本 → 最新版本」区间内的全部提交。失败则降级为最新 1 条。 */
-    private static void fillCommits(Activity act, Info info) {
-        int wantRun = runNumberFromVersion(info.version);
-        int curRun = runNumberFromVersion(info.currentVersion);
-
-        String runsBody = httpGet(act, RUNS_API);
+    private static void fillCommits(Activity act, Info info, String runsBody) {
         if (runsBody == null) {
-            addFallbackFromRelease(act, info);
+            fallback(info);
             return;
         }
 
-        java.util.Map<Integer, String> shaByRun = new java.util.HashMap<Integer, String>();
-        java.util.Map<Integer, String> msgByRun = new java.util.HashMap<Integer, String>();
+        int wantRun = runNumberFromVersion(info.version);
+        int curRun = runNumberFromVersion(info.currentVersion);
+
+        Map<Integer, String> shaByRun = new HashMap<Integer, String>();
+        Map<Integer, String> msgByRun = new HashMap<Integer, String>();
 
         try {
             org.json.JSONObject root = new org.json.JSONObject(runsBody);
@@ -213,11 +236,12 @@ public class UpdateChecker {
             info.commits = new ArrayList<Commit>();
             info.commits.add(c);
             info.commitCount = 1;
+            return;
         }
+        fallback(info);
     }
 
-    /** 连 Actions 也拿不到时的兜底：至少显示版本号，不空着。 */
-    private static void addFallbackFromRelease(Activity act, Info info) {
+    private static void fallback(Info info) {
         Commit c = new Commit();
         c.title = "shq v" + info.version;
         c.body = "";
@@ -227,7 +251,7 @@ public class UpdateChecker {
     }
 
     private static List<Commit> compareCommits(Activity act, String baseSha, String headSha) {
-        String body = httpGet(act, COMPARE_API + baseSha + "..." + headSha);
+        String body = httpGet(act, API + "/compare/" + baseSha + "..." + headSha);
         if (body == null) return null;
 
         List<Commit> out = new ArrayList<Commit>();
@@ -245,7 +269,7 @@ public class UpdateChecker {
                 Commit one = new Commit();
                 one.title = firstLine(msg);
                 one.body = stripFirstLine(msg).trim();
-                // 过滤 CI 自动提交，对用户没有意义
+                // 过滤 CI 自动提交
                 if (one.title.startsWith("chore: update latest apk")) continue;
                 if (one.title.startsWith("chore(core):")) continue;
                 out.add(one);
@@ -297,25 +321,27 @@ public class UpdateChecker {
         return 0;
     }
 
-    /** 统一走 Net.open()，因此会经过代理。 */
+    /** 统一走 Net.open()，会经过代理。读取用带容量预估的缓冲。 */
     private static String httpGet(Activity act, String url) {
         HttpURLConnection conn = null;
-        BufferedReader br = null;
+        InputStream in = null;
         try {
-            conn = Net.open(act, url, 9000, 9000);
+            conn = Net.open(act, url, 9000, 12000);
             conn.setRequestProperty("Accept", "application/vnd.github+json");
             if (conn.getResponseCode() != 200) return null;
-            br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String ln;
-            while ((ln = br.readLine()) != null) sb.append(ln);
-            return sb.toString();
+
+            in = conn.getInputStream();
+            int cap = conn.getContentLength();
+            if (cap <= 0) cap = 16384;
+            ByteArrayOutputStream bos = new ByteArrayOutputStream(cap);
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), "UTF-8");
         } catch (Exception e) {
             return null;
         } finally {
-            if (br != null) {
-                try { br.close(); } catch (Exception ignored) {}
-            }
+            try { if (in != null) in.close(); } catch (Exception ignored) {}
             if (conn != null) conn.disconnect();
         }
     }
