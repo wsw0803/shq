@@ -17,25 +17,19 @@ import com.tencent.open.agent.AgentActivity;
 /**
  * 登录模块通用基类（抓号 / 挂机共用）。
  *
- * 修复 Y700 四代 + 一加(氧OS/ColorOS)移植包「登录后卡住」的问题。
- * 这类移植包自带较新的 Chromium WebView，与源码原假设有三处差异，
- * 任意一处都会让界面停在登录页或白屏：
+ * 多层兜底抓 token：
+ * 1) shouldOverrideUrlLoading  常规跳转
+ * 2) onPageStarted / Finished  页面 URL
+ * 3) doUpdateVisitedHistory    部分 ROM 只回调历史
+ * 4) JS 桥 + 轮询              从页面侧发现跳转
  *
- * 1) QQ 登录完成后是 302 到 auth://tauth.qq.com/?#access_token=xxx，
- *    新版 WebView 会静默丢弃非 http(s) 的导航，
- *    shouldOverrideUrlLoading 根本不会被调用。
- * 2) 登录页用 window.open 弹小窗，未设置 setSupportMultipleWindows(true)
- *    且没有 WebChromeClient.onCreateWindow 时，弹窗直接被忽略，
- *    表现就是点“登录”没反应。
- * 3) 移植 ROM 上第三方 Cookie 默认被拦，QQ 登录态写不进去，
- *    登录成功后又被踢回登录页（看起来也是“卡住”）。
+ * 关键修复（此前推送失败未入库）：
+ * - LoginChromeClient 复用同一实例。原来每次 prepare() 都 new 一个，
+ *   弹窗容器状态全丢，依赖 window.open 登录的游戏会卡死。
+ * - 拿到 token 后收起弹窗，避免盖住主界面。
  *
- * 对应做了多层兜底，任意一层命中都会把 token 交给 AgentActivity.performLogin：
- * 1) shouldOverrideUrlLoading(WebResourceRequest / String)  常规跳转拦截
- * 2) onPageStarted / onPageFinished  页面 URL 已带 token
- * 3) doUpdateVisitedHistory  部分 ROM 只回调历史变化
- * 4) JS 桥 + 500ms 轮询 location.href  从页面侧发现跳转
- * 另加 90 秒看门狗：疑似卡死时自动重载一次，避免无限等待。
+ * 每条回调都写入 LoginDiag，并自动挂上「诊断」悬浮按钮，
+ * 卡住时用户点一下即可导出 URL 轨迹给开发者。
  */
 public abstract class BaseLoginWebViewClient extends WebViewClient {
 
@@ -53,11 +47,17 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     private boolean errorToastShown = false;
     private boolean watchdogFired = false;
 
+    /** 复用同一个 ChromeClient，保住弹窗容器状态。 */
+    private LoginChromeClient chromeClient;
+
+    private WebView lastView;
+
     private final Runnable watchdog = new Runnable() {
         @Override
         public void run() {
             if (tokenGot || watchdogFired) return;
             watchdogFired = true;
+            LoginDiag.add("WATCHDOG", "90s 无 token，重载页面");
             toast("登录页 90 秒内没有返回结果，已自动重载一次");
             try {
                 WebView v = lastView;
@@ -69,8 +69,6 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             }
         }
     };
-
-    private WebView lastView;
 
     protected BaseLoginWebViewClient(AgentActivity activity) {
         this.activity = activity;
@@ -85,9 +83,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         return tokenGot;
     }
 
-    /**
-     * 统一的 token 投递口。返回 true 表示这个 URL 已被当作登录结果处理过。
-     */
+    /** 统一的 token 投递口。 */
     protected final boolean deliver(WebView view, String url) {
         if (!isTokenUrl(url)) return false;
         synchronized (this) {
@@ -97,10 +93,14 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             lastTokenAt = now;
             tokenGot = true;
         }
+        LoginDiag.add("TOKEN", "命中 token URL");
         try {
             handler.removeCallbacks(watchdog);
         } catch (Throwable ignored) {
         }
+
+        closePopup();
+
         try {
             final String token = url;
             if (view != null) {
@@ -111,6 +111,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                         try {
                             activity.performLogin(token);
                         } catch (Throwable t) {
+                            LoginDiag.add("ERR", "performLogin: " + t);
                             toast("登录处理异常: " + t);
                         }
                     }
@@ -122,6 +123,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                         try {
                             activity.performLogin(token);
                         } catch (Throwable t) {
+                            LoginDiag.add("ERR", "performLogin: " + t);
                             toast("登录处理异常: " + t);
                         }
                     }
@@ -133,26 +135,22 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         return true;
     }
 
-    /** 子类可覆写：拿到 token 之后的额外动作（例如挂机模式刷新页面） */
     protected void onTokenDelivered(WebView view) {
     }
 
-    /**
-     * 第一次拿到 WebView 时补齐所有移植 ROM 上必须的设置。
-     * 幂等，可反复调用。
-     */
+    /** 幂等地补齐 WebView 设置，并复用 ChromeClient 与 JS 桥。 */
     protected void prepare(final WebView view) {
         if (view == null) return;
         lastView = view;
 
         if (!configured) {
             configured = true;
+            LoginDiag.begin();
             try {
                 WebSettings ws = view.getSettings();
                 ws.setJavaScriptEnabled(true);
                 ws.setDomStorageEnabled(true);
                 ws.setDatabaseEnabled(true);
-                // 关键：允许 window.open 弹窗，否则点登录没反应
                 ws.setSupportMultipleWindows(true);
                 ws.setJavaScriptCanOpenWindowsAutomatically(true);
                 ws.setUseWideViewPort(true);
@@ -165,22 +163,32 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                     ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
                 } catch (Throwable ignored) {
                 }
-                // 移植 ROM 上第三方 Cookie 常被默认拦截，QQ 登录态写不进去
                 CookieManager cm = CookieManager.getInstance();
                 cm.setAcceptCookie(true);
                 try {
                     cm.setAcceptThirdPartyCookies(view, true);
                 } catch (Throwable ignored) {
                 }
+                LoginDiag.add("SETUP", "UA=" + ws.getUserAgentString());
             } catch (Throwable ignored) {
             }
+
+            // 挂上诊断按钮，卡住时用户可自行导出
             try {
-                view.setWebChromeClient(new LoginChromeClient(activity, this));
-                LoginWebBridge.install(activity, view, this);
-                bridgeReady = true;
+                LoginDiag.attachButton(activity, activity.getSelectedGameName());
             } catch (Throwable ignored) {
             }
-        } else if (!bridgeReady) {
+        }
+
+        if (chromeClient == null) {
+            try {
+                chromeClient = new LoginChromeClient(activity, this);
+                view.setWebChromeClient(chromeClient);
+            } catch (Throwable ignored) {
+            }
+        }
+
+        if (!bridgeReady) {
             bridgeReady = true;
             try {
                 LoginWebBridge.install(activity, view, this);
@@ -189,9 +197,17 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         }
     }
 
+    protected void closePopup() {
+        if (chromeClient != null) {
+            try {
+                chromeClient.closePopup();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private void startWatchdog(WebView view) {
-        if (view == null || tokenGot) return;
-        if (watchdogFired) return;
+        if (view == null || tokenGot || watchdogFired) return;
         try {
             handler.removeCallbacks(watchdog);
             handler.postDelayed(watchdog, WATCHDOG_MS);
@@ -217,6 +233,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     @Override
     public void onPageStarted(WebView view, String url, Bitmap favicon) {
         super.onPageStarted(view, url, favicon);
+        LoginDiag.add("PAGE+", url);
         prepare(view);
         startWatchdog(view);
         deliver(view, url);
@@ -225,12 +242,16 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     @Override
     public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
         super.doUpdateVisitedHistory(view, url, isReload);
+        if (url != null && !isTokenUrl(url)) {
+            LoginDiag.add("HIST", url);
+        }
         deliver(view, url);
     }
 
     @Override
     public void onPageFinished(WebView view, String url) {
         super.onPageFinished(view, url);
+        LoginDiag.add("PAGE-", url);
         prepare(view);
         try {
             LoginWebBridge.inject(view);
@@ -249,6 +270,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     @SuppressWarnings("deprecation")
     public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
         super.onReceivedError(view, errorCode, description, failingUrl);
+        LoginDiag.add("ERR", "code=" + errorCode + " " + description + " @ " + failingUrl);
         if (!errorToastShown) {
             errorToastShown = true;
             toast("页面加载失败(" + errorCode + "): " + description);
@@ -265,17 +287,20 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                 d = String.valueOf(error.getDescription());
             } catch (Throwable ignored) {
             }
+            LoginDiag.add("ERR", "mainFrame " + d);
             toast("页面加载失败: " + d);
         }
     }
 
     @Override
     public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+        LoginDiag.add("CRASH", "WebView 渲染进程崩溃");
         toast("WebView 渲染进程崩溃，正在自动恢复界面");
         try {
             handler.removeCallbacks(watchdog);
         } catch (Throwable ignored) {
         }
+        closePopup();
         try {
             view.destroy();
         } catch (Throwable ignored) {
