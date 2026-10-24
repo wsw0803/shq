@@ -1,41 +1,49 @@
 package com.tencent.open.agent;
 
-import android.app.Activity;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowManager;
 import android.webkit.WebView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.Toast;
 
-import com.tencent.tim.R;
 import com.tencent.tim.BaseActivity;
-import com.tencent.tim.NormalWebViewClient;
 import com.tencent.tim.HangUpWebViewClient;
+import com.tencent.tim.LoginDiag;
+import com.tencent.tim.NormalWebViewClient;
+import com.tencent.tim.R;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * 上号 / 抓号 / 挂机 三种模式的界面。
+ *
+ * 本次改动：接入 LoginDiag，让三种模式都能导出诊断。
+ * 上号模式不走 WebView，所以诊断点埋在 AgentActivity 里：
+ *   - 进入界面时记录 模式 / 游戏 / appid / 输入内容是否含 token
+ *   - performLogin 记录各字段长度（不记录明文）
+ *   - 记录解析出的 appid 与「已选游戏登记的 appid」是否一致
+ *     —— 这是排查「其他游戏能登、某个游戏登不上」的关键
+ *   - 保存到文件的结果也记录
+ *
+ * 业务逻辑与原实现保持一致，只加了埋点。
+ */
 public class AgentActivity extends BaseActivity {
 
     private static final String PREF_NAME = "MyPrefs";
@@ -48,17 +56,16 @@ public class AgentActivity extends BaseActivity {
     private EditText plainText;
     private Button pasteLoginButton;
     private Button manualLoginButton;
-
     private String currentMode;
     private Window mWindow;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
-        // 设置全屏窗口
+
         requestWindowFeature(1);
         setRequestedOrientation(0);
+
         this.mWindow = getWindow();
         if (Build.VERSION.SDK_INT >= 28) {
             this.mWindow.getAttributes().layoutInDisplayCutoutMode = 1;
@@ -69,7 +76,7 @@ public class AgentActivity extends BaseActivity {
         if (Build.VERSION.SDK_INT >= 21) {
             getWindow().setNavigationBarColor(getResources().getColor(0x0106000b));
         }
-        
+
         setContentView(R.layout.activity_agent);
 
         webView = findViewById(R.id.webview);
@@ -79,13 +86,20 @@ public class AgentActivity extends BaseActivity {
         manualLoginButton = findViewById(R.id.btn_manual_login);
 
         try {
-            com.tencent.tim.Ui.apply(this); try { android.view.View bgc = findViewById(R.id.bg_custom); if (bgc != null) bgc.setVisibility(android.view.View.GONE); } catch (Throwable ignored) {}
-        } catch (Throwable ignored) {}
+            com.tencent.tim.Ui.apply(this);
+            try {
+                android.view.View bgc = findViewById(R.id.bg_custom);
+                if (bgc != null) bgc.setVisibility(android.view.View.GONE);
+            } catch (Throwable ignored) {
+            }
+        } catch (Throwable ignored) {
+        }
 
         android.widget.Button pickToken = findViewById(R.id.btn_pick_token);
         if (pickToken != null) {
             pickToken.setOnClickListener(v -> showPickToken());
         }
+
         plainText.addTextChangedListener(new android.text.TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             public void onTextChanged(CharSequence s, int a, int b, int c) {}
@@ -94,23 +108,17 @@ public class AgentActivity extends BaseActivity {
             }
         });
 
-
         Intent intent = getIntent();
         String modeFromIntent = null;
         if (intent != null) {
             modeFromIntent = intent.getStringExtra("mode");
         }
 
-        // 如果 Intent 中有 mode，则直接使用
         if (modeFromIntent != null && !modeFromIntent.isEmpty()) {
             currentMode = modeFromIntent;
         } else {
-            // 没有 mode，则从 SharedPreferences 读取保存的模式
             SharedPreferences prefs = getSharedPreferences("myPrefs", MODE_PRIVATE);
-            String savedMode = prefs.getString("pd_key", "capture");
-            currentMode = savedMode;
-
-            // 如果是从游戏跳转，可以额外显示一个提示
+            currentMode = prefs.getString("pd_key", "capture");
             if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
                 String url = intent.getData().toString();
                 if (url.startsWith("auth:")) {
@@ -120,7 +128,11 @@ public class AgentActivity extends BaseActivity {
             }
         }
 
-        // 根据模式显示界面
+        // 诊断从这里开始，三种模式都覆盖
+        LoginDiag.resetButtonFlag();
+        LoginDiag.begin();
+        LoginDiag.add("AGENT", "mode=" + currentMode + " game=" + getSelectedGameName());
+
         if ("login".equals(currentMode)) {
             setupLoginMode();
         } else if ("capture".equals(currentMode)) {
@@ -130,20 +142,24 @@ public class AgentActivity extends BaseActivity {
         } else {
             setupCaptureMode();
         }
+
+        // 上号模式也挂诊断按钮。WebView 模式已由 BaseLoginWebViewClient 挂过，
+        // 内部按 Activity 去重，不会重复。
+        try {
+            LoginDiag.attachButton(this, getSelectedGameName());
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus && mWindow != null) {
-            // 抓号/挂机模式保持全屏，上号模式恢复状态栏
             if ("login".equals(currentMode)) {
-                // 上号模式：恢复状态栏
                 mWindow.getDecorView().setSystemUiVisibility(
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                         View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
             } else {
-                // 抓号/挂机模式：保持全屏沉浸式
                 mWindow.getDecorView().setSystemUiVisibility(5894);
             }
         }
@@ -151,28 +167,35 @@ public class AgentActivity extends BaseActivity {
 
     private void setupLoginMode() {
         try {
-            // 上号模式：显示状态栏，设置状态栏颜色
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 getWindow().setStatusBarColor(Color.parseColor("#0A0F1A"));
                 getWindow().setNavigationBarColor(Color.parseColor("#0A0F1A"));
             }
-            
-            // 恢复状态栏显示
             mWindow.getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
-            
+
             webView.setVisibility(View.GONE);
             loginScroll.setVisibility(View.VISIBLE);
             loadRawDataFromPreferences();
+
+            String input = plainText.getText() == null ? "" : plainText.getText().toString();
+            LoginDiag.add("LOGIN", "game=" + getSelectedGameName()
+                    + " 已选appid=" + getSelectedGameAppid()
+                    + " 输入长度=" + input.length()
+                    + " 含token=" + input.contains("access_token="));
 
             if (pasteLoginButton != null) {
                 pasteLoginButton.setOnClickListener(v -> pasteAndLogin());
             }
             if (manualLoginButton != null) {
-                manualLoginButton.setOnClickListener(v -> performLogin(plainText.getText().toString()));
+                manualLoginButton.setOnClickListener(v -> {
+                    LoginDiag.add("LOGIN", "点击执行登录");
+                    performLogin(plainText.getText().toString());
+                });
             }
         } catch (Exception e) {
+            LoginDiag.add("ERR", "setupLoginMode: " + e);
             e.printStackTrace();
             Toast.makeText(this, "启动失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             finish();
@@ -181,22 +204,19 @@ public class AgentActivity extends BaseActivity {
 
     private void setupCaptureMode() {
         try {
-            // 抓号模式：全屏隐藏状态栏
             mWindow.getDecorView().setSystemUiVisibility(5894);
-            
             webView.setVisibility(View.VISIBLE);
             loginScroll.setVisibility(View.GONE);
-
             webView.getSettings().setJavaScriptEnabled(true);
             webView.getSettings().setLoadWithOverviewMode(true);
             webView.getSettings().setUseWideViewPort(true);
             webView.getSettings().setBuiltInZoomControls(true);
             webView.getSettings().setDisplayZoomControls(false);
             webView.getSettings().setDomStorageEnabled(true);
-            
             webView.setWebViewClient(new NormalWebViewClient(this));
 
             String url = getLoginUrl();
+            LoginDiag.add("CAPTURE", "url appid=" + com.tencent.tim.TokenStore.appidOfUrl(url));
             if (url != null && !url.isEmpty()) {
                 webView.loadUrl(url);
             } else {
@@ -204,6 +224,7 @@ public class AgentActivity extends BaseActivity {
                 finish();
             }
         } catch (Exception e) {
+            LoginDiag.add("ERR", "setupCaptureMode: " + e);
             e.printStackTrace();
             Toast.makeText(this, "启动抓号模式失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             finish();
@@ -212,22 +233,19 @@ public class AgentActivity extends BaseActivity {
 
     private void setupHangUpMode() {
         try {
-            // 挂机模式：全屏隐藏状态栏
             mWindow.getDecorView().setSystemUiVisibility(5894);
-            
             webView.setVisibility(View.VISIBLE);
             loginScroll.setVisibility(View.GONE);
-
             webView.getSettings().setJavaScriptEnabled(true);
             webView.getSettings().setLoadWithOverviewMode(true);
             webView.getSettings().setUseWideViewPort(true);
             webView.getSettings().setBuiltInZoomControls(true);
             webView.getSettings().setDisplayZoomControls(false);
             webView.getSettings().setDomStorageEnabled(true);
-            
             webView.setWebViewClient(new HangUpWebViewClient(this));
 
             String url = getLoginUrl();
+            LoginDiag.add("HANGUP", "url appid=" + com.tencent.tim.TokenStore.appidOfUrl(url));
             if (url != null && !url.isEmpty()) {
                 webView.loadUrl(url);
             } else {
@@ -235,6 +253,7 @@ public class AgentActivity extends BaseActivity {
                 finish();
             }
         } catch (Exception e) {
+            LoginDiag.add("ERR", "setupHangUpMode: " + e);
             e.printStackTrace();
             Toast.makeText(this, "启动挂机模式失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             finish();
@@ -251,8 +270,11 @@ public class AgentActivity extends BaseActivity {
     }
 
     private void showPickToken() {
-        String __g = ""; com.tencent.tim.TokenDialog.show(this, __g, e -> {
+        LoginDiag.add("LOGIN", "打开 Token 选择器");
+        String g = "";
+        com.tencent.tim.TokenDialog.show(this, g, e -> {
             String url2 = com.tencent.tim.TokenStore.rebuildUrl(e);
+            LoginDiag.add("LOGIN", "选中 Token game=" + e.game + " appid=" + e.appid);
             plainText.setText(url2);
             updateAutoGameHint(url2);
             performLogin(url2);
@@ -269,6 +291,8 @@ public class AgentActivity extends BaseActivity {
             if (clipboard != null && clipboard.hasPrimaryClip()) {
                 String text = clipboard.getPrimaryClip().getItemAt(0).getText().toString();
                 if (!TextUtils.isEmpty(text)) {
+                    LoginDiag.add("LOGIN", "粘贴登录，长度=" + text.length()
+                            + " 含token=" + text.contains("access_token="));
                     plainText.setText(text);
                     performLogin(text);
                     Toast.makeText(this, "已从剪切板粘贴并登录", Toast.LENGTH_SHORT).show();
@@ -277,6 +301,7 @@ public class AgentActivity extends BaseActivity {
                 Toast.makeText(this, "剪切板没有内容", Toast.LENGTH_SHORT).show();
             }
         } catch (Exception e) {
+            LoginDiag.add("ERR", "pasteAndLogin: " + e);
             Toast.makeText(this, "粘贴失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
@@ -288,6 +313,7 @@ public class AgentActivity extends BaseActivity {
 
     public void performLogin(String url) {
         if (url == null || url.isEmpty()) {
+            LoginDiag.add("ERR", "performLogin: 数据为空");
             Toast.makeText(this, "数据为空", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -296,39 +322,58 @@ public class AgentActivity extends BaseActivity {
         String expiresIn = grab(url, "expires_in=([^&\\s#]+)");
         String openId = grab(url, "openid=([^&\\s#]+)");
         String payToken = grab(url, "pay_token=([^&\\s#]+)");
-        if (!accessToken.isEmpty()) {
 
-            try {
-                JSONObject json = new JSONObject();
-                json.put("access_token", accessToken);
-                json.put("openid", openId);
-                json.put("pay_token", payToken);
-                json.put("expires_in", expiresIn == null || expiresIn.isEmpty() ? "7776000" : expiresIn);
-                json.put("ret", "0");
-                json.put("pf", "desktop_m_qq-10000144-android-2002-");
-                json.put("page_type", "1");
+        // 关键诊断：各字段只记录长度，脱敏后可安全展示
+        LoginDiag.add("PARSE", "access_token=" + (accessToken.isEmpty() ? "空" : ("len" + accessToken.length()))
+                + " openid=" + (openId.isEmpty() ? "空" : ("len" + openId.length()))
+                + " pay_token=" + (payToken.isEmpty() ? "空" : ("len" + payToken.length()))
+                + " expires_in=" + (expiresIn.isEmpty() ? "空" : expiresIn));
 
-                String saved = normalizeAuthUrl(url);
-                saveRawDataToPreferences(saved);
-
-                if (!"login".equals(currentMode)) {
-                    saveAccountToFile(saved, appidFrom(url), currentMode != null ? currentMode : "抓号模式");
-                } else {
-                    Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
-                }
-
-                Intent resultIntent = new Intent();
-                resultIntent.putExtra("key_response", json.toString());
-                setResult(RESULT_OK, resultIntent);
-
-                new android.os.Handler().postDelayed(() -> finish(), 2000);
-
-            } catch (JSONException e) {
-                e.printStackTrace();
-                Toast.makeText(this, "JSON处理错误", Toast.LENGTH_SHORT).show();
-            }
-        } else {
+        if (accessToken.isEmpty()) {
+            LoginDiag.add("ERR", "performLogin: access_token 为空，内容格式不符");
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            JSONObject json = new JSONObject();
+            json.put("access_token", accessToken);
+            json.put("openid", openId);
+            json.put("pay_token", payToken);
+            json.put("expires_in", expiresIn == null || expiresIn.isEmpty() ? "7776000" : expiresIn);
+            json.put("ret", "0");
+            json.put("pf", "desktop_m_qq-10000144-android-2002-");
+            json.put("page_type", "1");
+
+            String saved = normalizeAuthUrl(url);
+            saveRawDataToPreferences(saved);
+
+            String gameName = getSelectedGameName();
+            String appid = appidFrom(url);
+            String chosenAppid = getSelectedGameAppid();
+
+            // appid 一致性检查：这是「其他游戏能登、某个游戏登不上」的首要怀疑点
+            LoginDiag.add("RESULT", "game=" + gameName
+                    + " token里appid=" + appid
+                    + " 已选游戏appid=" + chosenAppid
+                    + " 一致=" + appid.equals(chosenAppid)
+                    + " mode=" + currentMode);
+
+            if (!"login".equals(currentMode)) {
+                saveAccountToFile(saved, appid, currentMode != null ? currentMode : "抓号模式");
+            } else {
+                Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
+            }
+
+            Intent resultIntent = new Intent();
+            resultIntent.putExtra("key_response", json.toString());
+            setResult(RESULT_OK, resultIntent);
+
+            new android.os.Handler().postDelayed(() -> finish(), 2000);
+        } catch (JSONException e) {
+            LoginDiag.add("ERR", "JSON: " + e);
+            e.printStackTrace();
+            Toast.makeText(this, "JSON处理错误", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -341,9 +386,25 @@ public class AgentActivity extends BaseActivity {
         return (a == null || a.isEmpty()) ? "未知" : a;
     }
 
+    /** 当前选中游戏登记的 appid，用于与 token 里的 appid 比对。 */
+    private String getSelectedGameAppid() {
+        try {
+            String name = getSelectedGameName();
+            String a = com.tencent.tim.TokenStore.appidOfGame(name);
+            if (a == null || a.isEmpty()) {
+                String su = getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", "");
+                a = com.tencent.tim.TokenStore.appidOfUrl(su);
+            }
+            return (a == null || a.isEmpty()) ? "未知" : a;
+        } catch (Throwable t) {
+            return "未知";
+        }
+    }
+
     private String normalizeAuthUrl(String url) {
         if (url == null || url.isEmpty()) return url;
         if (url.startsWith("auth://tauth.qq.com") && url.contains("access_token=")) return url;
+
         String at = grab(url, "access_token=([^&#]+)");
         if (at.isEmpty()) return url;
         String openid = grab(url, "openid=([^&#]+)");
@@ -352,6 +413,7 @@ public class AgentActivity extends BaseActivity {
         if (exp.isEmpty()) exp = "7776000";
         String authTime = grab(url, "auth_time=([^&#]+)");
         String pfkey = grab(url, "key=([^&#]+)");
+
         StringBuilder sb = new StringBuilder("auth://tauth.qq.com/?#");
         sb.append("access_token=").append(at);
         sb.append("&expires_in=").append(exp);
@@ -368,10 +430,14 @@ public class AgentActivity extends BaseActivity {
     private String withAppid(String url) {
         if (url == null || url.contains("appid=") || url.contains("client_id=")) return url;
         String a = "";
-        try { a = com.tencent.tim.TokenStore.appidOfGame(getSelectedGameName()); } catch (Exception ignored) {}
+        try {
+            a = com.tencent.tim.TokenStore.appidOfGame(getSelectedGameName());
+        } catch (Exception ignored) {
+        }
         if (a == null || a.isEmpty()) a = "1104466820";
         return url + (url.indexOf("?") >= 0 ? "&" : "?") + "appid=" + a;
     }
+
     private void saveRawDataToPreferences(String data) {
         getSharedPreferences(PREF_NAME, MODE_PRIVATE)
                 .edit()
@@ -402,15 +468,23 @@ public class AgentActivity extends BaseActivity {
                 final String aidShown = (appid == null || appid.isEmpty()) ? "未知" : appid;
                 String line = com.tencent.tim.TokenStore.joinLine("", time, aidShown, url, mode);
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(gameName, line);
+                LoginDiag.add("SAVE", "game=" + gameName + " appid=" + aidShown
+                        + " ok=" + ok + (ok ? "" : (" err=" + com.tencent.tim.TokenStore.lastError)));
                 final String g = gameName;
                 runOnUiThread(() -> {
                     if (ok) {
-                        Toast.makeText(AgentActivity.this, "已保存 " + g + " appid=" + aidShown + " -> " + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(AgentActivity.this,
+                                "已保存 " + g + " appid=" + aidShown + " -> "
+                                        + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
+                                Toast.LENGTH_LONG).show();
                     } else {
-                        Toast.makeText(AgentActivity.this, "保存失败: " + com.tencent.tim.TokenStore.lastError, Toast.LENGTH_LONG).show();
+                        Toast.makeText(AgentActivity.this,
+                                "保存失败: " + com.tencent.tim.TokenStore.lastError,
+                                Toast.LENGTH_LONG).show();
                     }
                 });
             } catch (Exception e) {
+                LoginDiag.add("ERR", "saveAccountToFile: " + e);
                 e.printStackTrace();
             }
         }).start();

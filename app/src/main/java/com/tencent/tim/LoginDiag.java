@@ -18,27 +18,27 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 登录诊断器。
+ * 登录诊断器。三种模式通用：抓号、挂机、上号。
  *
- * 目的：游戏登录卡住时，一把拿到「WebView 经过了哪些 URL」和「系统层有无报错」，
- * 交给开发者定位，不用用户装 adb。
- *
- * 两路信息：
- * 1) URL 轨迹：由 BaseLoginWebViewClient 每步回调写入内存环形缓冲。
- *    logcat 看不到 WebView 的导航链，这一路最关键。
+ * 要点：
+ * 1) URL 轨迹：由 BaseLoginWebViewClient 与 AgentActivity 每步写入内存环形缓冲。
+ *    系统 logcat 看不到 WebView 导航链，这一路是定位卡点的关键。
  * 2) su logcat：有 root 时抓系统日志里与 WebView / 崩溃 / SSL 相关的行。
  *
  * 导出到：
  *   Android/data/com.tencent.tim/files/diag_login.txt
  *
- * 界面上通过右下角「诊断」悬浮按钮触发，抓号/挂机模式都有。
+ * 界面：右上角动态挂「诊断」按钮，点击即导出并复制到剪贴板。
+ * 不改布局、不改 Activity 结构，零侵入。
  */
 public class LoginDiag {
 
-    private static final int MAX_EVENTS = 300;
+    private static final int MAX_EVENTS = 400;
     private static final List<String> events = new ArrayList<String>();
     private static long startedAt = 0L;
-    private static boolean buttonAttached = false;
+
+    /** 用弱标记避免重复挂按钮导致叠层。 */
+    private static String attachedKey = null;
 
     private static final SimpleDateFormat TS =
             new SimpleDateFormat("HH:mm:ss.SSS", Locale.CHINA);
@@ -66,20 +66,22 @@ public class LoginDiag {
     }
 
     /**
-     * 动态挂一个诊断悬浮按钮到窗口右上角。
-     *
-     * 不改布局、不改 AgentActivity —— 只在有 WebView 的模式下由
-     * BaseLoginWebViewClient.prepare() 调用一次，风险最小。
+     * 动态挂诊断悬浮按钮。同一 Activity 只挂一次。
+     * 抓号/挂机由 BaseLoginWebViewClient 调用，上号由 AgentActivity 调用。
      */
     public static void attachButton(final Activity act, final String gameName) {
-        if (act == null || buttonAttached) return;
-        buttonAttached = true;
+        if (act == null) return;
+        final String key = act.getClass().getName() + "@" + System.identityHashCode(act);
+        synchronized (LoginDiag.class) {
+            if (key.equals(attachedKey)) return;
+            attachedKey = key;
+        }
         try {
             Button btn = new Button(act);
             btn.setText("诊断");
             btn.setTextSize(11);
             btn.setTextColor(0xFFF5F7FA);
-            btn.setAlpha(0.85f);
+            btn.setAlpha(0.9f);
             btn.setBackground(TokenDialog.glass(act, 12, false));
 
             int pad = (int) (8 * act.getResources().getDisplayMetrics().density);
@@ -108,11 +110,19 @@ public class LoginDiag {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT));
             }
-        } catch (Throwable ignored) {
+            add("DIAG", "按钮已挂载");
+        } catch (Throwable t) {
+            add("ERR", "挂载诊断按钮失败: " + t);
         }
     }
 
+    /** 重置挂载标记，Activity 重建时用。 */
+    public static synchronized void resetButtonFlag() {
+        attachedKey = null;
+    }
+
     private static void exportAsync(final Activity act, final String gameName) {
+        add("DIAG", "用户点击导出");
         final android.widget.Toast tip = android.widget.Toast.makeText(act,
                 "正在收集诊断信息...", android.widget.Toast.LENGTH_SHORT);
         tip.show();
@@ -126,7 +136,6 @@ public class LoginDiag {
                                     android.widget.Toast.LENGTH_LONG).show();
                             return;
                         }
-                        // 顺带复制到剪贴板，方便直接粘贴发出来
                         try {
                             android.content.ClipboardManager cm =
                                     (android.content.ClipboardManager) act.getSystemService(
@@ -140,7 +149,7 @@ public class LoginDiag {
                         new android.app.AlertDialog.Builder(act)
                                 .setTitle("诊断已导出")
                                 .setMessage("文件:\n" + path
-                                        + "\n\nURL 轨迹已同时复制到剪贴板，可直接粘贴发送。")
+                                        + "\n\nURL 轨迹已复制到剪贴板，可直接粘贴发送。")
                                 .setPositiveButton("知道了", null)
                                 .show();
                     }
@@ -168,7 +177,7 @@ public class LoginDiag {
         sb.append("节点: ").append(NodeConfig.summary()).append("\n");
         sb.append("xray: ").append(XrayCore.isAlive() ? "运行中" : "未运行").append("\n\n");
 
-        sb.append("--- URL 轨迹 ---\n");
+        sb.append("--- 事件轨迹 ---\n");
         List<String> snap = snapshot();
         if (snap.isEmpty()) {
             sb.append("(空)\n");
