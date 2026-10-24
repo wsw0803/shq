@@ -45,10 +45,11 @@
                         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="持续抓取日志" android:textSize="13sp" android:textColor="@color/text_primary" />
                         <Switch android:id="@+id/sw_diag" android:layout_width="wrap_content" android:layout_height="wrap_content" />
                     </LinearLayout>
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="开启后持续记录：抓号 / 上号 / 数据写入 / 导出 的全过程，便于定位问题。关闭后不产生任何记录。" android:textSize="10sp" android:textColor="@color/text_muted" android:paddingTop="6dp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="开启后持续记录抓号 / 上号 / 数据写入的全过程。关闭时自动保存一份带时间戳的日志文件，无需手动导出。" android:textSize="10sp" android:textColor="@color/text_muted" android:paddingTop="6dp" />
+                    <TextView android:id="@+id/tv_diag_files" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="暂无日志文件" android:textSize="10sp" android:textColor="@color/accent_cyan" android:fontFamily="monospace" android:paddingTop="6dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
-                        <Button android:id="@+id/btn_diag_export" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="导出日志" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:tag="glass" android:textAllCaps="false" android:layout_marginEnd="4dp" android:padding="10dp" />
-                        <Button android:id="@+id/btn_diag_clear" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="清空日志" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:tag="glass" android:textAllCaps="false" android:padding="10dp" />
+                        <Button android:id="@+id/btn_diag_export" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="查看已保存日志" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:tag="glass" android:textAllCaps="false" android:layout_marginEnd="4dp" android:padding="10dp" />
+                        <Button android:id="@+id/btn_diag_clear" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="清空当前记录" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:tag="glass" android:textAllCaps="false" android:padding="10dp" />
                     </LinearLayout>
                 </LinearLayout>
 

@@ -7,6 +7,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -14,44 +16,47 @@ import java.util.Locale;
 /**
  * 诊断日志。
  *
- * 改为设置项常驻开关，不再有悬浮球：
- *   设置 → 诊断日志 → 开/关
- * 开启后持续记录 抓号 / 上号 / 数据写入 / 导出 等全流程，
- * 关闭后所有 add() 直接丢弃，零开销。
+ * 本次修复的设计错误：
+ * 原来关闭开关时直接 events.clear()，所以「关了再导出」得到的是空文件；
+ * 而且文件名固定 diag_login.txt，每次覆盖，永远只有一个。
  *
- * 记录内容：
- * - 模式、游戏、已选 appid
- * - WebView 导航链（系统 logcat 看不到，必须自己记）
- * - Cookie 状态（区分「ck 被拦」与「弹窗被吞」）
- * - token 各字段长度（不记明文）
- * - token 内 appid 与已选 appid 是否一致
- * - 数据写入（addEntry / saveBatch / exportAll）结果
- * - 导出动作
+ * 现在：
+ * 1) 关闭开关时自动把本次记录落盘，不需要手动导出
+ * 2) 文件名按时间戳命名，每次一份，互不覆盖
+ *      diag_20261025_005323.txt
+ * 3) 只保留最近 30 份，更早的自动删除
+ * 4) 手动「导出」仍然可用，会另存一份并把内容复制到剪贴板
  *
- * 文件落在：Android/data/com.tencent.tim/files/diag_login.txt
- * 设置页可点「导出诊断日志」直接拿到文件路径并复制到剪贴板。
+ * 记录内容：抓号 / 上号 / 数据写入 / 导出 全流程，自动脱敏。
  */
 public class LoginDiag {
 
     public static final String PREF = "diag_pref";
     public static final String KEY_ENABLED = "diag_enabled";
 
+    private static final String FILE_PREFIX = "diag_";
+    private static final String FILE_SUFFIX = ".txt";
+    /** 最多保留的日志份数。 */
+    private static final int MAX_FILES = 30;
+
     private static final int MAX_EVENTS = 600;
     private static final List<String> events = new ArrayList<String>();
     private static long startedAt = 0L;
 
-    /** 缓存开关状态，避免每条日志都读 SharedPreferences。 */
     private static volatile boolean enabled = false;
     private static volatile boolean loaded = false;
 
     private static final SimpleDateFormat TS =
             new SimpleDateFormat("HH:mm:ss.SSS", Locale.CHINA);
+    private static final SimpleDateFormat NAME_TS =
+            new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA);
+    private static final SimpleDateFormat FULL_TS =
+            new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA);
 
     private static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
     }
 
-    /** 应用启动时调一次，把开关状态读进内存。 */
     public static void init(Context c) {
         if (c == null) return;
         enabled = prefs(c).getBoolean(KEY_ENABLED, false);
@@ -63,19 +68,42 @@ public class LoginDiag {
         return enabled;
     }
 
-    public static void setEnabled(Context c, boolean on) {
+    /**
+     * 开关诊断。
+     *
+     * 开启：清空缓冲开始记录。
+     * 关闭：自动落盘（时间戳命名），然后清空缓冲。
+     *       这就是「开启然后关闭后直接生成日志」的实现。
+     */
+    public static void setEnabled(final Context c, boolean on) {
         if (c == null) return;
         prefs(c).edit().putBoolean(KEY_ENABLED, on).apply();
         enabled = on;
         loaded = true;
+
         if (on) {
             begin();
-            add("DIAG", "已开启诊断日志");
-        } else {
-            synchronized (LoginDiag.class) {
-                events.clear();
-            }
+            add("DIAG", "开启诊断日志");
+            return;
         }
+
+        // 关闭：先取快照再清空，然后在后台落盘
+        final Context app = c.getApplicationContext();
+        final List<String> snap;
+        final long started;
+        synchronized (LoginDiag.class) {
+            snap = new ArrayList<String>(events);
+            started = startedAt;
+            events.clear();
+            startedAt = 0L;
+        }
+        if (snap.isEmpty()) return;
+
+        new Thread(new Runnable() {
+            public void run() {
+                saveSnapshot(app, snap, started);
+            }
+        }).start();
     }
 
     public static synchronized void begin() {
@@ -105,36 +133,83 @@ public class LoginDiag {
         startedAt = System.currentTimeMillis();
     }
 
-    /**
-     * 导出诊断文件，返回路径，失败返回 null。
-     * 需在后台线程调用（su logcat 会阻塞）。
-     */
-    public static String export(Context ctx, String gameName) {
-        if (ctx == null) return null;
-        File dir = ctx.getExternalFilesDir(null);
-        if (dir == null) dir = ctx.getFilesDir();
-        File out = new File(dir, "diag_login.txt");
+    /** 日志目录。 */
+    public static File logDir(Context c) {
+        File d = c.getExternalFilesDir(null);
+        return d != null ? d : c.getFilesDir();
+    }
+
+    /** 列出已有的日志文件，按时间从新到旧。 */
+    public static List<File> listLogs(Context c) {
+        List<File> out = new ArrayList<File>();
+        try {
+            File dir = logDir(c);
+            File[] fs = dir.listFiles();
+            if (fs == null) return out;
+            for (File f : fs) {
+                String n = f.getName();
+                if (n != null && n.startsWith(FILE_PREFIX) && n.endsWith(FILE_SUFFIX)) {
+                    out.add(f);
+                }
+            }
+            java.util.Collections.sort(out, new Comparator<File>() {
+                public int compare(File a, File b) {
+                    return Long.compare(b.lastModified(), a.lastModified());
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+        return out;
+    }
+
+    /** 生成一个不重名的时间戳文件名。 */
+    private static File newLogFile(Context c, long stampMs) {
+        File dir = logDir(c);
+        try {
+            if (!dir.exists()) dir.mkdirs();
+        } catch (Throwable ignored) {
+        }
+        String base = FILE_PREFIX + NAME_TS.format(new Date(stampMs > 0 ? stampMs : System.currentTimeMillis()));
+        File f = new File(dir, base + FILE_SUFFIX);
+        int i = 2;
+        while (f.exists() && i < 100) {
+            f = new File(dir, base + "_" + i + FILE_SUFFIX);
+            i++;
+        }
+        return f;
+    }
+
+    /** 清理超出上限的旧日志。 */
+    private static void prune(Context c) {
+        try {
+            List<File> all = listLogs(c);
+            for (int i = MAX_FILES; i < all.size(); i++) {
+                all.get(i).delete();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 把快照写成文件，返回路径，失败返回 null。 */
+    private static String saveSnapshot(Context c, List<String> snap, long started) {
+        if (c == null || snap == null || snap.isEmpty()) return null;
+        File out = newLogFile(c, started);
 
         StringBuilder sb = new StringBuilder();
         sb.append("=== shq 诊断日志 ===\n");
-        sb.append("时间: ").append(TS.format(new Date())).append("\n");
-        sb.append("游戏: ").append(gameName == null ? "" : gameName).append("\n");
+        sb.append("开始时间: ").append(FULL_TS.format(new Date(started > 0 ? started : System.currentTimeMillis()))).append("\n");
+        sb.append("结束时间: ").append(FULL_TS.format(new Date())).append("\n");
         sb.append("Android: ").append(android.os.Build.VERSION.RELEASE)
                 .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
         sb.append("机型: ").append(android.os.Build.MANUFACTURER).append(' ')
                 .append(android.os.Build.MODEL).append("\n");
-        sb.append("线路: ").append(Net.routeName(ctx)).append("\n");
+        sb.append("线路: ").append(Net.routeName(c)).append("\n");
         sb.append("节点: ").append(NodeConfig.summary()).append("\n");
         sb.append("xray: ").append(XrayCore.isAlive() ? "运行中" : "未运行").append("\n");
-        sb.append("诊断开关: ").append(enabled ? "开" : "关").append("\n\n");
+        sb.append("事件数: ").append(snap.size()).append("\n\n");
 
         sb.append("--- 事件轨迹 ---\n");
-        List<String> snap = snapshot();
-        if (snap.isEmpty()) {
-            sb.append("(空，请先在设置里开启诊断日志)\n");
-        } else {
-            for (String line : snap) sb.append(line).append('\n');
-        }
+        for (String line : snap) sb.append(line).append('\n');
 
         sb.append("\n--- su logcat（已过滤）---\n");
         String log = suLogcat(800);
@@ -145,6 +220,7 @@ public class LoginDiag {
             fos = new FileOutputStream(out, false);
             fos.write(sb.toString().getBytes("UTF-8"));
             fos.flush();
+            prune(c);
             return out.getAbsolutePath();
         } catch (Exception e) {
             return null;
@@ -153,20 +229,57 @@ public class LoginDiag {
         }
     }
 
-    /** 把当前轨迹复制到剪贴板，便于直接粘贴反馈。 */
-    public static void copyToClipboard(Context c) {
-        if (c == null) return;
+    /**
+     * 手动导出一份当前日志（另存新文件），返回路径。
+     * 与关闭开关时的自动保存互不影响。
+     */
+    public static String export(Context ctx, String gameName) {
+        List<String> snap = snapshot();
+        if (snap.isEmpty()) {
+            // 没有正在记录的内容时，导最近一份文件
+            List<File> all = listLogs(ctx);
+            if (!all.isEmpty()) return all.get(0).getAbsolutePath();
+            return null;
+        }
+        return saveSnapshot(ctx, snap, startedAt);
+    }
+
+    /** 把当前轨迹复制到剪贴板。 */
+    public static String copyToClipboard(Context c) {
+        if (c == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String s : snapshot()) sb.append(s).append('\n');
+        String text = sb.toString();
         try {
             android.content.ClipboardManager cm =
                     (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
-            StringBuilder sb = new StringBuilder();
-            for (String s : snapshot()) sb.append(s).append('\n');
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("diag", sb.toString()));
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("diag", text));
         } catch (Throwable ignored) {
+        }
+        return text;
+    }
+
+    /** 读文件内容，用于直接展示/复制。 */
+    public static String readFile(File f) {
+        if (f == null || !f.exists()) return "";
+        java.io.BufferedReader br = null;
+        try {
+            br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String ln;
+            while ((ln = br.readLine()) != null) sb.append(ln).append('\n');
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (br != null) {
+                try { br.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
-    /** 用 su 抓 logcat 并过滤。Android 高版本对普通应用读 logcat 有限制，走 su 更稳。 */
+    /** 用 su 抓 logcat 并过滤。 */
     private static String suLogcat(int maxLines) {
         Process p = null;
         try {

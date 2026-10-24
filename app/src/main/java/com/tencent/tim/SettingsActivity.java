@@ -11,15 +11,16 @@ import android.widget.TextView;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.List;
 
 public class SettingsActivity extends BaseActivity {
 
     private static final int REQ_PICK_BG = 1001;
-    /** 背景图落到应用私有目录，避免依赖外部 URI 的持久化授权。 */
     private static final String BG_FILE = "bg_custom.img";
 
     private TextView tvDpi, tvGlass, tvBright;
     private SeekBar seekDpi, seekGlass, seekBright;
+    private TextView tvDiagFiles;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,8 +45,6 @@ public class SettingsActivity extends BaseActivity {
         Button pickBg = findViewById(R.id.btn_pick_bg);
         Button clearBg = findViewById(R.id.btn_clear_bg);
         pickBg.setOnClickListener(v -> {
-            // ACTION_GET_CONTENT 的 URI 无法持久化授权，重启后背景会消失，
-            // 改用 ACTION_OPEN_DOCUMENT 并复制进私有目录。
             android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
             it.addCategory(android.content.Intent.CATEGORY_OPENABLE);
             it.setType("image/*");
@@ -108,57 +107,109 @@ public class SettingsActivity extends BaseActivity {
         });
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshDiagFiles();
+    }
+
     /**
-     * 诊断日志开关。开启后持续记录抓号/上号/数据写入/导出的全过程。
-     * 关闭时不产生任何记录，零开销。
+     * 诊断日志开关。
+     * 关闭时会自动把本次记录落盘，文件名带时间戳，不需要手动导出。
      */
     private void setupDiag() {
         final Switch sw = findViewById(R.id.sw_diag);
+        tvDiagFiles = findViewById(R.id.tv_diag_files);
         if (sw == null) return;
 
         sw.setChecked(LoginDiag.isEnabled(this));
         sw.setOnCheckedChangeListener((btn, on) -> {
             LoginDiag.setEnabled(this, on);
-            android.widget.Toast.makeText(this,
-                    on ? "已开启，日志会持续记录" : "已关闭，不再产生记录",
-                    android.widget.Toast.LENGTH_SHORT).show();
+            if (on) {
+                android.widget.Toast.makeText(this,
+                        "已开启，操作完成后关闭即可自动保存日志",
+                        android.widget.Toast.LENGTH_LONG).show();
+            } else {
+                android.widget.Toast.makeText(this,
+                        "已关闭，本次日志已自动保存",
+                        android.widget.Toast.LENGTH_LONG).show();
+                // 落盘在后台线程，稍等再刷新列表
+                btn.postDelayed(this::refreshDiagFiles, 800);
+            }
         });
 
         Button export = findViewById(R.id.btn_diag_export);
         if (export != null) {
-            export.setOnClickListener(v -> exportDiag());
+            export.setOnClickListener(v -> showDiagList());
         }
 
         Button clear = findViewById(R.id.btn_diag_clear);
         if (clear != null) {
             clear.setOnClickListener(v -> {
                 LoginDiag.clear();
-                android.widget.Toast.makeText(this, "日志已清空",
+                android.widget.Toast.makeText(this, "当前记录已清空（已保存的文件不受影响）",
                         android.widget.Toast.LENGTH_SHORT).show();
+                refreshDiagFiles();
             });
         }
+
+        refreshDiagFiles();
     }
 
-    /** 导出日志：落盘 + 复制到剪贴板，方便直接粘贴反馈。 */
-    private void exportDiag() {
-        android.widget.Toast.makeText(this, "正在导出...", android.widget.Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            final String path = LoginDiag.export(this, null);
-            runOnUiThread(() -> {
-                if (path == null) {
-                    android.widget.Toast.makeText(this, "导出失败",
-                            android.widget.Toast.LENGTH_LONG).show();
-                    return;
-                }
-                LoginDiag.copyToClipboard(this);
-                new android.app.AlertDialog.Builder(this)
-                        .setTitle("已导出")
-                        .setMessage("文件:\n" + path
-                                + "\n\n轨迹已复制到剪贴板，可直接粘贴发送。")
-                        .setPositiveButton("知道了", null)
-                        .show();
-            });
-        }).start();
+    private void refreshDiagFiles() {
+        if (tvDiagFiles == null) return;
+        List<File> all = LoginDiag.listLogs(this);
+        if (all.isEmpty()) {
+            tvDiagFiles.setText("暂无日志文件");
+            return;
+        }
+        File latest = all.get(0);
+        String name = latest.getName();
+        tvDiagFiles.setText("已有 " + all.size() + " 份日志，最新: " + name);
+    }
+
+    /** 列出所有日志文件，点选后复制内容到剪贴板。 */
+    private void showDiagList() {
+        final List<File> all = LoginDiag.listLogs(this);
+        if (all.isEmpty()) {
+            android.widget.Toast.makeText(this,
+                    "还没有日志。开启开关、操作一次、再关闭即可自动生成",
+                    android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String[] items = new String[all.size()];
+        for (int i = 0; i < all.size(); i++) {
+            File f = all.get(i);
+            long kb = Math.max(1, f.length() / 1024);
+            items[i] = f.getName() + "  (" + kb + " KB)";
+        }
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("诊断日志（点选复制内容）")
+                .setItems(items, (d, which) -> {
+                    File f = all.get(which);
+                    String content = LoginDiag.readFile(f);
+                    if (content.isEmpty()) {
+                        android.widget.Toast.makeText(this, "读取失败",
+                                android.widget.Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    try {
+                        android.content.ClipboardManager cm =
+                                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("diag", content));
+                    } catch (Throwable ignored) {
+                    }
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle(f.getName())
+                            .setMessage("路径:\n" + f.getAbsolutePath()
+                                    + "\n\n内容已复制到剪贴板，可直接粘贴发送。")
+                            .setPositiveButton("知道了", null)
+                            .show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 手动代理设置，用于首次引导下载 xray 核心。 */
