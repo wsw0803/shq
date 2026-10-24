@@ -19,18 +19,14 @@ import com.tencent.open.agent.AgentActivity;
  *
  * 多层兜底抓 token：跳转 / 页面开始结束 / 历史变化 / JS 桥轮询。
  *
- * 关于「登录卡住」的两种不同病因，这里都做了埋点以便区分：
+ * 两种「登录卡住」病因在此分别埋点，便于区分：
+ * A) Cookie 被拦：登录页正常，扫码成功但被踢回登录页。
+ *    每步记录关键域 cookie 长度。
+ * B) window.open 被吞：点登录毫无反应。
+ *    通过 setSupportMultipleWindows + 真实挂载容器解决。
  *
- * A) Cookie 被系统或 ROM 拦截
- *    表现：登录页正常，扫码成功，但又跳回登录页或提示未登录。
- *    处理：开启第三方 Cookie，并在每次页面结束时记录 Cookie 状态
- *         （域名数量、是否含关键域），便于判断是否真的写进去了。
- *
- * B) window.open 弹窗被吞
- *    表现：点登录后没有任何反应，弹窗不出现。
- *    处理：setSupportMultipleWindows + onCreateWindow 真实挂载容器。
- *
- * 这两者症状不同，不能混为一谈。诊断文件里会分别记录。
+ * 日志由设置页的开关控制，关闭时 add() 直接丢弃，零开销。
+ * 不再有悬浮球。
  */
 public abstract class BaseLoginWebViewClient extends WebViewClient {
 
@@ -141,10 +137,8 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
 
     /**
      * 记录 Cookie 状态。
-     *
-     * CookieManager 没有直接枚举全部 Cookie 的接口，但可以按关键域名探测：
-     * 登录态主要落在 qq.com / ptlogin2.qq.com 上。
-     * 这里把关键 cookie 的「有无」和总长度记下来，足以判断是否写入成功。
+     * 登录态主要落在 qq.com / ptlogin2.qq.com / connect.qq.com，
+     * 记录三处长度即可判断是否写入成功。
      */
     protected void logCookieState(String when) {
         try {

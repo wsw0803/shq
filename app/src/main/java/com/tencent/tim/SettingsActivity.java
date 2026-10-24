@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.io.File;
@@ -43,10 +44,8 @@ public class SettingsActivity extends BaseActivity {
         Button pickBg = findViewById(R.id.btn_pick_bg);
         Button clearBg = findViewById(R.id.btn_clear_bg);
         pickBg.setOnClickListener(v -> {
-            // ACTION_GET_CONTENT 拿到的 URI 无法持久化授权，
-            // 重启或升级后就读不到，背景会「消失」。
-            // 改用 ACTION_OPEN_DOCUMENT，并把图片复制进私有目录，
-            // 之后不再依赖外部授权。
+            // ACTION_GET_CONTENT 的 URI 无法持久化授权，重启后背景会消失，
+            // 改用 ACTION_OPEN_DOCUMENT 并复制进私有目录。
             android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
             it.addCategory(android.content.Intent.CATEGORY_OPENABLE);
             it.setType("image/*");
@@ -61,6 +60,7 @@ public class SettingsActivity extends BaseActivity {
         });
 
         setupProxyButton();
+        setupDiag();
 
         seekDpi.setOnSeekBarChangeListener(new L() {
             @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
@@ -109,12 +109,59 @@ public class SettingsActivity extends BaseActivity {
     }
 
     /**
-     * 手动代理设置。
-     *
-     * 存在的意义：首次使用时代理核心还没下载下来，
-     * 而核心本身也要从网上下载，形成死锁。
-     * 用户若已有可用的本地代理（如 Clash 的 7890），填进来就能完成引导。
+     * 诊断日志开关。开启后持续记录抓号/上号/数据写入/导出的全过程。
+     * 关闭时不产生任何记录，零开销。
      */
+    private void setupDiag() {
+        final Switch sw = findViewById(R.id.sw_diag);
+        if (sw == null) return;
+
+        sw.setChecked(LoginDiag.isEnabled(this));
+        sw.setOnCheckedChangeListener((btn, on) -> {
+            LoginDiag.setEnabled(this, on);
+            android.widget.Toast.makeText(this,
+                    on ? "已开启，日志会持续记录" : "已关闭，不再产生记录",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        });
+
+        Button export = findViewById(R.id.btn_diag_export);
+        if (export != null) {
+            export.setOnClickListener(v -> exportDiag());
+        }
+
+        Button clear = findViewById(R.id.btn_diag_clear);
+        if (clear != null) {
+            clear.setOnClickListener(v -> {
+                LoginDiag.clear();
+                android.widget.Toast.makeText(this, "日志已清空",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
+
+    /** 导出日志：落盘 + 复制到剪贴板，方便直接粘贴反馈。 */
+    private void exportDiag() {
+        android.widget.Toast.makeText(this, "正在导出...", android.widget.Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final String path = LoginDiag.export(this, null);
+            runOnUiThread(() -> {
+                if (path == null) {
+                    android.widget.Toast.makeText(this, "导出失败",
+                            android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                }
+                LoginDiag.copyToClipboard(this);
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("已导出")
+                        .setMessage("文件:\n" + path
+                                + "\n\n轨迹已复制到剪贴板，可直接粘贴发送。")
+                        .setPositiveButton("知道了", null)
+                        .show();
+            });
+        }).start();
+    }
+
+    /** 手动代理设置，用于首次引导下载 xray 核心。 */
     private void setupProxyButton() {
         Button btn = findViewById(R.id.btn_proxy);
         if (btn == null) return;

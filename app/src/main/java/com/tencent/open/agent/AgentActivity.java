@@ -34,15 +34,11 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 诊断改为按需开启，符合实际操作顺序：
- *   点「开启诊断」→ 走一遍上号/抓号流程 → 点「导出诊断」
- * 进入界面时不自动开始记录，避免把启动噪音混进来。
+ * 日志由设置页开关控制，这里不再挂悬浮球。
+ * 开启后持续记录：模式、游戏、appid、token 各字段长度、
+ * appid 一致性、数据写入结果、导出动作。
  *
- * 上号模式的诊断点：
- * - 进入界面记录 模式 / 游戏 / 已选 appid / 输入是否含 token
- * - performLogin 记录各字段长度（不记明文）
- * - 记录 token 内 appid 与已选 appid 是否一致
- * - 记录保存结果
+ * 关闭时不产生任何记录，add() 直接丢弃。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -70,7 +66,6 @@ public class AgentActivity extends BaseActivity {
         if (Build.VERSION.SDK_INT >= 28) {
             this.mWindow.getAttributes().layoutInDisplayCutoutMode = 1;
         }
-        // 5894 = 全屏 + 沉浸式
         this.mWindow.getDecorView().setSystemUiVisibility(5894);
         this.mWindow.setSoftInputMode(3);
         if (Build.VERSION.SDK_INT >= 21) {
@@ -128,6 +123,8 @@ public class AgentActivity extends BaseActivity {
             }
         }
 
+        LoginDiag.add("AGENT", "mode=" + currentMode + " game=" + getSelectedGameName());
+
         if ("login".equals(currentMode)) {
             setupLoginMode();
         } else if ("capture".equals(currentMode)) {
@@ -136,13 +133,6 @@ public class AgentActivity extends BaseActivity {
             setupHangUpMode();
         } else {
             setupCaptureMode();
-        }
-
-        // 诊断按钮：首次点击开启，之后点击导出
-        LoginDiag.resetButtonFlag();
-        try {
-            LoginDiag.attachButton(this, getSelectedGameName());
-        } catch (Throwable ignored) {
         }
     }
 
@@ -173,6 +163,12 @@ public class AgentActivity extends BaseActivity {
             webView.setVisibility(View.GONE);
             loginScroll.setVisibility(View.VISIBLE);
             loadRawDataFromPreferences();
+
+            String input = plainText.getText() == null ? "" : plainText.getText().toString();
+            LoginDiag.add("LOGIN", "game=" + getSelectedGameName()
+                    + " 已选appid=" + getSelectedGameAppid()
+                    + " 输入长度=" + input.length()
+                    + " 含token=" + input.contains("access_token="));
 
             if (pasteLoginButton != null) {
                 pasteLoginButton.setOnClickListener(v -> pasteAndLogin());
@@ -340,7 +336,6 @@ public class AgentActivity extends BaseActivity {
             String appid = appidFrom(url);
             String chosenAppid = getSelectedGameAppid();
 
-            // appid 一致性：排查「其他游戏能登、某个游戏登不上」的关键
             LoginDiag.add("RESULT", "game=" + gameName
                     + " token里appid=" + appid
                     + " 已选appid=" + chosenAppid
@@ -374,7 +369,6 @@ public class AgentActivity extends BaseActivity {
         return (a == null || a.isEmpty()) ? "未知" : a;
     }
 
-    /** 当前选中游戏登记的 appid，用于与 token 里的 appid 比对。 */
     private String getSelectedGameAppid() {
         try {
             String name = getSelectedGameName();
