@@ -16,6 +16,7 @@ import android.widget.ScrollView;
 import android.widget.Toast;
 
 import com.tencent.tim.BaseActivity;
+import com.tencent.tim.GameLaunch;
 import com.tencent.tim.HangUpWebViewClient;
 import com.tencent.tim.LoginDiag;
 import com.tencent.tim.NormalWebViewClient;
@@ -34,16 +35,17 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 本次修复的诊断问题：
+ * 本次关键改动：上号模式不再只依赖 setResult。
  *
- * 1) 原来用 access_token=len64 这种形式记录字段，
- *    会被 LogScrubber 整段抹成 ****，完全失去诊断价值。
- *    现在改用不含敏感词的缩写：at / oid / pt / exp。
+ * 原来上号成功后只调 setResult(RESULT_OK)，但本界面若是从 shq 主界面启动的，
+ * 结果只会回到 MainActivity，目标游戏收不到 token，
+ * 表现就是「提示登录成功但游戏没反应」。
+ * 现在改为：
+ *   1) 先尝试直接把 token 派发给游戏（root + am start 启动游戏内自带的
+ *      com.tencent.open.agent.AgentActivity），这一步不依赖谁启动了 shq
+ *   2) 同时仍然 setResult，兼容「游戏自己唤起 shq」的正常路径
  *
- * 2) 新增记录「谁启动了本界面」——这是上号成败的关键：
- *    上号模式必须由游戏自己通过 auth:// 唤起本 Activity，
- *    setResult 才能把 token 交回游戏；
- *    若是本应用主界面启动的，结果只会回到 MainActivity，游戏永远拿不到 token。
+ * 诊断字段改用不含敏感词的缩写（at/oid/pt/exp），避免被脱敏抹掉。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -59,7 +61,6 @@ public class AgentActivity extends BaseActivity {
     private Button manualLoginButton;
     private String currentMode;
     private Window mWindow;
-    /** 本界面是否由外部（游戏）通过 URL 唤起。只有这种情况结果才能回到游戏。 */
     private boolean launchedByApp = false;
     private String launchReferrer = "";
 
@@ -117,20 +118,15 @@ public class AgentActivity extends BaseActivity {
             modeFromIntent = intent.getStringExtra("mode");
         }
 
-        // 判断启动来源：由游戏通过 auth:// 唤起 vs 本应用内部启动
         if (intent != null) {
             try {
-                if (Intent.ACTION_VIEW.equals(intent.getAction())) {
-                    launchedByApp = true;
-                }
-                // referrer 能看出是哪个应用唤起的（部分 ROM 才提供）
+                if (Intent.ACTION_VIEW.equals(intent.getAction())) launchedByApp = true;
                 if (Build.VERSION.SDK_INT >= 22) {
-                    java.lang.ref.Reference<android.content.Context> dummy = null;
                     String ref = getReferrer() == null ? "" : String.valueOf(getReferrer());
                     launchReferrer = ref;
                 }
                 if (intent.getData() != null) {
-                    launchReferrer = launchReferrer + " data=" + intent.getData().getScheme();
+                    launchReferrer = launchReferrer + " scheme=" + intent.getData().getScheme();
                 }
             } catch (Throwable ignored) {
             }
@@ -154,7 +150,8 @@ public class AgentActivity extends BaseActivity {
                 + " game=" + getSelectedGameName()
                 + " 外部唤起=" + launchedByApp
                 + " referrer=" + (launchReferrer.isEmpty() ? "无" : launchReferrer)
-                + " 任务栈id=" + getTaskId());
+                + " 游戏包名=" + (GameLaunch.hasPackage(getSelectedGameName())
+                        ? GameLaunch.packageOf(getSelectedGameName()) : "未配置"));
 
         if ("login".equals(currentMode)) {
             setupLoginMode();
@@ -377,22 +374,34 @@ public class AgentActivity extends BaseActivity {
 
             if (!"login".equals(currentMode)) {
                 saveAccountToFile(saved, appid, currentMode != null ? currentMode : "抓号模式");
+                new android.os.Handler().postDelayed(() -> finish(), 2000);
             } else {
-                Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
+                // 上号模式：直接把 token 派发给游戏，不等 setResult
+                boolean sent = false;
+                try {
+                    sent = GameLaunch.dispatch(this, gameName, saved);
+                } catch (Throwable t) {
+                    LoginDiag.add("DISPATCH", "派发异常: " + t);
+                }
+
+                if (sent) {
+                    Toast.makeText(this, "已发送到 " + gameName + "，请查看游戏",
+                            Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "已直接派发给游戏，不依赖 setResult");
+                } else {
+                    Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", launchedByApp
+                            ? "直接派发失败，回退 setResult（本界面由游戏唤起，应该能收到）"
+                            : "直接派发失败，且本界面不是游戏唤起的，游戏很可能收不到");
+                }
             }
 
+            // 仍然 setResult，兼容「游戏自己唤起 shq」的正常路径
             Intent resultIntent = new Intent();
             resultIntent.putExtra("key_response", json.toString());
             setResult(RESULT_OK, resultIntent);
 
-            // 关键：只有本界面是由游戏唤起时，结果才会回到游戏。
-            // 若由本应用主界面启动，setResult 只会回到 MainActivity，
-            // 游戏侧永远收不到 token —— 这是上号失败的常见原因。
-            LoginDiag.add("RETURN", launchedByApp
-                    ? "已通过 setResult 交回调用方"
-                    : "警告：本界面不是游戏唤起的，setResult 只会回到 shq 主界面，游戏收不到 token");
-
-            new android.os.Handler().postDelayed(() -> finish(), 2000);
+            new android.os.Handler().postDelayed(() -> finish(), 2500);
         } catch (JSONException e) {
             LoginDiag.add("ERR", "JSON: " + e);
             e.printStackTrace();
