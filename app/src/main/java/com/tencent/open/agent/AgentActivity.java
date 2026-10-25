@@ -73,6 +73,8 @@ public class AgentActivity extends BaseActivity {
     private String callerPackage = "";
     private boolean launchedExternally = false;
     private boolean dispatching = false;
+    /** 游戏自己唤起我们时带的 appid，优先于本地选择的 appid。 */
+    private String gameAppid = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -128,6 +130,7 @@ public class AgentActivity extends BaseActivity {
             modeFromIntent = intent.getStringExtra("mode");
         }
         resolveCaller(intent);
+        gameAppid = requestedAppid(intent);
         if (modeFromIntent != null && !modeFromIntent.isEmpty()) {
             currentMode = modeFromIntent;
         } else {
@@ -142,6 +145,7 @@ public class AgentActivity extends BaseActivity {
                 + " 外部唤起=" + launchedExternally
                 + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
                 + " 带token=" + (incoming != null)
+                + " 游戏请求appid=" + (gameAppid.isEmpty() ? "未提供" : gameAppid)
                 + " getCallingActivity=" + (callingActivityName() == null ? "null" : callingActivityName())
                 + " 真实回传通道=" + (hasRealChannel() ? "有" : "无"));
 
@@ -497,7 +501,29 @@ public class AgentActivity extends BaseActivity {
         Intent resultIntent = new Intent();
         resultIntent.putExtra("key_response", json.toString());
         resultIntent.putExtra("auth", saved);
+        /*
+         * 关键补齐：把 auth URI 同时设成 Intent 的 data。
+         *
+         * QQ SDK 的 AssistActivity 在 onActivityResult 里是这么解析的（各版本有差异）：
+         *   旧版：data.getStringExtra("key_response") → 当 JSON 解析
+         *   新版：data.getDataString() → 解析 auth://tauth.qq.com/?#access_token=...
+         *
+         * 上一版只给了 extras，data 是 null。如果游戏里这份 SDK 走的是 data 分支，
+         * 它拿到的就是 null，于是「结果交回去了、游戏也回来了、但就是不登录」——
+         * 和日志里观察到的现象完全一致。两条路一起给，哪种解析都能命中。
+         */
+        String dataUri = saved == null ? "" : saved.replace("auth://tauth.qq.com/?#", "auth://tauth.qq.com/#");
+        resultIntent.setData(android.net.Uri.parse(dataUri));
+        // 一些 MSDK 版本还会检查这两个标记位，缺了就当「用户取消」处理。
+        resultIntent.putExtra("ret", 0);
+        resultIntent.putExtra("action", "login");
         setResult(RESULT_OK, resultIntent);
+
+        LoginDiag.add("RETURN", "resultIntent: data="
+                + (dataUri.isEmpty() ? "空" : "len" + dataUri.length())
+                + " extras=[key_response len" + json.toString().length()
+                + ", auth len" + (saved == null ? 0 : saved.length())
+                + "] resultCode=RESULT_OK");
 
         if (!"login".equals(mode)) {
             saveAccountToFile(saved, appid, mode);
@@ -739,8 +765,47 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
+    /**
+     * 游戏唤起我们时自己带的 appid。
+     *
+     * 这是最权威的来源：是游戏本体告诉我们要用哪个 appid 登录，
+     * 比本地「已选游戏」的配置可靠。MSDK 会拿它跟 token 里的 appid 校验，
+     * 不一致就直接拒绝 —— 这正是「token 交回了但游戏不登录」最常见的原因。
+     */
+    private String requestedAppid(Intent intent) {
+        if (intent == null) {
+            return "";
+        }
+        String[] keys = {"appid", "app_id", "client_id", "aid", "srcAppid"};
+        for (String k : keys) {
+            try {
+                String v = intent.getStringExtra(k);
+                String digits = com.tencent.tim.GameLaunch.digitsOf(v);
+                if (!digits.isEmpty()) {
+                    return digits;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            String d = intent.getDataString();
+            String digits = com.tencent.tim.GameLaunch.digitsOf(
+                    com.tencent.tim.GameLaunch.paramOf(d, "client_id"));
+            if (digits.isEmpty()) {
+                digits = com.tencent.tim.GameLaunch.digitsOf(
+                        com.tencent.tim.GameLaunch.paramOf(d, "appid"));
+            }
+            return digits;
+        } catch (Throwable ignored) {
+        }
+        return "";
+    }
+
     private String appidFrom(String url) {
         String a = com.tencent.tim.TokenStore.appidOfUrl(url);
+        if (a == null || a.isEmpty()) {
+            a = gameAppid;
+        }
         if (a == null || a.isEmpty()) {
             String su = getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", "");
             a = com.tencent.tim.TokenStore.appidOfUrl(su);
@@ -750,6 +815,9 @@ public class AgentActivity extends BaseActivity {
 
     private String getSelectedGameAppid() {
         try {
+            if (gameAppid != null && !gameAppid.isEmpty()) {
+                return gameAppid;
+            }
             String name = getSelectedGameName();
             String a = com.tencent.tim.TokenStore.appidOfGame(name);
             if (a == null || a.isEmpty()) {

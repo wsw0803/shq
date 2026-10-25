@@ -107,8 +107,71 @@ public class LoginDiag {
     };
 
     /**
-     * SDK 关键词。命中即收录，不做白名单判断 —— 这一段的目的就是读 SDK 报错，
-     * 任何「看起来像噪音」的过滤都可能正好滤掉那句 ret=-1。
+     * 强关键词：只认登录管线本身。
+     *
+     * 上一版把 "gcloud" / "login" / "openid" 这种大词当成命中条件，
+     * 结果 6268 行里捞出来的全是 GCloudVoice::Pause、CameraUnitLog、
+     * OplusHansManager 之类的系统噪音，真正能回答「SDK 为什么拒绝这个 token」
+     * 的那几行（tauth / key_response / ret=）一条都没有。
+     *
+     * 所以拆成两层：
+     *   STRONG  —— 命中了就直接放到最前面，这是证据；
+     *   SDK_KEYS —— 只当补充上下文，且必须先过 NOISE 噪声表。
+     */
+    private static final String[] STRONG = {
+            "key_response",
+            "ret=",
+            "errcode",
+            "tauth",
+            "authagent",
+            "assistactivity",
+            "authactivity",
+            "authorityactivity",
+            "onactivityresult",
+            "authorize",
+            "loginmanager",
+            "iuilistener",
+            "pfkey",
+            "pay_token",
+            "usercallback",
+            "msdk_login",
+            "msdksso",
+            "checktoken",
+            "refresh_token",
+            "appid error",
+            "appid不匹配",
+            "signature",
+    };
+
+    /**
+     * 噪声标签：命中即整行丢弃。
+     *
+     * 这些是 ColorOS / GCloud / 相机 HAL 的自嗨日志，跟登录一毛钱关系没有，
+     * 但它们量极大，会把真正的证据挤出保留窗口。
+     */
+    private static final String[] NOISE = {
+            "gcloudvoice",
+            "gcloudcore",
+            "cameraunitlog",
+            "oplus",
+            "remoteanim",
+            "aps core",
+            "aps interface",
+            "locationfreezeproc",
+            "ostatsmanager",
+            "appsenseclient",
+            "hansmanager",
+            "sdhms",
+            "persist.sys.assert",
+            "windowmanager:",
+            "surfaceflinger",
+            "chatty",
+            "choreographer",
+            "freeze uid",
+    };
+
+    /**
+     * SDK 关键词（补充层）。命中即收录，但必须先过 NOISE。
      */
     private static final String[] SDK_KEYS = {
             "msdk",
@@ -118,16 +181,14 @@ public class LoginDiag {
             "authactivity",
             "opensdk",
             "qqauth",
-            "gcloud",
             "itop",
             "com.tencent.tauth",
             "com.tencent.connect",
-            "com.itop.gcloud",
+            "com.tencent.open",
             "key_response",
             "access_token",
             "openid",
             "pay_token",
-            "login",
     };
 
     private static SharedPreferences prefs(Context c) {
@@ -287,9 +348,13 @@ public class LoginDiag {
         sb.append("--- 事件轨迹 ---\n");
         for (String line : snap) sb.append(line).append('\n');
 
-        sb.append("\n--- 腾讯 SDK 日志（原样，未按白名单过滤）---\n");
+        sb.append("\n--- 腾讯 SDK 日志（本进程，未按白名单过滤）---\n");
         String sdk = sdkLog(SDK_RAW);
         sb.append(sdk.isEmpty() ? "(无 root 或抓取失败)\n" : sdk);
+
+        sb.append("\n--- 目标游戏进程日志（关键：SDK 在这里下判决）---\n");
+        String gl = gameLog(c, 4000);
+        sb.append(gl.isEmpty() ? "(无 root 或抓取失败)\n" : gl);
 
         sb.append("\n--- su logcat（白名单筛选）---\n");
         String log = suLogcat(LOGCAT_RAW);
@@ -359,28 +424,41 @@ public class LoginDiag {
     }
 
     /**
-     * 腾讯 SDK 专用：只按关键词收，不做白名单判断。
+     * 腾讯 SDK 专用：强关键词优先，噪声整行丢弃。
      *
      * 这一段的意义是「让 SDK 自己开口」。游戏内登录失败，原因通常写在这里：
      * appid 不匹配、token 无效、签名校验失败、服务端 ret 非 0 ……
+     *
+     * 输出分两段：
+     *   ① 证据行 —— 命中 STRONG，按原顺序保留，这是能直接下判断的；
+     *   ② 上下文 —— 命中 SDK_KEYS 且不是噪音，用来提供时间线。
+     * 命中数量、被丢掉的噪音条数都写进头部，避免再次出现「看着像空的」。
      */
     private static String sdkLog(int maxLines) {
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", "logcat -d -v threadtime -t " + maxLines});
             BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            Map<String, Bucket> kept = new LinkedHashMap<String, Bucket>();
+            Map<String, Bucket> strong = new LinkedHashMap<String, Bucket>();
+            Map<String, Bucket> ctx = new LinkedHashMap<String, Bucket>();
             int raw = 0;
+            int dropped = 0;
             String ln;
             while ((ln = br.readLine()) != null) {
                 raw++;
-                if (!looksLikeSdk(ln)) continue;
                 String body = bodyOf(ln);
                 if (body == null || body.isEmpty()) continue;
                 String line = trim(body);
                 if (line.isEmpty()) continue;
-                Bucket b = kept.get(line);
-                if (b == null) kept.put(line, new Bucket(line));
+                boolean isStrong = isStrong(line);
+                if (!isStrong && isNoise(line)) {
+                    dropped++;
+                    continue;
+                }
+                if (!isStrong && !looksLikeSdk(line)) continue;
+                Map<String, Bucket> into = isStrong ? strong : ctx;
+                Bucket b = into.get(line);
+                if (b == null) into.put(line, new Bucket(line));
                 else b.count++;
             }
             br.close();
@@ -388,24 +466,26 @@ public class LoginDiag {
                 p.waitFor();
             } catch (Exception ignored) {
             }
-            if (kept.isEmpty()) {
-                return "读取 " + raw + " 行，没有命中 SDK 关键词\n"
-                        + "(说明登录流程可能根本没进到 SDK，或 SDK 没打日志)\n";
-            }
-            List<Bucket> list = new ArrayList<Bucket>(kept.values());
-            boolean trimmed = false;
-            if (list.size() > SDK_UNIQUE) {
-                list = new ArrayList<Bucket>(list.subList(list.size() - SDK_UNIQUE, list.size()));
-                trimmed = true;
-            }
+
             StringBuilder sb = new StringBuilder();
-            sb.append("读取 ").append(raw).append(" 行，命中 ").append(kept.size()).append(" 条");
-            if (trimmed) sb.append("，只显示最近 ").append(SDK_UNIQUE).append(" 条");
+            sb.append("读取 ").append(raw).append(" 行，证据 ").append(strong.size())
+                    .append(" 条，上下文 ").append(ctx.size()).append(" 条");
+            if (dropped > 0) sb.append("，已丢弃噪声 ").append(dropped).append(" 行");
             sb.append('\n');
-            for (Bucket b : list) {
-                sb.append(b.text);
-                if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
-                sb.append('\n');
+
+            sb.append("\n[证据行 · 登录管线]\n");
+            if (strong.isEmpty()) {
+                sb.append("(没有命中。说明 SDK 没有走到回调处理 —— ")
+                        .append("token 很可能交给了错误的组件，或 setResult 的 caller 不是 SDK 本身)\n");
+            } else {
+                appendBuckets(sb, new ArrayList<Bucket>(strong.values()), SDK_UNIQUE);
+            }
+
+            sb.append("\n[上下文 · SDK 周边]\n");
+            if (ctx.isEmpty()) {
+                sb.append("(无)\n");
+            } else {
+                appendBuckets(sb, new ArrayList<Bucket>(ctx.values()), SDK_UNIQUE);
             }
             return sb.toString();
         } catch (Exception e) {
@@ -413,6 +493,150 @@ public class LoginDiag {
         } finally {
             if (p != null) p.destroy();
         }
+    }
+
+    private static void appendBuckets(StringBuilder sb, List<Bucket> list, int cap) {
+        boolean trimmed = false;
+        if (list.size() > cap) {
+            list = new ArrayList<Bucket>(list.subList(list.size() - cap, list.size()));
+            trimmed = true;
+        }
+        if (trimmed) sb.append("(只显示最近 ").append(cap).append(" 条)\n");
+        for (Bucket b : list) {
+            sb.append(b.text);
+            if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
+            sb.append('\n');
+        }
+    }
+
+    private static boolean isStrong(String line) {
+        String low = line.toLowerCase(Locale.ROOT);
+        for (String k : STRONG) {
+            if (low.contains(k.toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
+    }
+
+    /** 游戏侧关键词：SDK 的判决写在游戏进程里，不在本进程。 */
+    private static final String[] GAME_KEYS = {
+            "msdk", "itop", "gcloud", "tmgp", "login", "auth", "token",
+            "openid", "appid", "ret =", "ret=", "errorcode", "errcode",
+    };
+
+    /**
+     * 目标游戏进程的日志。
+     *
+     * 这是上一版最大的盲区：token 交回游戏之后，被不被接受、为什么被拒绝，
+     * 全部记录在 com.tencent.tmgp.xxx 自己的进程里。我们一直在读自己的进程，
+     * 所以永远只能看到「已交回」，看不到「交回之后发生了什么」。
+     *
+     * 这里按 pid 直读游戏进程，命中强关键词的视为判决行优先输出。
+     */
+    private static String gameLog(Context c, int maxLines) {
+        String pkg = "";
+        try {
+            String game = c.getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
+                    .getString("selected_game_name", "");
+            pkg = GameLaunch.packageOf(game);
+        } catch (Throwable ignored) {
+        }
+        if (pkg == null || pkg.isEmpty()) {
+            return "(没有选中游戏，跳过)\n";
+        }
+        String pids = runSuCmd("pidof " + pkg).trim();
+        if (pids.isEmpty()) {
+            return "游戏进程不在（" + pkg + "），没有判决可读\n";
+        }
+        String pidArg = pids.replaceAll("\\s+", ",");
+        String dump = runSuCmd("logcat -d -v threadtime -b main,system,crash -t "
+                + maxLines + " --pid=" + pidArg);
+        if (dump == null || dump.isEmpty()) {
+            dump = runSuCmd("logcat -d -v threadtime -t " + maxLines
+                    + " --pid=" + pidArg.split(",")[0]);
+        }
+        Map<String, Bucket> strong = new LinkedHashMap<String, Bucket>();
+        Map<String, Bucket> ctx = new LinkedHashMap<String, Bucket>();
+        int raw = 0;
+        int dropped = 0;
+        if (dump != null) {
+            for (String rawLine : dump.split("\n")) {
+                raw++;
+                String body = bodyOf(rawLine);
+                if (body == null || body.isEmpty()) continue;
+                String line = trim(body);
+                if (line.isEmpty()) continue;
+                boolean s = isStrong(line);
+                if (!s && isNoise(line)) {
+                    dropped++;
+                    continue;
+                }
+                if (!s && !looksLikeGame(line)) continue;
+                Map<String, Bucket> into = s ? strong : ctx;
+                Bucket b = into.get(line);
+                if (b == null) into.put(line, new Bucket(line));
+                else b.count++;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("包名 ").append(pkg).append(" pid=").append(pidArg)
+                .append("，读取 ").append(raw).append(" 行，证据 ").append(strong.size())
+                .append(" 条，上下文 ").append(ctx.size()).append(" 条");
+        if (dropped > 0) sb.append("，丢弃噪声 ").append(dropped).append(" 行");
+        sb.append('\n');
+
+        sb.append("\n[证据行 · SDK 判决]\n");
+        if (strong.isEmpty()) {
+            sb.append("(没有判决行。说明游戏进程根本没回调 SDK 的登录结果 —— ")
+                    .append("token 大概率不是被 AssistActivity 消费，而是被系统丢了)\n");
+        } else {
+            appendBuckets(sb, new ArrayList<Bucket>(strong.values()), 80);
+        }
+        sb.append("\n[上下文 · 游戏侧]\n");
+        if (ctx.isEmpty()) {
+            sb.append("(无)\n");
+        } else {
+            appendBuckets(sb, new ArrayList<Bucket>(ctx.values()), 60);
+        }
+        return sb.toString();
+    }
+
+    private static boolean looksLikeGame(String line) {
+        String low = line.toLowerCase(Locale.ROOT);
+        for (String k : GAME_KEYS) {
+            if (low.contains(k)) return true;
+        }
+        return false;
+    }
+
+    private static String runSuCmd(String cmd) {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String ln;
+            while ((ln = br.readLine()) != null) {
+                sb.append(ln).append('\n');
+            }
+            br.close();
+            try {
+                p.waitFor();
+            } catch (InterruptedException ignored) {
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        } finally {
+            if (p != null) p.destroy();
+        }
+    }
+
+    private static boolean isNoise(String line) {
+        String low = line.toLowerCase(Locale.ROOT);
+        for (String k : NOISE) {
+            if (low.contains(k.toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
     }
 
     private static boolean looksLikeSdk(String line) {

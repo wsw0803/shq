@@ -436,6 +436,16 @@ public class GameLaunch {
         return url.substring(b, e);
     }
 
+    /** 公开版：给 AgentActivity 读 Intent 里的 appid 用。 */
+    public static String paramOf(String url, String key) {
+        return param(url, key);
+    }
+
+    /** 只保留前导数字，不足 5 位视为无效。appid 都是 9~10 位数字。 */
+    public static String digitsOf(String s) {
+        return cleanAppid(s);
+    }
+
     private static String cleanAppid(String s) {
         if (s == null) {
             return "";
@@ -469,7 +479,7 @@ public class GameLaunch {
         sb.append(",\"access_token\":\"").append(at).append('"');
         sb.append(",\"pay_token\":\"").append(param(authUrl, "pay_token")).append('"');
         sb.append(",\"expires_in\":\"").append(exp).append('"');
-        sb.append(",\"pf\":\"desktop_m_qq-10000144-android-2002-\"");
+        sb.append(",\"pf\":\"").append("desktop_m_qq-10000144-android-2002-").append('"');
         sb.append(",\"page_type\":\"1\"}");
         return sb.toString();
     }

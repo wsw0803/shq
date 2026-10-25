@@ -84,14 +84,40 @@
             android:taskAffinity=""
             android:excludeFromRecents="true"
             android:screenOrientation="sensorLandscape">
+            <!--
+                回调入口 A：官方 auth / qq scheme。
+                data 里绝对不能写 android:host —— Android 会把同一个 intent-filter
+                内所有 <data> 的属性合并成集合，一旦写了 host，
+                其他 scheme 就只认那个 host，tencent<appid>://tauth 会被挡在外面。
+            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="auth" />
-                <data android:scheme="tencent" />
                 <data android:scheme="qq" />
-                <data android:host="*" />
+                <data android:scheme="tencent" />
+            </intent-filter>
+
+            <!--
+                回调入口 B：真正的 QQ 登录回调是 tencent<appid>://tauth。
+                它的 scheme 是 "tencent1110543085" 整串，不是 "tencent"，
+                旧的 scheme="tencent" + host="*" 永远匹配不到 ——
+                这是「回调根本没进 AgentActivity」的根因。
+
+                Android 的 scheme 不支持通配符，只能按 appid 逐条列。
+                新增游戏时在这里补一行。单独一个 filter，避免污染入口 A。
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tencent1104466820" />
+                <data android:scheme="tencent1110543085" />
+                <data android:scheme="tencent1106579570" />
+                <data android:scheme="tencent1105207630" />
+                <data android:scheme="tencent1105818161" />
+                <data android:scheme="tencent1104930057" />
             </intent-filter>
         </activity>
 
