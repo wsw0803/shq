@@ -479,20 +479,46 @@ public class AgentActivity extends BaseActivity {
         final String chosenAppid = getSelectedGameAppid();
         final String mode = currentMode != null ? currentMode : "capture";
 
-        JSONObject json = new JSONObject();
-        try {
-            json.put("access_token", accessToken);
-            json.put("openid", openId);
-            json.put("pay_token", payToken);
-            json.put("expires_in", expiresIn == null || expiresIn.isEmpty() ? "7776000" : expiresIn);
-            json.put("ret", "0");
-            json.put("pf", "desktop_m_qq-10000144-android-2002-");
-            json.put("page_type", "1");
-        } catch (Throwable e) {
-            LoginDiag.add("ERR", "JSON: " + e);
-            Toast.makeText(this, "JSON处理错误", Toast.LENGTH_SHORT).show();
-            return;
+        /*
+         * 2026-10-25 第十四次修订（三角洲）。
+         *
+         * 上一版这里是手写死的 7 个字段：access_token / openid / pay_token /
+         * expires_in / ret / pf / page_type，正好拼出 len234 的 key_response。
+         *
+         * 但原始回包有 10 个字段（日志里「字段清单」写得清清楚楚）：
+         *   access_token expires_in openid pay_token ret pf pfkey auth_time
+         *   page_type appid
+         * 手工拼装把 pfkey / auth_time / appid 三个字段丢掉了。
+         * 三角洲的 MSDK 在 checkToken 时逐字段比对，少一个就判「响应不完整」，
+         * 表现正是：setResult 成功、AssistActivity 正常走完、游戏也回来了，
+         * 但就是不登录。
+         *
+         * GameLaunch.keyResponse() 本来就是「原样铺开全部字段」的实现，
+         * 之前只在 amStart 的兜底分支里用过，这条 setResult 主链路绕过了它。
+         * 现在两条链路共用同一份 JSON，字段不再有任何损耗。
+         */
+        String keyResponseJson = com.tencent.tim.GameLaunch.keyResponse(saved);
+        if (keyResponseJson == null || keyResponseJson.isEmpty()) {
+            LoginDiag.add("ERR", "keyResponse 为空，退回手工拼装");
+            JSONObject fallback = new JSONObject();
+            try {
+                fallback.put("access_token", accessToken);
+                fallback.put("openid", openId);
+                fallback.put("pay_token", payToken);
+                fallback.put("expires_in", expiresIn == null || expiresIn.isEmpty() ? "7776000" : expiresIn);
+                fallback.put("ret", "0");
+                fallback.put("pf", "desktop_m_qq-10000144-android-2002-");
+                fallback.put("page_type", "1");
+            } catch (Throwable e) {
+                LoginDiag.add("ERR", "JSON: " + e);
+                Toast.makeText(this, "JSON处理错误", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            keyResponseJson = fallback.toString();
         }
+        LoginDiag.add("PARSE", "key_response 字段数="
+                + com.tencent.tim.GameLaunch.params(saved).size()
+                + " len=" + keyResponseJson.length());
 
         saveRawDataToPreferences(saved);
 
@@ -503,7 +529,7 @@ public class AgentActivity extends BaseActivity {
                 + " mode=" + mode);
 
         Intent resultIntent = new Intent();
-        resultIntent.putExtra("key_response", json.toString());
+        resultIntent.putExtra("key_response", keyResponseJson);
         resultIntent.putExtra("auth", saved);
         /*
          * 关键补齐：把 auth URI 同时设成 Intent 的 data。
@@ -542,7 +568,7 @@ public class AgentActivity extends BaseActivity {
 
         LoginDiag.add("RETURN", "resultIntent: data="
                 + (dataUri.isEmpty() ? "空" : "len" + dataUri.length())
-                + " extras=[key_response len" + json.toString().length()
+                + " extras=[key_response len" + keyResponseJson.length()
                 + ", auth len" + (saved == null ? 0 : saved.length())
                 + "] resultCode=RESULT_OK 字段=" + keyWithLen(saved));
 
