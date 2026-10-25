@@ -38,15 +38,15 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # v4 修掉了 v3 在 Gradle 9 下的缓存保存失败问题
-      # （之前报「未能保存路径 /home/runner/.gradle/caches/transforms-4/*」等）
+      # v6 起迁到 node24（v4 仍跑在 node20 上，正是剩下的那条弃用告警）
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
-          # 构建缓存写入；Gradle Home 缓存只在没有可用条目时写，减少无谓上传
+          # 构建缓存写入
           cache-read-only: false
-          # 自动清理无用条目，避免缓存无限膨胀导致保存被拒
-          gradle-home-cache-cleanup: true
+          # 参数已改名：旧名 gradle-home-cache-cleanup 在 v4 起被弃用，
+          # 现在叫 cache-cleanup（就是摘要里那条「已弃用的功能」）
+          cache-cleanup: on-success
           # 缓存内容真的变了才覆盖，避免每次 run 都重传几十 MB
           cache-overwrite-existing: true
 
@@ -102,7 +102,7 @@ jobs:
           cp app/build/outputs/apk/release/*.apk out/shq-${{ steps.version.outputs.vName }}.apk
 
       - name: Publish APK to Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.vName }}
           name: shq v${{ steps.version.outputs.vName }}
