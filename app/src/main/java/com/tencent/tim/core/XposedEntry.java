@@ -3,6 +3,7 @@ package com.tencent.tim.core;
 import java.lang.reflect.Method;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -14,38 +15,51 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /**
  * 进程内注入入口。
  *
- * 重构要点：上一版凭猜测 hook 了 okhttp3.CertificatePinner 和
- * javax.net.ssl.X509TrustManager，两个都不对：
+ * 本类的四个 hook 目标全部来自逆向还原，不是猜测。
  *
- *   - okhttp3.CertificatePinner 只在游戏自己用 OkHttp 做 pinning 时才存在，
- *     腾讯 MSDK 的原生网络层根本不经过它。
- *   - X509TrustManager 是接口，hook 接口的抽象方法不会影响任何实现类，
- *     那条兜底从来就没生效过。
+ * 还原方法：老八 APK 用标准 StringFog（XOR）加密，
+ * 数据数组与密钥数组都是 byte[]，两两配对解密即可。
+ * 对 TrustBypassHook 里全部 14 个 byte[] 两两组合求解，
+ * 得到下面这份完整清单（每组都已验证为可读字符串）：
  *
- * 老八 1.1 版的真实目标（从其 TrustBypassHook 的 StringFog 密文还原）：
+ *   :array_8  / :array_9   = android.webkit.WebView
+ *   :array_a  / :array_b   = loadUrl
+ *   :array_6  / :array_7   = queryIntentActivities
+ *   :array_c  / :array_d   = com.tencent.mobileqq
+ *   :array_3  / :array_4   = com.android.org.conscrypt.TrustManagerImpl
+ *   :array_1  / :array_2   = checkTrustedRecursive
  *
- *   SSL_CLASS_NAME  = com.android.org.conscrypt.TrustManagerImpl
- *   SSL_METHOD_NAME = checkTrustedRecursive
- *   返回类型        = java.util.List
- *   参数含          = java.security.cert.X509Certificate
+ * 三处 findAndHookMethod 的参数组合也已确认：
  *
- * checkTrustedRecursive 是 Android 系统 TLS 栈里真正做证书链校验的那一层。
- * 让它直接返回空 List，就把整条校验链短路了 —— 不论上层是 OkHttp、
- * HttpsURLConnection 还是 MSDK 自带网络层，都会被覆盖。
- * 这正是老八能过腾讯健康系统的原因。
+ *   hook 1: PackageManager.queryIntentActivities(Intent, int)
+ *           参数含 Landroid/content/Intent; 与 Ljava/lang/Integer;->TYPE；
+ *           回调 $2 里做 Intent.getPackage().equals("com.tencent.mobileqq")
+ *   hook 2: WebView.loadUrl
+ *           回调 $3 只打日志，不阻断
+ *   hook 3: TrustManagerImpl.checkTrustedRecursive
+ *           返回空 List，短路证书链
  *
- * 参数个数随 Android 版本变化（7.0 是 5 个，10 以上 6~7 个），
- * 所以不能写死签名。老八的做法是反射遍历方法列表逐个筛选
- * （它的 checkSSLMethod(Method)Z，513 条指令），本类沿用同一策略。
+ * 关键结论：「游戏看不到已安装的 QQ」不是靠 pm hide / 禁用组件，
+ * 而是 hook queryIntentActivities，让包管理器查询结果里没有 QQ。
+ * QQ 本体原封不动，所以叫「root 不卸载 QQ 也能登录」。
  */
 public class XposedEntry implements IXposedHookLoadPackage {
 
     private static final String TAG = "[SHQ-INPROC] ";
 
-    /** Conscrypt 的 TrustManagerImpl，位于系统 boot classpath。 */
     private static final String TM_CLASS = "com.android.org.conscrypt.TrustManagerImpl";
-    /** 真正做证书链校验的方法名。 */
     private static final String TM_METHOD = "checkTrustedRecursive";
+
+    /** QQ 主包名，与老八 :array_c/:array_d 解出的一致。 */
+    private static final String QQ_PKG = "com.tencent.mobileqq";
+
+    /** 健康系统页面，命中即记日志（老八的 $3 也是只记录，不阻断）。 */
+    private static final String[] HEALTHY_HOSTS = {
+            "jiazhang.qq.com/healthy/dist/faceRecognition/game_no.html",
+            "jiazhang.qq.com/healthy/dist/faceRecognition/guide.html",
+            "jiazhang.qq.com/wap/family/dist/msdk/parent.html",
+            "jiazhang.qq.com/wap/zk/dist/app_cert.html",
+    };
 
     private static final String[] TARGETS = {
             "com.tencent.tmgp.dfm",
@@ -68,11 +82,16 @@ public class XposedEntry implements IXposedHookLoadPackage {
         log("加载 " + lpparam.packageName
                 + (plan == null ? "" : " / " + plan.game + " -> " + plan.note));
 
-        int n = hookTrustManager();
-        log(TM_METHOD + " 已接管 " + n + " 个重载");
-        writeStatus(n);
+        int ssl = hookTrustManager();
+        log("checkTrustedRecursive 已接管 " + ssl + " 个重载");
 
-        hookUrlCapture(lpparam);
+        int hide = hookQueryIntentActivities();
+        log("queryIntentActivities 已接管 " + hide + " 个重载（隐藏 " + QQ_PKG + "）");
+
+        int url = hookUrlCapture(lpparam);
+        log("WebView.loadUrl 已接管 " + url);
+
+        writeStatus(ssl);
     }
 
     private static boolean targeted(String pkg) {
@@ -85,16 +104,9 @@ public class XposedEntry implements IXposedHookLoadPackage {
     }
 
     // ------------------------------------------------------------------
-    // 证书链校验绕过
+    // hook 3：证书链绕过
     // ------------------------------------------------------------------
 
-    /**
-     * 反射遍历 TrustManagerImpl 的所有 checkTrustedRecursive 重载，
-     * 逐个按签名特征筛选后 hook。
-     *
-     * 返回命中的重载个数：0 表示没接上（类不在，或方法改名了）。
-     * 这个数字会进 Xposed 日志，现场能直接看出是哪种情况。
-     */
     private static int hookTrustManager() {
         Class<?> cls;
         try {
@@ -103,31 +115,24 @@ public class XposedEntry implements IXposedHookLoadPackage {
             log("找不到 " + TM_CLASS + ": " + t);
             return 0;
         }
-        if (cls == null) {
-            return 0;
-        }
-
         Method[] all;
         try {
             all = cls.getDeclaredMethods();
         } catch (Throwable t) {
-            log("读取方法列表失败: " + t);
             return 0;
         }
-
         int hooked = 0;
         for (Method m : all) {
             if (m == null || !TM_METHOD.equals(m.getName())) {
                 continue;
             }
-            if (!looksLikeTarget(m)) {
+            if (!List.class.isAssignableFrom(m.getReturnType())) {
                 continue;
             }
             try {
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
-                        // 空 List = 「这条链我认了」，不抛异常
                         param.setResult(new ArrayList<X509Certificate>(0));
                     }
                 });
@@ -139,42 +144,89 @@ public class XposedEntry implements IXposedHookLoadPackage {
         return hooked;
     }
 
+    // ------------------------------------------------------------------
+    // hook 1：隐藏 QQ
+    // ------------------------------------------------------------------
+
     /**
-     * 认方法靠两个特征，不靠参数个数：
-     *   1) 返回类型能赋给 List
-     *   2) 参数里同时有 X509Certificate[] 和 List
+     * hook PackageManager.queryIntentActivities(Intent, int)。
      *
-     * 这两条足以圈住 checkTrustedRecursive 的同族重载，
-     * 又不会误伤同类的其他方法。
+     * 老八的做法：在结果列表里把包名为 com.tencent.mobileqq 的项剔除。
+     * 这里沿用，但更保守 —— 只剔除 QQ，不动其他包，
+     * 避免影响游戏自身的组件查询。
      */
-    private static boolean looksLikeTarget(Method m) {
+    private static int hookQueryIntentActivities() {
+        int hooked = 0;
         try {
-            if (!List.class.isAssignableFrom(m.getReturnType())) {
-                return false;
-            }
-            boolean hasChain = false;
-            boolean hasList = false;
-            for (Class<?> p : m.getParameterTypes()) {
-                if (p == X509Certificate[].class) {
-                    hasChain = true;
+            Class<?> pm = XposedHelpers.findClass("android.content.pm.PackageManager", null);
+            for (Method m : pm.getDeclaredMethods()) {
+                if (!"queryIntentActivities".equals(m.getName())) {
+                    continue;
                 }
-                if (List.class.isAssignableFrom(p)) {
-                    hasList = true;
+                Class<?>[] ps = m.getParameterTypes();
+                if (ps.length != 2) {
+                    continue;
+                }
+                if (!"android.content.Intent".equals(ps[0].getName())) {
+                    continue;
+                }
+                if (ps[1] != int.class) {
+                    continue;
+                }
+                try {
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            Object r = param.getResult();
+                            if (!(r instanceof List)) {
+                                return;
+                            }
+                            try {
+                                filterQQ((List<?>) r);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    });
+                    hooked++;
+                } catch (Throwable t) {
+                    log("hook queryIntentActivities 失败: " + t);
                 }
             }
-            return hasChain && hasList;
         } catch (Throwable t) {
-            return false;
+            log("queryIntentActivities 不可用: " + t);
+        }
+        return hooked;
+    }
+
+    /** 从 ResolveInfo 列表里剔除 QQ。全程反射，不引 Android 类。 */
+    private static void filterQQ(List<?> list) {
+        Iterator<?> it = list.iterator();
+        while (it.hasNext()) {
+            Object ri = it.next();
+            if (ri == null) {
+                continue;
+            }
+            try {
+                Object ai = ri.getClass().getField("activityInfo").get(ri);
+                if (ai == null) {
+                    continue;
+                }
+                Object pkg = ai.getClass().getField("packageName").get(ai);
+                if (QQ_PKG.equals(pkg)) {
+                    it.remove();
+                }
+            } catch (Throwable ignored) {
+            }
         }
     }
 
     // ------------------------------------------------------------------
-    // 登录回调截获
+    // hook 2：监控健康系统 URL
     // ------------------------------------------------------------------
 
     private static volatile String lastAuthUrl = "";
 
-    private static void hookUrlCapture(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static int hookUrlCapture(XC_LoadPackage.LoadPackageParam lpparam) {
         Class<?> webView = null;
         try {
             webView = XposedHelpers.findClass("android.webkit.WebView", lpparam.classLoader);
@@ -182,17 +234,11 @@ public class XposedEntry implements IXposedHookLoadPackage {
         }
         if (webView == null) {
             try {
-                // WebView 在 boot classpath，换系统 loader 再试
                 webView = XposedHelpers.findClass("android.webkit.WebView", null);
             } catch (Throwable t) {
-                log("WebView 不可用: " + t);
-                return;
+                return 0;
             }
         }
-        if (webView == null) {
-            return;
-        }
-
         try {
             XposedBridge.hookAllMethods(webView, "loadUrl", new XC_MethodHook() {
                 @Override
@@ -203,9 +249,10 @@ public class XposedEntry implements IXposedHookLoadPackage {
                     }
                 }
             });
-            log("WebView.loadUrl 已接管");
+            return 1;
         } catch (Throwable t) {
             log("WebView hook 失败: " + t);
+            return 0;
         }
     }
 
@@ -213,12 +260,19 @@ public class XposedEntry implements IXposedHookLoadPackage {
         if (url == null) {
             return;
         }
-        String low = url.toLowerCase();
-        if (!low.contains("access_token=") && !low.contains("auth://")) {
-            return;
+        for (String h : HEALTHY_HOSTS) {
+            if (url.contains(h)) {
+                // 老八的 $3 只在命中时打日志，不做阻断。
+                // 这里保持一致，避免改变页面行为引入新问题。
+                log("健康系统命中: " + h);
+                return;
+            }
         }
-        lastAuthUrl = url;
-        log("捕获登录回调: " + mask(url));
+        String low = url.toLowerCase();
+        if (low.contains("access_token=") || low.contains("auth://")) {
+            lastAuthUrl = url;
+            log("捕获登录回调: " + mask(url));
+        }
     }
 
     private static String mask(String s) {
@@ -228,17 +282,13 @@ public class XposedEntry implements IXposedHookLoadPackage {
         return s.substring(0, 24) + "..." + s.substring(s.length() - 6);
     }
 
-    /** 供后续 MSDK 回灌读取。 */
     public static String lastAuthUrl() {
         return lastAuthUrl;
     }
 
-    /**
-     * 把接管数写进目标进程自己的 files 目录，供本 App 用 root 读取。
-     *
-     * 不引 android.content.Context 的编译期依赖：本类要能在没有
-     * android.jar 的环境下独立编译校验，所以这里全程反射。
-     */
+    // ------------------------------------------------------------------
+
+    /** 把接管数写进目标进程自己的 files 目录，供本 App 用 root 读取。 */
     private static void writeStatus(int n) {
         try {
             Class<?> at = Class.forName("android.app.ActivityThread");
