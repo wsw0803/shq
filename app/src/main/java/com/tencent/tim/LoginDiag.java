@@ -14,31 +14,27 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.Locale;
 
 /**
  * 诊断日志。
  *
  * 设计：开关控制，关闭时自动落盘，时间戳命名，不进内存累积。
  *
- * 本次修改（2026-10-25）：
+ * logcat 的筛选思路（2026-10-25 第二次修订）：
  *
- * 1) 文件名的时间只到分钟。
- *    原来用 yyyyMMdd_HHmmss，同一分钟内保存两次会生成两个几乎同名的文件，很乱。
- *    现在用 yyyyMMdd_HHmm，同分钟内再保存则退化为 _2、_3 后缀。
+ * 上一版用「黑名单 + 出现 error/fail 就保留」的宽容规则，结果翻车了：
+ * ColorOS 上满屏都是 PERFHAL 的 "Failed to reset optimization"、
+ * SchedAssist 的 "ioctl failed"、gameoptHal 的 "set isolate cpus failed"、
+ * lowmemorykiller 的 "device has enough memory ... disable killing"。
+ * 这些行都带 failed / error，于是全被当成有用信息保留，
+ * 而真正该看的 "START u0 {cmp=com.tencent.tmgp.dfm/...}" 反被挤进 120 条上限之外。
  *
- * 2) logcat 段落不再刷满时间戳。
- *    原来的过滤条件里有 com.tencent.tim，于是 WindowManager、ActivityTaskManager、
- *    OplusQs、OStatsManager 这些每秒几十条的系统噪声全被收进来，
- *    而且每条都带着 "10-25 16:51:32.620  4358  5210 D" 这样的前缀，
- *    真正有用的几行被埋掉。
- *    现在：按 message 黑名单剔掉已知噪声；去掉日期、pid/tid、毫秒，只保留本地时刻；
- *    相同内容合并成一行并标注次数；超出上限时保留最近的若干条。
- *
- * 3) 事件轨迹的格式不变（HH:mm:ss.SSS [TAG]），那是排查的主线，不需要压缩。
+ * 现在改成白名单：只有命中 KEEP 里的明确模式才保留，其余一律丢弃。
+ * logcat 段落的目标不是「尽量多」，而是「一眼看出 app 到底做了什么」。
  */
 public class LoginDiag {
 
@@ -51,10 +47,10 @@ public class LoginDiag {
     private static final int MAX_EVENTS = 600;
 
     /** logcat 取多少行原始日志来筛。 */
-    private static final int LOGCAT_RAW = 1200;
+    private static final int LOGCAT_RAW = 2000;
 
     /** 合并去重之后最多保留多少条，超了只留最近的。 */
-    private static final int LOGCAT_UNIQUE = 120;
+    private static final int LOGCAT_UNIQUE = 80;
 
     private static final List<String> events = new ArrayList<String>();
     private static long startedAt = 0L;
@@ -70,68 +66,33 @@ public class LoginDiag {
             "^\\d{2}-\\d{2}\\s+(\\d{2}:\\d{2}:\\d{2})\\.\\d{3}\\s+\\d+\\s+\\d+\\s+[VDIWEFA]\\s+");
 
     /**
-     * 已知无用的噪声。这些是 ColorOS / 一加 的系统埋点与窗口刷新日志，
-     * 每次都会刷几十上百条，留着只会把有用的行挤掉。
+     * 白名单：命中任意一条才保留。
+     *
+     * 选的都是「能说明 app 干了什么」的行：组件启动、结果交付、权限拒绝、
+     * 崩溃、WebView 与 xray 的异常。系统埋点、功耗统计、调频日志一概不要。
      */
-    private static final String[] NOISE = {
-            "isLandscapeFullscreenEnabled",
-            "NFW_findFocusedWindowIfNeeded",
-            "OplusScrollToTopManager",
-            "InputDispatcherExtImpl",
-            "QuickBackInputPolicy",
-            "OplusQs",
-            "OStatsManager",
-            "OplusBatteryStatsManager",
-            "AudioFlingerExtImpl",
-            "OCAM_BreakpadMaster",
-            "AppSenseClient",
-            "AppSenseService",
-            "handleSenseEvent",
-            "notifyAppEvent",
-            "notifyAppChanges",
-            "notifySenseEvent",
-            "notifyActivityQuery",
-            "Subsys-ScoreAppManager",
-            "CellMap",
-            "QoeMapService",
-            "SceneService",
-            "ExtremeCommService",
-            "AtomHighLoadSenseInfo",
-            "FrontAppsEvent",
-            "NhsAppSenseListener",
-            "NAS-DataSceneEvent",
-            "ConferenceScene",
-            "EstManager",
-            "ActivityAdapter",
-            "OPlusFrontAppManager",
-            "HeapTask",
-            "no_need_print",
-            "useAdapterResult",
-            "decide -->>",
-    };
-
-    /** 出现这些字样一律保留，哪怕命中噪声黑名单之外的判断。 */
-    private static final String[] IMPORTANT = {
-            "AndroidRuntime",
-            "FATAL",
-            "ANR in",
-            "SIGSEGV",
+    private static final String[] KEEP = {
+            "START u0",              // 组件启动（含 am start / startActivity）
+            "Displayed ",           // 首次显示耗时，能确认游戏真的起来了
+            "Force finishing",
             "Force stopping",
-            "Force finish",
-            "lowmemorykiller",
-            "am_kill",
             "ActivityNotFoundException",
-            "does not exist",
+            "does not exist",        // am start -n 打到不存在的组件
             "Unable to resolve",
             "Unable to start",
             "Permission Denial",
-            "START u0",
-            "Start proc",
-            "Displayed ",
-            "CompatibilityInfo",
+            "not exported",
+            "ANR in",
+            "FATAL EXCEPTION",
+            "AndroidRuntime",
+            "am_kill",
+            "Process ",              // Process xxx has died / Start proc
             "WebView",
             "chromium",
             "xray",
+            "Tencent",               // 腾讯 SDK 自身的日志
+            "tauth",
+            "auth://",
     };
 
     private static SharedPreferences prefs(Context c) {
@@ -252,7 +213,7 @@ public class LoginDiag {
     }
 
     /**
-     * 生成日志文件。因为文件名只到分钟，同一分钟内可能撞名，
+     * 生成日志文件。文件名只到分钟，同一分钟内可能撞名，
      * 这里补 _2、_3 后缀，不覆盖已有文件。
      */
     private static File newLogFile(Context c, long stampMs) {
@@ -298,7 +259,7 @@ public class LoginDiag {
         sb.append("事件数: ").append(snap.size()).append("\n\n");
         sb.append("--- 事件轨迹 ---\n");
         for (String line : snap) sb.append(line).append('\n');
-        sb.append("\n--- su logcat（已合并重复行，只保留时刻）---\n");
+        sb.append("\n--- su logcat（白名单筛选，重复行合并）---\n");
         String log = suLogcat(LOGCAT_RAW);
         sb.append(log.isEmpty() ? "(无 root 或抓取失败)\n" : log);
         FileOutputStream fos = null;
@@ -336,7 +297,7 @@ public class LoginDiag {
         String text = sb.toString();
         try {
             android.content.ClipboardManager cm =
-                    (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
+                    (android.content.ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE);
             cm.setPrimaryClip(android.content.ClipData.newPlainText("diag", text));
         } catch (Throwable ignored) {
         }
@@ -366,13 +327,10 @@ public class LoginDiag {
     }
 
     /**
-     * 取 logcat 并压缩。
+     * 取 logcat 并按白名单压缩。
      *
-     * 处理三步：
-     *   1) 按 message 黑名单剔掉系统埋点噪声（重要字样例外，一定保留）；
-     *   2) 去掉日期、pid/tid、毫秒，只留 HH:mm:ss；
-     *   3) 内容相同的行合并，标注出现次数。
-     * 条目超过上限时保留最近的若干条 —— 出问题总在最后。
+     * 三步：白名单筛选 → 只留 HH:mm:ss → 相同内容合并并标次数。
+     * 条目超上限时保留最近的若干条，出问题总在最后。
      */
     private static String suLogcat(int maxLines) {
         Process p = null;
@@ -412,12 +370,16 @@ public class LoginDiag {
                 trimmed = true;
             }
             StringBuilder sb = new StringBuilder();
-            sb.append("读取 ").append(raw).append(" 行，丢弃噪声 ").append(dropped)
-                    .append(" 行，合并为 ").append(merged.size()).append(" 条");
+            sb.append("读取 ").append(raw).append(" 行，筛掉 ").append(dropped)
+                    .append(" 行，保留 ").append(merged.size()).append(" 条");
             if (trimmed) {
-                sb.append("，只保留最近 ").append(LOGCAT_UNIQUE).append(" 条");
+                sb.append("，只显示最近 ").append(LOGCAT_UNIQUE).append(" 条");
             }
             sb.append('\n');
+            if (list.isEmpty()) {
+                sb.append("(这段时间内没有组件启动、崩溃或权限相关记录)\n");
+                return sb.toString();
+            }
             for (Bucket b : list) {
                 sb.append(b.time).append(' ').append(b.text);
                 if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
@@ -448,6 +410,10 @@ public class LoginDiag {
 
     /**
      * 归一化成 "Tag: msg"。返回 null 表示这行不要。
+     *
+     * 只做白名单判断：命中 KEEP 任意一条才留下。
+     * 上一版那条「包含 error / fail 就保留」的规则必须删掉 ——
+     * ColorOS 上大量无害的 failed 会顺着它全爬进来。
      */
     private static String compact(String line) {
         if (line == null) return null;
@@ -465,25 +431,29 @@ public class LoginDiag {
         s = s.trim();
         if (s.isEmpty()) return null;
 
-        boolean important = false;
-        for (String k : IMPORTANT) {
+        boolean keep = false;
+        for (String k : KEEP) {
             if (s.contains(k)) {
-                important = true;
+                keep = true;
                 break;
             }
         }
-        if (!important) {
-            for (String n : NOISE) {
-                if (s.contains(n)) return null;
+        if (!keep) return null;
+
+        // "Process" 太宽，只留死亡与启动两类，避免普通业务日志混进来
+        if (s.contains("Process ") && !s.contains("has died") && !s.contains("Start proc")
+                && !s.contains("was killed")) {
+            boolean other = false;
+            for (String k : KEEP) {
+                if (!"Process ".equals(k) && s.contains(k)) {
+                    other = true;
+                    break;
+                }
             }
-            String low = s.toLowerCase(Locale.ROOT);
-            if (!low.contains("com.tencent.tim") && !low.contains("dfm")
-                    && !low.contains("shq") && !low.contains("error")
-                    && !low.contains("fail") && !low.contains("exception")) {
-                return null;
-            }
+            if (!other) return null;
         }
-        if (s.length() > 260) s = s.substring(0, 260) + "...";
+
+        if (s.length() > 240) s = s.substring(0, 240) + "...";
         return s;
     }
 
