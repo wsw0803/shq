@@ -597,6 +597,16 @@ public class LoginDiag {
         if (pids.isEmpty()) {
             return "游戏进程不在（" + pkg + "），没有判决可读\n";
         }
+        /*
+         * logcat 的 --pid 只接受一个 pid，或者用 -P 传 pid 列表。
+         * 上一版把 "19361 22454" 转成 "19361,22454" 塞进 --pid=，
+         * 那个逗号语法是无效的 —— logcat 直接报错退出，
+         * 于是「读取 1 行，证据 0 条」，看起来像游戏什么都没打。
+         *
+         * 现在按 pid 逐个读，再合并。三角洲会起多个进程，
+         * 每个都要读，不能只挑一个。
+         */
+        String[] pidList = pids.split("\\s+");
         String pidArg = pids.replaceAll("\\s+", ",");
 
         // 时间锚点：诊断开始前 30 秒，覆盖登录页打开的那一刻
@@ -609,20 +619,24 @@ public class LoginDiag {
                 .format(new Date(anchor));
 
         StringBuilder dumpSb = new StringBuilder();
-        // 按时间读，不用 -t。多缓冲区各读一次，crash 里的堆栈也要。
         String[] bufs = {"main", "system", "crash", "events"};
-        int raw = 0;
         for (String b : bufs) {
-            String part = runSuCmd("logcat -d -v threadtime -b " + b
-                    + " -T '" + since + "' --pid=" + pidArg);
-            if (part != null && !part.isEmpty()) {
-                dumpSb.append(part);
+            for (String one : pidList) {
+                if (one.isEmpty()) {
+                    continue;
+                }
+                String part = runSuCmd("logcat -d -v threadtime -b " + b
+                        + " -T '" + since + "' --pid=" + one);
+                if (part != null && !part.isEmpty()) {
+                    dumpSb.append(part);
+                }
             }
         }
         String dump = dumpSb.toString();
 
         Map<String, Bucket> strong = new LinkedHashMap<String, Bucket>();
         Map<String, Bucket> ctx = new LinkedHashMap<String, Bucket>();
+        int raw = 0;
         int dropped = 0;
         if (dump != null) {
             for (String rawLine : dump.split("\n")) {
@@ -687,17 +701,10 @@ public class LoginDiag {
         // 说明按时间读的窗口没覆盖到 SDK 打日志的那一刻。
         // 这一段不带 -T，改按 tag 白名单 + 较大 tail，专捞 openSDK / MSDK。
         sb.append("\n[SDK 全量 · 按 tag，不受时间窗限制]\n");
-        sb.append(sdkByTag(pidArg));
+        sb.append(sdkByTag(pidArg, pidList));
         return sb.toString();
     }
 
-    /**
-     * 按 tag 直接抓 SDK 日志，不用时间窗。
-     *
-     * QQ 互联 / MSDK 的日志 tag 是固定几个：openSDK_LOG、tauth、MSDK、
-     * MSDKCallback、Tencent、QQAuth。用 | 拼成正则一次抓完。
-     * 不设 -T，抓最近的；不设 -t 上限太大也没意义，用 2000 行做 tail。
-     */
     /**
      * SDK tag 全量抓取。
      *
@@ -711,19 +718,36 @@ public class LoginDiag {
      * 正确做法：logcat 只管把最近的日志吐出来，tag 匹配放在 Java 侧做。
      * 这样既不受 -s 语义限制，也不受 --pid 与 -s 联用时的版本差异影响。
      */
-    private static String sdkByTag(String pidArg) {
+    private static String sdkByTag(String pidArg, String[] pidList) {
         String[] tags = {
                 "openSDK_LOG", "openSDK", "tauth", "TAuth", "MSDK", "MSDKCallback",
                 "QQAuth", "AuthAgent", "AuthAgentActivity", "Tencent",
                 "AssistActivity", "UserInfo", "QQToken",
         };
-        // 先按 pid 抓；抓不到再退到全量，随后在 Java 侧双重过滤
-        String out = runSuCmd("logcat -d -v threadtime -b main,system,events -t 6000 --pid="
-                + pidArg);
-        String scope = "pid=" + pidArg;
-        if (out == null || out.trim().isEmpty()) {
-            out = runSuCmd("logcat -d -v threadtime -b main,system,events -t 6000");
-            scope = "全量";
+        /*
+         * 按 pid 逐个读，不能用 "pid1,pid2" 这种逗号语法 ——
+         * logcat 的 --pid 只认单个 pid，逗号会让它整个报错退出，
+         * 结果就是「读取 1 行」。上一轮 gameLog 段为空就是这个原因。
+         *
+         * 游戏进程不止一个，每个都要读。
+         */
+        StringBuilder all = new StringBuilder();
+        int okReads = 0;
+        for (String one : pidList) {
+            if (one == null || one.isEmpty()) {
+                continue;
+            }
+            String part = runSuCmd("logcat -d -v threadtime -b main,system,events -t 3000 --pid=" + one);
+            if (part != null && !part.trim().isEmpty()) {
+                all.append(part);
+                okReads++;
+            }
+        }
+        String out = all.toString();
+        String scope = "pid=" + pidArg + "（" + okReads + "/" + pidList.length + " 个进程读到）";
+        if (out.trim().isEmpty()) {
+            out = runSuCmd("logcat -d -v threadtime -b main,system,events -t 8000");
+            scope = "全量（按 pid 读全是空，退到全量）";
         }
 
         Map<String, Bucket> kept = new LinkedHashMap<String, Bucket>();
