@@ -37,25 +37,32 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 上号模式（2026-10-25 第五次修订）：
+ * 上号模式（2026-10-25 第六次修订）。
  *
- * 上一版把「游戏被唤到前台」当成了「token 已交给游戏」：
+ * 上一版的黑屏，根因是两个错误叠在一起：
  *
- *   [DISPATCH] B 主界面 com.epicgames.ue4.SplashActivity -> LaunchState: WARM
- *   [DISPATCH] 前台: com.tencent.tmgp.dfm/com.epicgames.ue4.GameActivity ✓
- *   [DISPATCH] B auth 已随 Intent 送进游戏主界面
+ * 1) 有真实回传通道，却去启动了游戏的内部界面。
  *
- * 三角洲本来就在后台活着，SplashActivity 只是把它带回前台，
- * 根本没读我们塞的 token。这句话是假的，会让人以为成功了。
+ *    getCallingActivity = com.tencent.tmgp.dfm/com.tencent.connect.common.AssistActivity
  *
- * 现在 GameLaunch 返回三态（NONE / WOKE / LANDED），本页按真实成色提示：
+ *    AssistActivity 是 QQ SDK 里收结果、回调 IUiListener 的组件，它确实在
+ *    startActivityForResult 等我们。这种情况下正确做法只有一个：setResult 后
+ *    立刻 finish，一个多余界面都别启动。
+ *    结果代码去 began 了 MSDK 的 WebViewActivity —— 那是「内部页」，
+ *    靠 Intent 里的 url / title 参数渲染，我们给不出，它起来就
+ *    destroySurface 退出，留下空任务栈 → 黑屏。
  *
- *   LANDED → 「已交给 X，请看游戏」（组件收下且停在游戏内）
- *   WOKE   → 「已把 X 唤到前台，但 token 可能未被读取」+ 复制到剪贴板
- *   NONE   → 「交付失败，auth 已复制到剪贴板」
+ * 2) 「收下并停在前台」被当成了成功，没有区分「稳住」和「一闪而过」。
  *
- * setResult 仍然照发：真有回传通道时它是白送的机会。
- * 但 getCallingActivity 非空不代表对方在等结果，绝不再凭它跳过派发。
+ * 现在的规则：
+ *
+ *   有真实回传通道 → 只 setResult + finish，绝不碰游戏内部界面。
+ *   （真实通道的判定：调用方是游戏包名，且落在 AssistActivity /
+ *    AuthActivity / AuthorityActivity 这类回调组件上。）
+ *
+ *   没有真实通道 → 才交给 GameLaunch 兜底，而它现在也只试回调组件，
+ *    内部 UI 页（webview / wechat / pay / splash ...）一律排除，
+ *    并且落地后要再等一会儿确认前台稳住，避免再黑屏。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -74,7 +81,6 @@ public class AgentActivity extends BaseActivity {
     private Window mWindow;
     private String callerPackage = "";
     private boolean launchedExternally = false;
-    /** 正在派发，避免连点重复派发。 */
     private boolean dispatching = false;
 
     @Override
@@ -144,7 +150,8 @@ public class AgentActivity extends BaseActivity {
                 + " 外部唤起=" + launchedExternally
                 + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
                 + " 带token=" + (incoming != null)
-                + " getCallingActivity=" + (callingActivityName() == null ? "null" : callingActivityName()));
+                + " getCallingActivity=" + (callingActivityName() == null ? "null" : callingActivityName())
+                + " 真实回传通道=" + (hasRealChannel() ? "有" : "无"));
 
         if ("login".equals(currentMode)) {
             setupLoginMode();
@@ -495,15 +502,28 @@ public class AgentActivity extends BaseActivity {
                 + " 一致=" + appid.equals(chosenAppid)
                 + " mode=" + mode);
 
-        // setResult 照发：真有回传通道时是零成本的机会，
-        // 但 getCallingActivity 非空不代表对方在等，绝不再凭它跳过派发。
         Intent resultIntent = new Intent();
         resultIntent.putExtra("key_response", json.toString());
+        // QQ SDK 的 AssistActivity 会优先读 key_response，也兼容 auth 字段
+        resultIntent.putExtra("auth", saved);
         setResult(RESULT_OK, resultIntent);
 
         if (!"login".equals(mode)) {
             saveAccountToFile(saved, appid, mode);
             finishLater(1200);
+            return;
+        }
+
+        // ---- 上号模式 ----
+        //
+        // 先判断真实回传通道，有就直接交回去，绝不启动游戏内部界面。
+        // 上一版的 WebViewActivity 就是这么把屏幕搞黑的：
+        // 它是 MSDK 内部页，缺 url 参数，起来就 destroySurface 退出，
+        // 留下空任务栈，用户看到的是黑屏。
+        if (hasRealChannel()) {
+            LoginDiag.add("RETURN", "真实回传通道 " + callingActivityName() + "，只走 setResult");
+            Toast.makeText(this, "已交回 " + gameName + "，请看游戏", Toast.LENGTH_SHORT).show();
+            finishLater(500);
             return;
         }
 
@@ -533,17 +553,16 @@ public class AgentActivity extends BaseActivity {
                 if (r == GameLaunch.RESULT_LANDED) {
                     Toast.makeText(this, "已交给 " + gameName + "，请看游戏",
                             Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "落地成功：登录组件收下且停在游戏内");
+                    LoginDiag.add("RETURN", "落地成功：回调组件收下且前台稳住");
                     finishLater(900);
                     return;
                 }
                 if (r == GameLaunch.RESULT_WOKE) {
-                    // 只把游戏唤到前台，token 未必被读取 —— 如实说，别糊弄
                     Toast.makeText(this,
                             "已把 " + gameName + " 唤到前台，但 token 可能没被读取；\n"
                                     + "auth 已复制到剪贴板，可在游戏内手动粘贴",
                             Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "仅唤醒游戏，登录组件没有消费 token");
+                    LoginDiag.add("RETURN", "仅唤醒游戏，没有回调组件消费 token");
                     finishLater(2500);
                     return;
                 }
@@ -556,7 +575,43 @@ public class AgentActivity extends BaseActivity {
         }).start();
     }
 
-    /** 调用方组件名；null 表示系统没记。仅用于日志，不参与成败判断。 */
+    /**
+     * 真实回传通道：调用方是游戏包名，并且落在回调组件上。
+     *
+     * 判据来自实际日志：三角洲唤起时 getCallingActivity 是它自己的
+     * com.tencent.connect.common.AssistActivity，这是 QQ SDK 收结果的地方。
+     * 而 ColorOS 在 NEW_TASK 唤起时可能把调用方填成别的包（甚至自己），
+     * 那种情况不能当成有通道。
+     */
+    private boolean hasRealChannel() {
+        try {
+            ComponentName c = getCallingActivity();
+            if (c == null) {
+                return false;
+            }
+            String pkg = c.getPackageName();
+            String cls = c.getClassName() == null ? "" : c.getClassName().toLowerCase();
+            if (pkg == null || pkg.equals(getPackageName())) {
+                return false;
+            }
+            // 调用方必须就是我们要交付的那个游戏
+            String target = GameLaunch.packageOf(getSelectedGameName());
+            if (!target.isEmpty() && !target.equals(pkg)) {
+                LoginDiag.add("RETURN", "调用方是 " + pkg + "，与目标游戏 " + target + " 不是同一个");
+                return false;
+            }
+            boolean callback = cls.contains("assistactivity") || cls.contains("authactivity")
+                    || cls.contains("authorityactivity") || cls.contains("authorize");
+            if (!callback) {
+                LoginDiag.add("RETURN", "调用方是 " + c.flattenToShortString() + "，不是回调组件");
+            }
+            return callback;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 调用方组件名；null 表示系统没记。 */
     private String callingActivityName() {
         try {
             ComponentName c = getCallingActivity();
@@ -566,13 +621,19 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
-    /** 统一收尾。上号且外部唤起时删任务，避免退回 shq 挡住游戏。 */
+    /**
+     * 统一收尾。
+     *
+     * 只有「上号 + 外部唤起 + 没有真实回传通道」才删任务：
+     * 有通道时必须让结果随着任务栈一起交回游戏，删了任务结果就丢了。
+     */
     private void finishLater(long delay) {
         ui.postDelayed(() -> {
             if (isFinishing()) {
                 return;
             }
-            boolean removeTask = "login".equals(currentMode) && launchedExternally;
+            boolean hasChannel = hasRealChannel();
+            boolean removeTask = "login".equals(currentMode) && launchedExternally && !hasChannel;
             if (removeTask && Build.VERSION.SDK_INT >= 21) {
                 finishAndRemoveTask();
             } else {

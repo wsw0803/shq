@@ -30,39 +30,32 @@ import java.util.Map;
 /**
  * 把 token 交给目标游戏。
  *
- * 2026-10-25 第四次修订。上一版日志暴露了两个真问题：
+ * 2026-10-25 第六次修订。上一份日志说明了两件关键的事：
  *
- * 一、把「组件收下 Intent 就结束」当成了成功。
+ * 一、黑屏的成因：启动了游戏的内部界面。
  *
- *   [DISPATCH] A 精确启动 com.tencent.tauth.AuthActivity [auth] -> 已接收
- *     Status: ok LaunchState: UNKNOWN (0)
- *   [DISPATCH] 当前前台: com.tencent.tim/com.tencent.open.agent.AgentActivity
+ *   前台: com.tencent.tmgp.dfm/...pixui.webview.WebViewActivity ✓
+ *   WindowManager: ...WebViewActivity state from DRAW_PENDING to NO_SURFACE; destroySurface
+ *   AppSenseClient: ...WebViewActivity; state: 0; event: GAME ... exit
  *
- *   LaunchState: UNKNOWN 意味着这个 Activity 起来就立刻结束了，前台一分没变，
- *   说明它把 Intent 当成无效数据丢掉了。但代码只看 Status: ok 就继续，
- *   四个候选全部这样空转一遍。
+ *   MSDK 的 WebViewActivity 是「内部页」，靠 Intent 里的 url / title 等参数渲染。
+ *   我们只给了 auth 数据，它拿不到 url，起来就 destroySurface 退出，
+ *   留下一个空任务栈 → 黑屏。所以这类内部页一律不碰。
  *
- * 二、把「游戏被唤醒」当成了 token 已消费。
+ * 二、真正该走的路：把结果交回调用方。
  *
- *   [DISPATCH] B 主界面 SplashActivity [auth] -> LaunchState: WARM
- *   [DISPATCH] 当前前台: com.tencent.tmgp.dfm/com.epicgames.ue4.GameActivity
- *   [DISPATCH] B auth 已随 Intent 送进游戏主界面
+ *   getCallingActivity = com.tencent.tmgp.dfm/com.tencent.connect.common.AssistActivity
  *
- *   三角洲本来就在后台活着，SplashActivity 只是把它带回前台，
- *   根本没有读取我们塞的 token。这句「已送进主界面」是错的。
+ *   这不是 ColorOS 伪造的（伪造时调用方还是自己或别的包）。AssistActivity
+ *   是 QQ SDK 里负责收结果、回调 IUiListener 的组件 —— 它确实在
+ *   startActivityForResult 等我们。这条通道存在时，正确做法就是
+ *   setResult + finish，一个多余界面都别启动。
  *
- * 三、MAX_TRIES=3 把最有希望的组件排除了。
- *
- *   三角洲的 8 个候选中，真正加载 URL 并截获 auth 回调的是
- *   MSDK 的 WebViewActivity / WebViewIPCActivity，它们在列表第 5、6 位，
- *   被「只试前 3 个」直接砍掉。
- *
- * 现在的判断标准：
- *
- * - 收下 + 停在前台（游戏内某个 Activity）= 强成功，token 很可能被消费了。
- * - 收下 + 立刻退出（LaunchState: UNKNOWN 且前台没变）= 失败，换下一个。
- * - Splash/主界面把游戏唤醒 = 弱成功，只算「唤醒了游戏」，
- *   会在结果里如实标注，不再冒充 token 交付成功。
+ * 所以本类的职责缩小为「没有真实通道时的兜底」：
+ *   只试真正接收 auth 的回调组件（AuthActivity / AuthorityActivity /
+ *   AssistActivity / AuthorizeActivity），内部 UI 页（webview、wechat、
+ *   douyin、pay、permission、policy、qrcode）全部排除。
+ *   每次启动后还要确认前台稳住了，起来就退的一律换下一个，避免再黑屏。
  */
 public class GameLaunch {
 
@@ -76,8 +69,8 @@ public class GameLaunch {
         PACKAGES.put("无畏契约", "com.tencent.tmgp.codev");
     }
 
-    /** 候选上限。MSDK 的 WebView 类组件往往排在后面，太少会全部错过。 */
-    private static final int MAX_TRIES = 8;
+    /** 候选上限。回调组件一般只有两三个，留点余量即可。 */
+    private static final int MAX_TRIES = 4;
 
     private static final char LF = (char) 10;
     private static final char CR = (char) 13;
@@ -86,7 +79,7 @@ public class GameLaunch {
     public static final int RESULT_NONE = 0;
     /** 只是把游戏唤到前台，token 未必被读取。 */
     public static final int RESULT_WOKE = 1;
-    /** 组件收下并停在游戏内，token 很可能已被消费。 */
+    /** 组件收下且前台稳住，token 很可能已被消费。 */
     public static final int RESULT_LANDED = 2;
 
     public static String packageOf(String gameName) {
@@ -183,7 +176,19 @@ public class GameLaunch {
         return out;
     }
 
-    /** 疑似接收 auth 的登录组件，按可能性从高到低。 */
+    /**
+     * 内部 UI 页：靠 Intent 里的 url / title 参数渲染，我们给不出，
+     * 起来就 destroySurface 退出并留下空任务栈 —— 黑屏就是这么来的。
+     */
+    private static boolean isInternalUi(String low) {
+        return low.contains("webview") || low.contains("wechat") || low.contains("wxapi")
+                || low.contains("wxentry") || low.contains("douyin") || low.contains("authorize_douyin")
+                || low.contains("pay") || low.contains("permission") || low.contains("policy")
+                || low.contains("qrcode") || low.contains("splash") || low.contains("downloader")
+                || low.contains("gameactivity") || low.contains("tpush");
+    }
+
+    /** 真正接收 auth 回调的组件，按可能性从高到低。 */
     public static List<String> findAuthActivities(Context c, String pkg) {
         List<Hit> hits = new ArrayList<Hit>();
         Map<String, Boolean> exported = exportedMap(c, pkg);
@@ -227,63 +232,39 @@ public class GameLaunch {
     }
 
     /**
-     * 打分。
-     *
-     * 排在最前的必须是真的会「读 URL、处理 auth 回调」的组件：
-     * MSDK 的 WebViewActivity 才是登录页宿主，AuthActivity / AssistActivity
-     * 只是 QQ SDK 的转发壳，实测收到数据就立刻结束。
+     * 打分。只留回调类组件，内部 UI 页直接淘汰。
      */
     private static int score(String cls) {
         if (cls == null || cls.isEmpty()) {
             return -1;
         }
         String low = cls.toLowerCase(Locale.ROOT);
-        // 明确不是 Activity 的、或者纯壳界面，直接淘汰
         if (low.contains("provider") || low.contains("receiver") || low.contains("service")
-                || low.contains("proxy") || low.contains("permission")
-                || low.contains("policy") || low.contains("qrcode")
-                || low.contains("pay")) {
+                || low.contains("proxy") || low.contains("stub")) {
             return -1;
         }
-        int s = 0;
-        // MSDK 的 webview 宿主：加载 ptlogin 页、截获 auth:// 回调的就是它
-        if (low.contains("webviewactivity")) {
-            s += 20;
+        if (isInternalUi(low)) {
+            return -1;
         }
-        if (low.contains("webviewipcactivity")) {
-            s += 18;
-        }
-        if (low.contains("webview")) {
-            s += 12;
-        }
-        // 微信/QQ 授权中转
-        if (low.contains("wechatagent") || low.contains("wxentry") || low.contains("wxapi")) {
-            s += 10;
-        }
-        // 第三方登录授权入口
-        if (low.contains("authorize") || low.contains("authorityactivity")) {
-            s += 8;
-        }
-        // QQ SDK 的两个壳：能收，但通常收完就结束，排在后面
         if (low.equals("com.tencent.tauth.authactivity")) {
-            s += 6;
+            return 20;
         }
         if (low.equals("com.tencent.connect.common.assistactivity")) {
-            s += 5;
+            return 18;
         }
-        if (low.contains("msdk") || low.contains("itop") || low.contains("gcloud")) {
-            s += 5;
+        if (low.contains("authorityactivity")) {
+            return 16;
         }
-        if (low.contains("login")) {
-            s += 4;
+        if (low.contains("authorize")) {
+            return 14;
         }
         if (low.contains("auth")) {
-            s += 4;
+            return 10;
         }
-        if (low.contains("qq") || low.contains("sso")) {
-            s += 2;
+        if (low.contains("msdk") || low.contains("itop") || low.contains("gcloud")) {
+            return 4;
         }
-        return s;
+        return 0;
     }
 
     /** 兼容旧调用点：只要游戏在前台就算成功。 */
@@ -293,8 +274,6 @@ public class GameLaunch {
 
     /**
      * 直接派发，返回成色（RESULT_NONE / RESULT_WOKE / RESULT_LANDED）。
-     *
-     * appid 用于拼 tencent&lt;appid&gt;://tauth 这种 QQ 回调形态。
      */
     public static int dispatchEx(Context ctx, String gameName, String authUrl, String appid) {
         String pkg = packageOf(gameName);
@@ -319,20 +298,16 @@ public class GameLaunch {
             aid = cleanAppid(param(authUrl, "appid"));
         }
 
-        logChannel(ctx);
-
         List<String> all = activitiesOf(ctx, pkg);
         LoginDiag.add("DISPATCH", "游戏 Activity 共 " + all.size() + " 个");
         dumpActivitiesToFile(ctx, gameName, pkg, all, aid);
-
-        boolean gameHasFilter = hasAuthFilter(ctx, pkg, authUrl);
-        LoginDiag.add("DISPATCH", "游戏自己注册 auth://: " + (gameHasFilter ? "是" : "否")
-                + " appid=" + (aid.isEmpty() ? "未知" : aid));
+        LoginDiag.add("DISPATCH", "游戏自己注册 auth://: "
+                + (hasAuthFilter(ctx, pkg, authUrl) ? "是" : "否") + " appid="
+                + (aid.isEmpty() ? "未知" : aid));
 
         List<String> forms = dataForms(authUrl, aid);
         LoginDiag.add("DISPATCH", "data 形态 " + forms.size() + " 种");
 
-        // 0) 手动指定的组件优先
         String manual = manualComponent(ctx, gameName);
         if (!manual.isEmpty()) {
             int r = tryOne(ctx, pkg, manual, authUrl, forms, "0 手动组件");
@@ -342,7 +317,7 @@ public class GameLaunch {
         }
 
         List<String> cands = findAuthActivities(ctx, pkg);
-        LoginDiag.add("DISPATCH", "疑似登录组件 " + cands.size() + " 个: " + join(cands, 10));
+        LoginDiag.add("DISPATCH", "aoth 回调组件 " + cands.size() + " 个: " + join(cands, 8));
 
         int tried = 0;
         for (String cls : cands) {
@@ -358,52 +333,25 @@ public class GameLaunch {
             }
         }
 
-        // B) 主界面：只能把游戏唤到前台，token 不会被这里读取，
-        // 所以它只算「唤醒了」，不能冒充交付成功。
-        String main = mainActivity(ctx, pkg);
-        if (!main.isEmpty()) {
-            int r = tryMain(ctx, pkg, main, authUrl, forms);
-            if (r >= RESULT_WOKE) {
-                LoginDiag.add("DISPATCH", "B 只把游戏唤到前台，token 未被读取");
-                return RESULT_WOKE;
-            }
-        } else {
-            LoginDiag.add("DISPATCH", "B 找不到游戏主界面，跳过");
-        }
-
-        String out = runSu("am start -W -a android.intent.action.VIEW -d " + RootUtil.shellQuote(authUrl)
-                + " -p " + pkg + " -f 0x10000000");
-        LoginDiag.add("DISPATCH", "C 包内 VIEW 解析 -> " + oneLine(out));
-        if (okAm(out) && waitForeground(pkg, 2)) {
-            LoginDiag.add("DISPATCH", "C 命中");
+        // 走到这里说明没有组件能真正消费 auth。
+        // 只把游戏唤回前台，绝不启动它的内部界面 —— 那是黑屏的来源。
+        boolean front = bringToFront(ctx, pkg);
+        if (front) {
+            LoginDiag.add("DISPATCH", "没有可用的回调组件，仅把游戏唤回前台");
+            copyToClipboard(ctx, authUrl);
             return RESULT_WOKE;
         }
 
-        try {
-            Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(authUrl));
-            it.setPackage(pkg);
-            it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(it);
-            LoginDiag.add("DISPATCH", "D 普通 Intent 已发出");
-            if (waitForeground(pkg, 2)) {
-                return RESULT_WOKE;
-            }
-        } catch (Throwable t) {
-            LoginDiag.add("DISPATCH", "D 普通 Intent 失败: " + t);
-        }
-
         copyToClipboard(ctx, authUrl);
-        boolean front = bringToFront(ctx, pkg);
-        LoginDiag.add("DISPATCH", "全部方式失败，auth 已复制到剪贴板，切回游戏=" + front);
-        return front ? RESULT_WOKE : RESULT_NONE;
+        LoginDiag.add("DISPATCH", "全部方式失败，auth 已复制到剪贴板");
+        return RESULT_NONE;
     }
 
     /**
      * 对一个组件依次试各种 data 形态。
      *
-     * 判定成色的依据是「启动后前台还在不在游戏里」：
-     * LaunchState: UNKNOWN 且前台仍是 shq，说明组件收下就结束了，数据被丢弃；
-     * 前台变成游戏的某个 Activity，才算真的落地。
+     * 落地后还要再等一会儿确认前台稳住：MSDK 内部页起来会 destroySurface 退出，
+     * 那种必须视为失败并换下一个，否则用户看到的就是黑屏。
      */
     private static int tryOne(Context ctx, String pkg, String cls, String authUrl,
                               List<String> forms, String tag) {
@@ -417,40 +365,34 @@ public class GameLaunch {
                 LoginDiag.add("DISPATCH", tag + " " + who + " -> 被拒 " + oneLine(out));
                 continue;
             }
-            boolean front = waitForeground(pkg, 2);
-            if (front) {
-                LoginDiag.add("DISPATCH", tag + " " + who + " -> 落地，前台已是游戏");
+            if (!waitForeground(pkg, 2)) {
+                LoginDiag.add("DISPATCH", tag + " " + who
+                        + (unknown ? " -> 收下即结束，换下一个" : " -> 收到但游戏没起来"));
+                continue;
+            }
+            // 前台虽然在游戏内，但要确认它不是「起来就退」的临时页
+            if (stillFront(pkg, 700)) {
+                LoginDiag.add("DISPATCH", tag + " " + who + " -> 落地且前台稳住");
                 return RESULT_LANDED;
             }
-            if (unknown) {
-                LoginDiag.add("DISPATCH", tag + " " + who + " -> 收下即结束（LaunchState UNKNOWN），换下一个");
-            } else {
-                LoginDiag.add("DISPATCH", tag + " " + who + " -> 收到但游戏没起来 " + oneLine(out));
-            }
+            LoginDiag.add("DISPATCH", tag + " " + who + " -> 起来后立刻退出（黑屏风险），换下一个");
+            bringToFront(ctx, pkg);
         }
         return RESULT_NONE;
     }
 
-    /** 主界面只负责唤醒，成功也只算 WOKE。 */
-    private static int tryMain(Context ctx, String pkg, String main, String authUrl,
-                               List<String> forms) {
-        String data = forms.isEmpty() ? authUrl : forms.get(0);
-        String out = runSu(amStart(pkg, main, authUrl, data));
-        boolean accepted = okAm(out);
-        LoginDiag.add("DISPATCH", "B 主界面 " + shortName(pkg, main) + " -> "
-                + (accepted ? "已接收" : "被拒") + " " + oneLine(out));
-        if (!accepted) {
-            return RESULT_NONE;
+    /** 已经在游戏内，过一会儿再确认一次，避免把「一闪而过」当成成功。 */
+    private static boolean stillFront(String pkg, long waitMs) {
+        try {
+            Thread.sleep(waitMs);
+        } catch (InterruptedException ignored) {
         }
-        return waitForeground(pkg, 3) ? RESULT_WOKE : RESULT_NONE;
+        return gameForeground(pkg);
     }
 
     /** "LaunchState: UNKNOWN" 表示起来就结束，等于没处理。 */
     private static boolean isLaunchUnknown(String out) {
-        if (out == null) {
-            return false;
-        }
-        return out.contains("LaunchState: UNKNOWN");
+        return out != null && out.contains("LaunchState: UNKNOWN");
     }
 
     /** 候选 data 形态：原始 auth:// 与 QQ 真正用的 tencent&lt;appid&gt;://tauth。 */
@@ -512,7 +454,7 @@ public class GameLaunch {
     }
 
     /** AssistActivity 读 key_response，这里按 QQ SDK 的字段拼一份。 */
-    private static String keyResponse(String authUrl) {
+    public static String keyResponse(String authUrl) {
         String at = param(authUrl, "access_token");
         if (at.isEmpty()) {
             return "";
@@ -554,21 +496,6 @@ public class GameLaunch {
         } catch (Throwable t) {
             return "";
         }
-    }
-
-    /** getCallingActivity 只记录，不作为成败判断 —— 它不代表对方在等结果。 */
-    private static void logChannel(Context ctx) {
-        if (!(ctx instanceof Activity)) {
-            LoginDiag.add("DISPATCH", "调用方不是 Activity，无法判断结果通道");
-            return;
-        }
-        ComponentName c = null;
-        try {
-            c = ((Activity) ctx).getCallingActivity();
-        } catch (Throwable ignored) {
-        }
-        LoginDiag.add("DISPATCH", "getCallingActivity=" + (c == null ? "null" : c.flattenToShortString())
-                + "（只作参考，不代表游戏在等结果）");
     }
 
     private static boolean hasAuthFilter(Context c, String pkg, String authUrl) {
@@ -638,8 +565,7 @@ public class GameLaunch {
             comp = componentOf(dump);
         }
         boolean hit = !comp.isEmpty() && comp.startsWith(pkg + "/");
-        LoginDiag.add("DISPATCH", "前台: " + (comp.isEmpty() ? "未知" : comp)
-                + (hit ? " ✓" : ""));
+        LoginDiag.add("DISPATCH", "前台: " + (comp.isEmpty() ? "未知" : comp) + (hit ? " ✓" : ""));
         return hit;
     }
 
@@ -748,7 +674,7 @@ public class GameLaunch {
             sb.append("# 共 ").append(all.size()).append(" 个 Activity").append(LF).append(LF);
             List<String> ranked = findAuthActivities(ctx, pkg);
             if (!ranked.isEmpty()) {
-                sb.append("## 疑似登录组件（自动尝试的顺序）").append(LF);
+                sb.append("## 疑似登录回调组件（自动尝试的顺序）").append(LF);
                 for (String s : ranked) {
                     sb.append(s).append(LF);
                 }
@@ -787,7 +713,7 @@ public class GameLaunch {
         if (cls == null) {
             return "";
         }
-        if (cls.startsWith(pkg + ".")) {
+        if (pkg != null && !pkg.isEmpty() && cls.startsWith(pkg + ".")) {
             return cls.substring(pkg.length());
         }
         return cls;
