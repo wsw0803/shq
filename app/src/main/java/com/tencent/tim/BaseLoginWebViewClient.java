@@ -14,8 +14,6 @@ import android.widget.Toast;
 
 import com.tencent.open.agent.AgentActivity;
 
-import java.util.Locale;
-
 /**
  * 登录模块通用基类（抓号 / 挂机共用）。
  *
@@ -142,13 +140,11 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
      *
      * 2026-10-25 第十次修订（三角洲）。
      *
-     * 上一版只查 qq.com / ptlogin2 / connect 三个域，长度过短就看不出内容。
-     * 三角洲登录链路上会写一串 qq 子域，其中 MTDK/MSDK 认的那个票据
-     * 就藏在某一域里 —— 之前只打长度，等于什么都没看。
+     * 上一版只查 qq.com / ptlogin2 / connect 三个域，且只打长度。
+     * 登录链路上会写一串 qq 子域，票据藏在哪一域、叫什么，
+     * 只打总长度看不出来。
      *
-     * 现在改成「遍历 CookieManager 里所有 Cookie，按域打印 key 名 + 值长度」，
-     * 并且把包含 v 开头的 key（vkey / vip / verify 之类）单独标出来。
-     * 这样下一份日志能一眼看到那个字段到底叫什么、在哪一域、多长。
+     * 现在按域打印每个 cookie 的 key 名 + 值长度。
      */
     protected void logCookieState(String when) {
         try {
@@ -191,11 +187,6 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                     String k = t.substring(0, eq).trim();
                     String v = t.substring(eq + 1).trim();
                     dump.append(k).append('(').append(v.length()).append(')');
-                    // v 开头的 key 单独标记：三角洲可能就在等这个
-                    if (k.toLowerCase(Locale.ROOT).startsWith("v")) {
-                        dump.append("★V:");
-                        dump.append(v.length() > 16 ? v.substring(0, 16) + "…" : v);
-                    }
                     dump.append(' ');
                 }
                 dump.append(" | ");

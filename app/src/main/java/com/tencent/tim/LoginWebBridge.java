@@ -69,8 +69,7 @@ public class LoginWebBridge {
             + "try{"
             + "var h=location.href;"
             // 非 token 页面的每一次变化也记下来。
-            // 三角洲登录链路上会出现一个 v 开头的页面/参数，
-            // 不记录跳转链路就永远不知道它叫什么、在第几跳出现。
+            // 登录链路上会有好几跳，不记录跳转链路就不知道卡在第几步。
             + "if(h&&h!==__last){"
             + "  __last=h;"
             + "  if(h.indexOf('access_token=')<0){note('JS-NAV',h);}"
@@ -131,7 +130,7 @@ public class LoginWebBridge {
          * 原样记录下来。
          *
          * 上一版只打「页面侧发现 token」四个字，等于把唯一有用的东西藏了。
-         * 三角洲的 MSDK 认哪个字段、要不要 v 开头的票据，全在完整 URL 里。
+         * 三角洲的 MSDK 认哪个字段、要不要完整回包，全在 URL 里。
          * 这里把字段名逐个列出来（值只打长度，避免 token 明文进日志），
          * 下一份日志能直接读出回包到底带了哪些 key。
          */

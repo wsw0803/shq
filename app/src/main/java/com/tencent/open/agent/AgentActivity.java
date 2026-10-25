@@ -463,11 +463,10 @@ public class AgentActivity extends BaseActivity {
                 + " oid=" + (openId.isEmpty() ? "缺" : ("len" + openId.length()))
                 + " pt=" + (payToken.isEmpty() ? "缺" : ("len" + payToken.length()))
                 + " exp=" + (expiresIn.isEmpty() ? "缺" : expiresIn));
-        // 把所有 v 开头的字段单独拎出来。
-        // 三角洲要的那个票据是 v 开头，之前没人知道它到底叫什么、在不在回包里，
-        // 这里直接列出来，key 名 + 值长度，下一份日志一看就明白。
-        String vKeys = vKeysOf(url);
-        LoginDiag.add("PARSE", "v 开头字段: " + (vKeys.isEmpty() ? "无" : vKeys));
+        // 把所有 query 字段名打出来，值只给长度。
+        // 三角洲认哪个字段，得先看到完整字段列表才能判断。
+        LoginDiag.add("PARSE", "字段清单: "
+                + (keyWithLen(url).isEmpty() ? "无" : keyWithLen(url)));
         if (accessToken.isEmpty()) {
             LoginDiag.add("ERR", "performLogin: at 为空，内容格式不符");
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
@@ -545,7 +544,7 @@ public class AgentActivity extends BaseActivity {
                 + (dataUri.isEmpty() ? "空" : "len" + dataUri.length())
                 + " extras=[key_response len" + json.toString().length()
                 + ", auth len" + (saved == null ? 0 : saved.length())
-                + "] resultCode=RESULT_OK 字段=" + fieldList(saved));
+                + "] resultCode=RESULT_OK 字段=" + keyWithLen(saved));
 
         if (!"login".equals(mode)) {
             saveAccountToFile(saved, appid, mode);
@@ -958,51 +957,22 @@ public class AgentActivity extends BaseActivity {
     }
 
     /**
-     * 把 auth 里的每个 key 列出来（只列名字，值不落盘）。
+     * 把 auth 的每个 query 字段列出来（key + 值长度），值不落盘。
      *
      * 上一版只打「字段数=10」，看不出到底是哪 10 个。
-     * 三角洲要的那个 v 开头的东西在不在、叫什么，必须看到 key 名才能判断。
+     * 要知道回包完不完整、SDK 缺哪一项，必须看到字段名和长度。
      */
-    private static String fieldList(String url) {
-        if (url == null || url.isEmpty()) {
-            return "无";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (String k : com.tencent.tim.GameLaunch.params(url).keySet()) {
-            if (sb.length() > 0) {
-                sb.append(',');
-            }
-            sb.append(k);
-        }
-        return sb.toString();
-    }
-
-    /** 列出所有 v 开头的 query 字段（key + 值长度），用于定位三角洲要的票据。 */
-    private static String vKeysOf(String url) {
+    private static String keyWithLen(String url) {
         if (url == null || url.isEmpty()) {
             return "";
         }
-        String q = url;
-        int hash = q.indexOf('#');
-        if (hash >= 0) {
-            q = q.substring(hash + 1);
-        }
-        int qm = q.indexOf('?');
-        if (qm >= 0) {
-            q = q.substring(qm + 1);
-        }
         StringBuilder sb = new StringBuilder();
-        for (String kv : q.split("&")) {
-            int eq = kv.indexOf('=');
-            String k = eq > 0 ? kv.substring(0, eq) : kv;
-            String v = eq > 0 ? kv.substring(eq + 1) : "";
-            if (k.isEmpty() || Character.toLowerCase(k.charAt(0)) != 'v') {
-                continue;
-            }
+        for (java.util.Map.Entry<String, String> e
+                : com.tencent.tim.GameLaunch.params(url).entrySet()) {
             if (sb.length() > 0) {
-                sb.append("  ");
+                sb.append(' ');
             }
-            sb.append(k).append('(').append(v.length()).append(')');
+            sb.append(e.getKey()).append('(').append(e.getValue().length()).append(')');
         }
         return sb.toString();
     }
