@@ -37,31 +37,30 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 上号模式（2026-10-25 第三次修订）：
+ * 上号模式（2026-10-25 第五次修订）：
  *
- * 上一版错在「有回传通道就只 setResult、不派发」：
+ * 上一版把「游戏被唤到前台」当成了「token 已交给游戏」：
  *
- *   [RETURN] 结果通道=有，走 setResult
+ *   [DISPATCH] B 主界面 com.epicgames.ue4.SplashActivity -> LaunchState: WARM
+ *   [DISPATCH] 前台: com.tencent.tmgp.dfm/com.epicgames.ue4.GameActivity ✓
+ *   [DISPATCH] B auth 已随 Intent 送进游戏主界面
  *
- * 但同一次 logcat 里，三角洲从头到尾没有任何一条 START u0，
- * 只出现在 OplusRecentsAnimationController 的 task 记录中，
- * 最后前台是 shq 的 SettingsActivity。也就是 setResult 根本没到游戏。
+ * 三角洲本来就在后台活着，SplashActivity 只是把它带回前台，
+ * 根本没读我们塞的 token。这句话是假的，会让人以为成功了。
  *
- * 根因：getCallingActivity() 非空只说明「系统记录了一个调用方」，
- * 不等于对方在用 startActivityForResult 等结果。ColorOS 在 NEW_TASK
- * 唤起时也会把这个字段填上，于是上一版的判断被它骗了。
+ * 现在 GameLaunch 返回三态（NONE / WOKE / LANDED），本页按真实成色提示：
  *
- * 现在的规则：
- *   setResult 照发（万一真有通道，白送的机会不能丢），
- *   但同时一定主动派发，最后以「游戏是否真的到了前台」作为成功依据。
- *   派发放在后台线程：里面有 su、dumpsys、轮询前台，主线程做必然 ANR。
+ *   LANDED → 「已交给 X，请看游戏」（组件收下且停在游戏内）
+ *   WOKE   → 「已把 X 唤到前台，但 token 可能未被读取」+ 复制到剪贴板
+ *   NONE   → 「交付失败，auth 已复制到剪贴板」
+ *
+ * setResult 仍然照发：真有回传通道时它是白送的机会。
+ * 但 getCallingActivity 非空不代表对方在等结果，绝不再凭它跳过派发。
  */
 public class AgentActivity extends BaseActivity {
 
     private static final String PREF_NAME = "MyPrefs";
     private static final String KEY_RAW_TEXT = "raw_text";
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "access_token=([^&]+)(?:&expires_in=([^&]+))?&openid=([^&]+)&pay_token=([^&]+)");
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -138,18 +137,14 @@ public class AgentActivity extends BaseActivity {
             currentMode = prefs.getString("pd_key", "capture");
         }
 
-        // 外部唤起且 Intent 已带 access_token：说明游戏把登录回调甩了过来，
-        // 直接当成一次登录处理，不用等人再粘一遍。
         String incoming = incomingAuth(intent);
 
         LoginDiag.add("AGENT", "mode=" + currentMode
                 + " game=" + getSelectedGameName()
                 + " 外部唤起=" + launchedExternally
                 + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
-                + " 游戏包名=" + (GameLaunch.hasPackage(getSelectedGameName())
-                ? GameLaunch.packageOf(getSelectedGameName()) : "未配置")
                 + " 带token=" + (incoming != null)
-                + " 回传通道=" + (callingActivityName() == null ? "无" : "有"));
+                + " getCallingActivity=" + (callingActivityName() == null ? "null" : callingActivityName()));
 
         if ("login".equals(currentMode)) {
             setupLoginMode();
@@ -168,7 +163,6 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
-    /** 从唤起 Intent 里取 auth 数据；没有 access_token 就不算回调。 */
     private String incomingAuth(Intent intent) {
         if (intent == null) {
             return null;
@@ -355,7 +349,6 @@ public class AgentActivity extends BaseActivity {
         });
     }
 
-    /** 长按「执行登录」：手动挑一个游戏的登录组件，记住下次直接用。 */
     private void showDispatchPicker() {
         final String game = getSelectedGameName();
         final String pkg = GameLaunch.packageOf(game);
@@ -500,13 +493,10 @@ public class AgentActivity extends BaseActivity {
                 + " tokenAppid=" + appid
                 + " 已选appid=" + chosenAppid
                 + " 一致=" + appid.equals(chosenAppid)
-                + " mode=" + mode
-                + " 外部唤起=" + launchedExternally
-                + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
-                + " getCallingActivity=" + (callingActivityName() == null ? "null" : callingActivityName()));
+                + " mode=" + mode);
 
-        // setResult 照发。真有回传通道时它是零成本的机会，
-        // 但不能把它当成主要手段 —— 见下方注释。
+        // setResult 照发：真有回传通道时是零成本的机会，
+        // 但 getCallingActivity 非空不代表对方在等，绝不再凭它跳过派发。
         Intent resultIntent = new Intent();
         resultIntent.putExtra("key_response", json.toString());
         setResult(RESULT_OK, resultIntent);
@@ -517,12 +507,6 @@ public class AgentActivity extends BaseActivity {
             return;
         }
 
-        // ---- 上号模式：一定主动派发 ----
-        //
-        // 上一版看到 getCallingActivity() 非空就只 setResult、跳过派发，
-        // 结果 logcat 里三角洲一条 START u0 都没有，token 石沉大海。
-        // ColorOS 在 NEW_TASK 唤起时也会把这个字段填上，凭它判断不可靠。
-        // 现在：只要配置了包名就派发，最终以「游戏是否到前台」为准。
         if (!GameLaunch.hasPackage(gameName)) {
             LoginDiag.add("DISPATCH", "「" + gameName + "」未配置包名，只能靠 setResult");
             Toast.makeText(this, "「" + gameName + "」未配置包名，游戏收不到 token",
@@ -534,29 +518,40 @@ public class AgentActivity extends BaseActivity {
         dispatching = true;
         Toast.makeText(this, "正在交付给 " + gameName + "…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            boolean sent = false;
+            int result = GameLaunch.RESULT_NONE;
             try {
-                sent = GameLaunch.dispatch(this, gameName, saved, appid);
+                result = GameLaunch.dispatchEx(this, gameName, saved, appid);
             } catch (Throwable t) {
                 LoginDiag.add("DISPATCH", "派发异常: " + t);
             }
-            final boolean ok = sent;
+            final int r = result;
             ui.post(() -> {
                 dispatching = false;
                 if (isFinishing()) {
                     return;
                 }
-                if (ok) {
+                if (r == GameLaunch.RESULT_LANDED) {
                     Toast.makeText(this, "已交给 " + gameName + "，请看游戏",
                             Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "派发成功，游戏已在前台");
-                } else {
-                    Toast.makeText(this,
-                            "交付失败：auth 已复制到剪贴板，请在游戏内手动粘贴",
-                            Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "派发失败，已回退剪贴板");
+                    LoginDiag.add("RETURN", "落地成功：登录组件收下且停在游戏内");
+                    finishLater(900);
+                    return;
                 }
-                finishLater(ok ? 900 : 2500);
+                if (r == GameLaunch.RESULT_WOKE) {
+                    // 只把游戏唤到前台，token 未必被读取 —— 如实说，别糊弄
+                    Toast.makeText(this,
+                            "已把 " + gameName + " 唤到前台，但 token 可能没被读取；\n"
+                                    + "auth 已复制到剪贴板，可在游戏内手动粘贴",
+                            Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "仅唤醒游戏，登录组件没有消费 token");
+                    finishLater(2500);
+                    return;
+                }
+                Toast.makeText(this,
+                        "交付失败：auth 已复制到剪贴板，请在游戏内手动粘贴",
+                        Toast.LENGTH_LONG).show();
+                LoginDiag.add("RETURN", "派发全部失败，已回退剪贴板");
+                finishLater(2500);
             });
         }).start();
     }
@@ -643,21 +638,6 @@ public class AgentActivity extends BaseActivity {
         }
         sb.append("&page_type=0");
         return sb.toString();
-    }
-
-    private String withAppid(String url) {
-        if (url == null || url.contains("appid=") || url.contains("client_id=")) {
-            return url;
-        }
-        String a = "";
-        try {
-            a = com.tencent.tim.TokenStore.appidOfGame(getSelectedGameName());
-        } catch (Exception ignored) {
-        }
-        if (a == null || a.isEmpty()) {
-            a = "1104466820";
-        }
-        return url + (url.indexOf("?") >= 0 ? "&" : "?") + "appid=" + a;
     }
 
     private void saveRawDataToPreferences(String data) {

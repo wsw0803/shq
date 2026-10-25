@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,19 +23,22 @@ import java.util.regex.Pattern;
 /**
  * 诊断日志。
  *
- * 设计：开关控制，关闭时自动落盘，时间戳命名，不进内存累积。
+ * 三个原则：
  *
- * logcat 的筛选思路（2026-10-25 第二次修订）：
+ * 1) 全文件只有一个时间。
+ *    原来是每行前挂 HH:mm:ss.SSS，logcat 段里再挂一次 HH:mm:ss，
+ *    满屏都是时间，真正要看的内容反而看不清。
+ *    现在时间只出现在头部一行，正文只保留 [标签] 内容，靠行序表达先后。
  *
- * 上一版用「黑名单 + 出现 error/fail 就保留」的宽容规则，结果翻车了：
- * ColorOS 上满屏都是 PERFHAL 的 "Failed to reset optimization"、
- * SchedAssist 的 "ioctl failed"、gameoptHal 的 "set isolate cpus failed"、
- * lowmemorykiller 的 "device has enough memory ... disable killing"。
- * 这些行都带 failed / error，于是全被当成有用信息保留，
- * 而真正该看的 "START u0 {cmp=com.tencent.tmgp.dfm/...}" 反被挤进 120 条上限之外。
+ * 2) logcat 只留「能说明 app 干了什么」的行。
+ *    ColorOS 上 PERFHAL / SchedAssist / gameoptHal / lowmemorykiller
+ *    每秒钟能刷几十条带 failed 的无害日志，一旦放宽就会把真正的
+ *    START u0 挤出去。所以用白名单，只认组件启动、崩溃、权限这几类。
  *
- * 现在改成白名单：只有命中 KEEP 里的明确模式才保留，其余一律丢弃。
- * logcat 段落的目标不是「尽量多」，而是「一眼看出 app 到底做了什么」。
+ * 3) 白名单不能空手而归。
+ *    上一版出现过「保留 0 条」—— 白名单一个都没命中，用户什么都看不到。
+ *    现在保留一份兜底：没有任何命中时，退化为最近 30 条去重后的 Tag: 消息。
+ *    宁可粗糙，也不能让日志变空。
  */
 public class LoginDiag {
 
@@ -49,15 +53,18 @@ public class LoginDiag {
     /** logcat 取多少行原始日志来筛。 */
     private static final int LOGCAT_RAW = 2000;
 
-    /** 合并去重之后最多保留多少条，超了只留最近的。 */
+    /** 命中白名单时最多保留多少条。 */
     private static final int LOGCAT_UNIQUE = 80;
+
+    /** 白名单零命中时的兜底条数。 */
+    private static final int LOGCAT_FALLBACK = 30;
 
     private static final List<String> events = new ArrayList<String>();
     private static long startedAt = 0L;
     private static volatile boolean enabled = false;
     private static volatile boolean loaded = false;
 
-    private static final SimpleDateFormat TS = new SimpleDateFormat("HH:mm:ss.SSS", Locale.CHINA);
+    /** 文件名精确到分钟；正文里不再出现任何逐行时间。 */
     private static final SimpleDateFormat NAME_TS = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.CHINA);
     private static final SimpleDateFormat FULL_TS = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA);
 
@@ -66,18 +73,18 @@ public class LoginDiag {
             "^\\d{2}-\\d{2}\\s+(\\d{2}:\\d{2}:\\d{2})\\.\\d{3}\\s+\\d+\\s+\\d+\\s+[VDIWEFA]\\s+");
 
     /**
-     * 白名单：命中任意一条才保留。
+     * 白名单：命中任意一条才进「重点」区。
      *
-     * 选的都是「能说明 app 干了什么」的行：组件启动、结果交付、权限拒绝、
-     * 崩溃、WebView 与 xray 的异常。系统埋点、功耗统计、调频日志一概不要。
+     * 全部围绕「app 到底启动了什么、被什么拒了、有没有崩」。
      */
     private static final String[] KEEP = {
-            "START u0",              // 组件启动（含 am start / startActivity）
-            "Displayed ",           // 首次显示耗时，能确认游戏真的起来了
+            "START u0",
+            "LaunchState",
+            "Displayed ",
             "Force finishing",
             "Force stopping",
             "ActivityNotFoundException",
-            "does not exist",        // am start -n 打到不存在的组件
+            "does not exist",
             "Unable to resolve",
             "Unable to start",
             "Permission Denial",
@@ -86,13 +93,16 @@ public class LoginDiag {
             "FATAL EXCEPTION",
             "AndroidRuntime",
             "am_kill",
-            "Process ",              // Process xxx has died / Start proc
+            "has died",
+            "Start proc",
+            "was killed",
             "WebView",
             "chromium",
             "xray",
-            "Tencent",               // 腾讯 SDK 自身的日志
             "tauth",
             "auth://",
+            "MSDK",
+            "msdk",
     };
 
     private static SharedPreferences prefs(Context c) {
@@ -143,13 +153,13 @@ public class LoginDiag {
         startedAt = System.currentTimeMillis();
     }
 
+    /** 事件行不再带时间，只留 [标签] 内容。 */
     public static synchronized void add(String tag, String detail) {
         if (!enabled) return;
         if (events.size() >= MAX_EVENTS) {
             events.remove(0);
         }
-        String t = TS.format(new Date());
-        events.add(t + " [" + tag + "] " + LogScrubber.scrub(detail));
+        events.add("[" + tag + "] " + LogScrubber.scrub(detail));
     }
 
     public static synchronized List<String> snapshot() {
@@ -193,7 +203,6 @@ public class LoginDiag {
         return out;
     }
 
-    /** 删除单个日志文件。 */
     public static boolean deleteLog(File f) {
         if (f == null || !f.exists()) return false;
         try {
@@ -203,7 +212,6 @@ public class LoginDiag {
         }
     }
 
-    /** 删除全部历史日志，返回删除数量。 */
     public static int deleteAllLogs(Context c) {
         int n = 0;
         for (File f : listLogs(c)) {
@@ -212,10 +220,7 @@ public class LoginDiag {
         return n;
     }
 
-    /**
-     * 生成日志文件。文件名只到分钟，同一分钟内可能撞名，
-     * 这里补 _2、_3 后缀，不覆盖已有文件。
-     */
+    /** 文件名只到分钟，同分钟撞名时补 _2、_3，不覆盖已有文件。 */
     private static File newLogFile(Context c, long stampMs) {
         File dir = logDir(c);
         try {
@@ -247,8 +252,9 @@ public class LoginDiag {
         File out = newLogFile(c, started);
         StringBuilder sb = new StringBuilder();
         sb.append("=== shq 诊断日志 ===\n");
-        sb.append("开始时间: ").append(FULL_TS.format(new Date(started > 0 ? started : System.currentTimeMillis()))).append("\n");
-        sb.append("结束时间: ").append(FULL_TS.format(new Date())).append("\n");
+        // 全文件唯一的一个时间点
+        sb.append("时间: ").append(FULL_TS.format(
+                new Date(started > 0 ? started : System.currentTimeMillis()))).append("\n");
         sb.append("Android: ").append(android.os.Build.VERSION.RELEASE)
                 .append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
         sb.append("机型: ").append(android.os.Build.MANUFACTURER).append(' ')
@@ -259,7 +265,7 @@ public class LoginDiag {
         sb.append("事件数: ").append(snap.size()).append("\n\n");
         sb.append("--- 事件轨迹 ---\n");
         for (String line : snap) sb.append(line).append('\n');
-        sb.append("\n--- su logcat（白名单筛选，重复行合并）---\n");
+        sb.append("\n--- su logcat ---\n");
         String log = suLogcat(LOGCAT_RAW);
         sb.append(log.isEmpty() ? "(无 root 或抓取失败)\n" : log);
         FileOutputStream fos = null;
@@ -279,7 +285,6 @@ public class LoginDiag {
         }
     }
 
-    /** 手动导出一份当前日志。没有正在记录的内容时返回最近一份文件。 */
     public static String export(Context ctx, String gameName) {
         List<String> snap = snapshot();
         if (snap.isEmpty()) {
@@ -297,7 +302,7 @@ public class LoginDiag {
         String text = sb.toString();
         try {
             android.content.ClipboardManager cm =
-                    (android.content.ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE);
+                    (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
             cm.setPrimaryClip(android.content.ClipData.newPlainText("diag", text));
         } catch (Throwable ignored) {
         }
@@ -327,34 +332,39 @@ public class LoginDiag {
     }
 
     /**
-     * 取 logcat 并按白名单压缩。
+     * 取 logcat 并压缩：白名单筛选 → 去掉行首时间/pid → 相同内容合并。
      *
-     * 三步：白名单筛选 → 只留 HH:mm:ss → 相同内容合并并标次数。
-     * 条目超上限时保留最近的若干条，出问题总在最后。
+     * 白名单一条都没命中时，退化为最近 LOGCAT_FALLBACK 条去重后的 Tag: 消息，
+     * 保证不会出现「保留 0 条」这种什么都看不到的结果。
      */
     private static String suLogcat(int maxLines) {
         Process p = null;
         try {
-            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "logcat -d -t " + maxLines});
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "logcat -d -v threadtime -t " + maxLines});
             BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
 
-            Map<String, Bucket> merged = new LinkedHashMap<String, Bucket>();
+            Map<String, Bucket> kept = new LinkedHashMap<String, Bucket>();
+            LinkedHashSet<String> others = new LinkedHashSet<String>();
             int raw = 0;
-            int dropped = 0;
             String ln;
             while ((ln = br.readLine()) != null) {
                 raw++;
-                String key = compact(ln);
-                if (key == null) {
-                    dropped++;
-                    continue;
-                }
-                String time = timeOf(ln);
-                Bucket b = merged.get(key);
-                if (b == null) {
-                    merged.put(key, new Bucket(time, key));
+                String body = bodyOf(ln);
+                if (body == null || body.isEmpty()) continue;
+                String line = trim(body);
+                if (line.isEmpty()) continue;
+                if (isKeep(line)) {
+                    Bucket b = kept.get(line);
+                    if (b == null) kept.put(line, new Bucket(line));
+                    else b.count++;
                 } else {
-                    b.count++;
+                    others.add(line);
+                    if (others.size() > 400) {
+                        // 只留尾部，前面的老日志没意义
+                        List<String> tmp = new ArrayList<String>(others);
+                        others.clear();
+                        for (int i = tmp.size() - 300; i < tmp.size(); i++) others.add(tmp.get(i));
+                    }
                 }
             }
             br.close();
@@ -363,25 +373,30 @@ public class LoginDiag {
             } catch (Exception ignored) {
             }
 
-            List<Bucket> list = new ArrayList<Bucket>(merged.values());
+            StringBuilder sb = new StringBuilder();
+            List<Bucket> list = new ArrayList<Bucket>(kept.values());
+            if (list.isEmpty()) {
+                sb.append("读取 ").append(raw).append(" 行，无关键行，显示最近 ")
+                        .append(LOGCAT_FALLBACK).append(" 条原始日志\n");
+                List<String> tail = new ArrayList<String>(others);
+                int from = Math.max(0, tail.size() - LOGCAT_FALLBACK);
+                for (int i = from; i < tail.size(); i++) {
+                    sb.append(tail.get(i)).append('\n');
+                }
+                if (tail.isEmpty()) sb.append("(这段时间没有可读的 logcat)\n");
+                return sb.toString();
+            }
             boolean trimmed = false;
             if (list.size() > LOGCAT_UNIQUE) {
                 list = new ArrayList<Bucket>(list.subList(list.size() - LOGCAT_UNIQUE, list.size()));
                 trimmed = true;
             }
-            StringBuilder sb = new StringBuilder();
-            sb.append("读取 ").append(raw).append(" 行，筛掉 ").append(dropped)
-                    .append(" 行，保留 ").append(merged.size()).append(" 条");
-            if (trimmed) {
-                sb.append("，只显示最近 ").append(LOGCAT_UNIQUE).append(" 条");
-            }
+            sb.append("读取 ").append(raw).append(" 行，命中关键行 ")
+                    .append(kept.size()).append(" 条");
+            if (trimmed) sb.append("，只显示最近 ").append(LOGCAT_UNIQUE).append(" 条");
             sb.append('\n');
-            if (list.isEmpty()) {
-                sb.append("(这段时间内没有组件启动、崩溃或权限相关记录)\n");
-                return sb.toString();
-            }
             for (Bucket b : list) {
-                sb.append(b.time).append(' ').append(b.text);
+                sb.append(b.text);
                 if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
                 sb.append('\n');
             }
@@ -393,29 +408,8 @@ public class LoginDiag {
         }
     }
 
-    /** 取 "10-25 16:51:32.620" 里的 16:51:32；取不到返回 --:--:-- 。 */
-    private static String timeOf(String line) {
-        try {
-            Matcher m = LOGCAT_HEAD.matcher(line);
-            if (m.find()) return m.group(1);
-            int i = line.indexOf(' ');
-            if (i > 0 && line.length() > i + 9) {
-                String s = line.substring(i + 1, i + 9);
-                if (s.length() == 8 && s.charAt(2) == ':' && s.charAt(5) == ':') return s;
-            }
-        } catch (Throwable ignored) {
-        }
-        return "--:--:--";
-    }
-
-    /**
-     * 归一化成 "Tag: msg"。返回 null 表示这行不要。
-     *
-     * 只做白名单判断：命中 KEEP 任意一条才留下。
-     * 上一版那条「包含 error / fail 就保留」的规则必须删掉 ——
-     * ColorOS 上大量无害的 failed 会顺着它全爬进来。
-     */
-    private static String compact(String line) {
+    /** 去掉 "10-25 16:51:32.620  4358  5210 D " 前缀，只留 "Tag: msg"。 */
+    private static String bodyOf(String line) {
         if (line == null) return null;
         String s = line;
         try {
@@ -423,47 +417,42 @@ public class LoginDiag {
             if (m.find()) {
                 s = s.substring(m.end());
             } else {
+                // 兼容没有毫秒字段或格式略有差异的行
                 int sp = s.indexOf(' ');
-                if (sp > 0 && sp < 4) s = s.substring(sp + 1);
+                if (sp > 0 && sp <= 6) s = s.substring(sp + 1);
+                int first = s.indexOf(' ');
+                if (first > 0) s = s.substring(first + 1);
             }
         } catch (Throwable ignored) {
         }
-        s = s.trim();
-        if (s.isEmpty()) return null;
+        return s.trim();
+    }
 
-        boolean keep = false;
+    /** 去掉行内可能存在的第二处时间，保证一行最多一个时间（正文里一个都不留）。 */
+    private static String trim(String s) {
+        String r = s;
+        try {
+            r = r.replaceAll("^\\d{2}:\\d{2}:\\d{2}[.,]\\d{3}\\s+", "");
+            r = r.replaceAll("^\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}[.,]\\d{3}\\s+", "");
+        } catch (Throwable ignored) {
+        }
+        r = r.trim();
+        if (r.length() > 240) r = r.substring(0, 240) + "...";
+        return r;
+    }
+
+    private static boolean isKeep(String s) {
         for (String k : KEEP) {
-            if (s.contains(k)) {
-                keep = true;
-                break;
-            }
+            if (s.contains(k)) return true;
         }
-        if (!keep) return null;
-
-        // "Process" 太宽，只留死亡与启动两类，避免普通业务日志混进来
-        if (s.contains("Process ") && !s.contains("has died") && !s.contains("Start proc")
-                && !s.contains("was killed")) {
-            boolean other = false;
-            for (String k : KEEP) {
-                if (!"Process ".equals(k) && s.contains(k)) {
-                    other = true;
-                    break;
-                }
-            }
-            if (!other) return null;
-        }
-
-        if (s.length() > 240) s = s.substring(0, 240) + "...";
-        return s;
+        return false;
     }
 
     private static class Bucket {
-        final String time;
         final String text;
         int count = 1;
 
-        Bucket(String t, String x) {
-            time = t;
+        Bucket(String x) {
             text = x;
         }
     }

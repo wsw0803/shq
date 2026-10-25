@@ -30,38 +30,39 @@ import java.util.Map;
 /**
  * 把 token 交给目标游戏。
  *
- * 上一版为什么必然失败（2026-10-25 07:49 诊断日志）：
+ * 2026-10-25 第四次修订。上一版日志暴露了两个真问题：
  *
- *   [DISPATCH] 找到候选组件 3 个:
- *     ...pixui.wechat.WeChatFileProvider: , ...SystemFileProvider: , ...qq.QQFileProvider:
- *   [DISPATCH] 精确启动 ... Error: Activity class {...} does not exist.
+ * 一、把「组件收下 Intent 就结束」当成了成功。
  *
- * 三个候选全是 ContentProvider（FileProvider 是 provider，不是 Activity），
- * 是从 dumpsys 文本里按 pkg/Class 硬切出来的，连名字末尾的冒号都留着。
- * am start -n 必然报 does not exist，三次机会全废，后面两条策略跟着废。
- * 真正的登录组件根本没被找到。
+ *   [DISPATCH] A 精确启动 com.tencent.tauth.AuthActivity [auth] -> 已接收
+ *     Status: ok LaunchState: UNKNOWN (0)
+ *   [DISPATCH] 当前前台: com.tencent.tim/com.tencent.open.agent.AgentActivity
  *
- * 现在的策略：
+ *   LaunchState: UNKNOWN 意味着这个 Activity 起来就立刻结束了，前台一分没变，
+ *   说明它把 Intent 当成无效数据丢掉了。但代码只看 Status: ok 就继续，
+ *   四个候选全部这样空转一遍。
  *
- * 1) 用 PackageManager 拿真实 Activity 列表，provider / service / receiver 混不进来；
- *    PackageManager 被包可见性拦住时退回 dumpsys，但只接受类名以 Activity 结尾的条目。
- * 2) 优先识别腾讯 SDK 的真正回调入口：
- *    com.tencent.tauth.AuthActivity、com.tencent.connect.common.AssistActivity、
- *    com.tencent.open.agent.AuthorityActivity —— 这三个才是 QQ 登录结果的落点，
- *    比「名字里带 msdk 的随便什么页面」可靠得多。
- * 3) 每个组件试两种 data 形态：
- *    原始 auth://tauth.qq.com/?#...
- *    以及 tencent<appid>://tauth?#...  —— 这是 QQ 回调游戏时真正用的 scheme。
- *    同时附带 auth / key_response / appid 三个 extra，
- *    对应 QQ SDK AssistActivity 读 key_response 的那条分支。
- * 4) am start 一律带 -W，用「Status: ok 或 Activity:」判定，不再靠「没输出就是成功」；
- *    启动后必须确认游戏真的到了前台，才算这条路径成功。
- * 5) 全失败：auth 复制到剪贴板并把游戏切回前台，token 不丢、人不被困在 shq。
- * 6) 把游戏的完整 Activity 清单落到 dispatch_<游戏>.txt，方便手动挑组件。
+ * 二、把「游戏被唤醒」当成了 token 已消费。
  *
- * 手动指定组件（不用重新打包）：
- *   在 AgentActivity 上号界面长按「执行登录」选一个，
- *   或者直接往 myPrefs 写 dispatch_class_<游戏名> = 完整类名（或 包名/类名）。
+ *   [DISPATCH] B 主界面 SplashActivity [auth] -> LaunchState: WARM
+ *   [DISPATCH] 当前前台: com.tencent.tmgp.dfm/com.epicgames.ue4.GameActivity
+ *   [DISPATCH] B auth 已随 Intent 送进游戏主界面
+ *
+ *   三角洲本来就在后台活着，SplashActivity 只是把它带回前台，
+ *   根本没有读取我们塞的 token。这句「已送进主界面」是错的。
+ *
+ * 三、MAX_TRIES=3 把最有希望的组件排除了。
+ *
+ *   三角洲的 8 个候选中，真正加载 URL 并截获 auth 回调的是
+ *   MSDK 的 WebViewActivity / WebViewIPCActivity，它们在列表第 5、6 位，
+ *   被「只试前 3 个」直接砍掉。
+ *
+ * 现在的判断标准：
+ *
+ * - 收下 + 停在前台（游戏内某个 Activity）= 强成功，token 很可能被消费了。
+ * - 收下 + 立刻退出（LaunchState: UNKNOWN 且前台没变）= 失败，换下一个。
+ * - Splash/主界面把游戏唤醒 = 弱成功，只算「唤醒了游戏」，
+ *   会在结果里如实标注，不再冒充 token 交付成功。
  */
 public class GameLaunch {
 
@@ -75,11 +76,18 @@ public class GameLaunch {
         PACKAGES.put("无畏契约", "com.tencent.tmgp.codev");
     }
 
-    /** 最多试几个候选组件，避免把时间耗在几十个 msdk 页面上。 */
-    private static final int MAX_TRIES = 3;
+    /** 候选上限。MSDK 的 WebView 类组件往往排在后面，太少会全部错过。 */
+    private static final int MAX_TRIES = 8;
 
     private static final char LF = (char) 10;
     private static final char CR = (char) 13;
+
+    /** 派发结果的成色。 */
+    public static final int RESULT_NONE = 0;
+    /** 只是把游戏唤到前台，token 未必被读取。 */
+    public static final int RESULT_WOKE = 1;
+    /** 组件收下并停在游戏内，token 很可能已被消费。 */
+    public static final int RESULT_LANDED = 2;
 
     public static String packageOf(String gameName) {
         if (gameName == null) {
@@ -172,13 +180,10 @@ public class GameLaunch {
                 out.add(full);
             }
         }
-        if (!out.isEmpty()) {
-            LoginDiag.add("DISPATCH", "PackageManager 无数据，dumpsys 兜底找到 " + out.size() + " 个 Activity");
-        }
         return out;
     }
 
-    /** 疑似接收 auth 的登录组件，按可能性从高到低，已导出的优先。 */
+    /** 疑似接收 auth 的登录组件，按可能性从高到低。 */
     public static List<String> findAuthActivities(Context c, String pkg) {
         List<Hit> hits = new ArrayList<Hit>();
         Map<String, Boolean> exported = exportedMap(c, pkg);
@@ -224,79 +229,86 @@ public class GameLaunch {
     /**
      * 打分。
      *
-     * provider / receiver / service / stub 直接淘汰（-1）；
-     * 腾讯 SDK 的几个已知回调入口给最高分，其余按关键词累加。
+     * 排在最前的必须是真的会「读 URL、处理 auth 回调」的组件：
+     * MSDK 的 WebViewActivity 才是登录页宿主，AuthActivity / AssistActivity
+     * 只是 QQ SDK 的转发壳，实测收到数据就立刻结束。
      */
     private static int score(String cls) {
         if (cls == null || cls.isEmpty()) {
             return -1;
         }
         String low = cls.toLowerCase(Locale.ROOT);
+        // 明确不是 Activity 的、或者纯壳界面，直接淘汰
         if (low.contains("provider") || low.contains("receiver") || low.contains("service")
-                || low.contains("stub") || low.contains("proxy")) {
+                || low.contains("proxy") || low.contains("permission")
+                || low.contains("policy") || low.contains("qrcode")
+                || low.contains("pay")) {
             return -1;
         }
-        if (low.equals("com.tencent.tauth.authactivity")) {
-            return 14;
-        }
-        if (low.equals("com.tencent.connect.common.assistactivity")) {
-            return 13;
-        }
-        if (low.contains("open.agent.authorityactivity")) {
-            return 11;
-        }
         int s = 0;
-        if (low.contains("auth")) {
+        // MSDK 的 webview 宿主：加载 ptlogin 页、截获 auth:// 回调的就是它
+        if (low.contains("webviewactivity")) {
+            s += 20;
+        }
+        if (low.contains("webviewipcactivity")) {
+            s += 18;
+        }
+        if (low.contains("webview")) {
+            s += 12;
+        }
+        // 微信/QQ 授权中转
+        if (low.contains("wechatagent") || low.contains("wxentry") || low.contains("wxapi")) {
+            s += 10;
+        }
+        // 第三方登录授权入口
+        if (low.contains("authorize") || low.contains("authorityactivity")) {
+            s += 8;
+        }
+        // QQ SDK 的两个壳：能收，但通常收完就结束，排在后面
+        if (low.equals("com.tencent.tauth.authactivity")) {
             s += 6;
         }
-        if (low.contains("assist")) {
+        if (low.equals("com.tencent.connect.common.assistactivity")) {
             s += 5;
         }
-        if (low.contains("msdk")) {
+        if (low.contains("msdk") || low.contains("itop") || low.contains("gcloud")) {
             s += 5;
         }
-        if (low.contains("itop") || low.contains("gcloud")) {
-            s += 5;
-        }
-        if (low.contains("open.agent") || low.contains("tencent.open")) {
+        if (low.contains("login")) {
             s += 4;
         }
-        if (low.contains("login") || low.contains("logina")) {
+        if (low.contains("auth")) {
             s += 4;
         }
-        if (low.contains("qq")) {
-            s += 3;
-        }
-        if (low.contains("sso") || low.contains("callback")) {
-            s += 3;
-        }
-        if (low.contains("web")) {
-            s += 1;
+        if (low.contains("qq") || low.contains("sso")) {
+            s += 2;
         }
         return s;
     }
 
+    /** 兼容旧调用点：只要游戏在前台就算成功。 */
     public static boolean dispatch(Context ctx, String gameName, String authUrl) {
-        return dispatch(ctx, gameName, authUrl, "");
+        return dispatchEx(ctx, gameName, authUrl, "") >= RESULT_WOKE;
     }
 
     /**
-     * 直接派发。appid 用于拼 tencent&lt;appid&gt;://tauth 这种 QQ 回调形态。
-     * 返回 true 表示已经尽力交付（游戏被拉起 / token 已在剪贴板）。
+     * 直接派发，返回成色（RESULT_NONE / RESULT_WOKE / RESULT_LANDED）。
+     *
+     * appid 用于拼 tencent&lt;appid&gt;://tauth 这种 QQ 回调形态。
      */
-    public static boolean dispatch(Context ctx, String gameName, String authUrl, String appid) {
+    public static int dispatchEx(Context ctx, String gameName, String authUrl, String appid) {
         String pkg = packageOf(gameName);
         if (pkg.isEmpty()) {
             LoginDiag.add("DISPATCH", "未配置「" + gameName + "」的包名，跳过");
-            return false;
+            return RESULT_NONE;
         }
         if (authUrl == null || authUrl.isEmpty()) {
             LoginDiag.add("DISPATCH", "auth 数据为空");
-            return false;
+            return RESULT_NONE;
         }
         if (!isInstalled(ctx, pkg)) {
             LoginDiag.add("DISPATCH", "游戏未安装: " + pkg);
-            return false;
+            return RESULT_NONE;
         }
 
         String aid = cleanAppid(appid);
@@ -310,7 +322,7 @@ public class GameLaunch {
         logChannel(ctx);
 
         List<String> all = activitiesOf(ctx, pkg);
-        LoginDiag.add("DISPATCH", "游戏 Activity 共 " + all.size() + " 个: " + join(all, 30));
+        LoginDiag.add("DISPATCH", "游戏 Activity 共 " + all.size() + " 个");
         dumpActivitiesToFile(ctx, gameName, pkg, all, aid);
 
         boolean gameHasFilter = hasAuthFilter(ctx, pkg, authUrl);
@@ -323,33 +335,40 @@ public class GameLaunch {
         // 0) 手动指定的组件优先
         String manual = manualComponent(ctx, gameName);
         if (!manual.isEmpty()) {
-            if (tryOne(ctx, pkg, manual, authUrl, forms, "0 手动组件")) {
-                return true;
+            int r = tryOne(ctx, pkg, manual, authUrl, forms, "0 手动组件");
+            if (r == RESULT_LANDED) {
+                return RESULT_LANDED;
             }
         }
 
         List<String> cands = findAuthActivities(ctx, pkg);
-        LoginDiag.add("DISPATCH", "疑似登录组件 " + cands.size() + " 个: " + join(cands, 8));
+        LoginDiag.add("DISPATCH", "疑似登录组件 " + cands.size() + " 个: " + join(cands, 10));
 
         int tried = 0;
         for (String cls : cands) {
             if (tried >= MAX_TRIES) {
-                LoginDiag.add("DISPATCH", "候选太多，只试了前 " + MAX_TRIES + " 个");
+                LoginDiag.add("DISPATCH", "候选超过 " + MAX_TRIES + " 个，后面的不再尝试");
                 break;
             }
             tried++;
-            if (tryOne(ctx, pkg, cls, authUrl, forms, "A 精确启动")) {
+            int r = tryOne(ctx, pkg, cls, authUrl, forms, "A");
+            if (r == RESULT_LANDED) {
                 LoginDiag.add("DISPATCH", "A 命中 " + cls);
-                return true;
+                return RESULT_LANDED;
             }
         }
 
+        // B) 主界面：只能把游戏唤到前台，token 不会被这里读取，
+        // 所以它只算「唤醒了」，不能冒充交付成功。
         String main = mainActivity(ctx, pkg);
-        if (main.isEmpty()) {
+        if (!main.isEmpty()) {
+            int r = tryMain(ctx, pkg, main, authUrl, forms);
+            if (r >= RESULT_WOKE) {
+                LoginDiag.add("DISPATCH", "B 只把游戏唤到前台，token 未被读取");
+                return RESULT_WOKE;
+            }
+        } else {
             LoginDiag.add("DISPATCH", "B 找不到游戏主界面，跳过");
-        } else if (tryOne(ctx, pkg, main, authUrl, forms, "B 主界面")) {
-            LoginDiag.add("DISPATCH", "B auth 已随 Intent 送进游戏主界面");
-            return true;
         }
 
         String out = runSu("am start -W -a android.intent.action.VIEW -d " + RootUtil.shellQuote(authUrl)
@@ -357,7 +376,7 @@ public class GameLaunch {
         LoginDiag.add("DISPATCH", "C 包内 VIEW 解析 -> " + oneLine(out));
         if (okAm(out) && waitForeground(pkg, 2)) {
             LoginDiag.add("DISPATCH", "C 命中");
-            return true;
+            return RESULT_WOKE;
         }
 
         try {
@@ -367,7 +386,7 @@ public class GameLaunch {
             ctx.startActivity(it);
             LoginDiag.add("DISPATCH", "D 普通 Intent 已发出");
             if (waitForeground(pkg, 2)) {
-                return true;
+                return RESULT_WOKE;
             }
         } catch (Throwable t) {
             LoginDiag.add("DISPATCH", "D 普通 Intent 失败: " + t);
@@ -376,24 +395,62 @@ public class GameLaunch {
         copyToClipboard(ctx, authUrl);
         boolean front = bringToFront(ctx, pkg);
         LoginDiag.add("DISPATCH", "全部方式失败，auth 已复制到剪贴板，切回游戏=" + front);
-        return front;
+        return front ? RESULT_WOKE : RESULT_NONE;
     }
 
-    /** 对一个组件依次试各种 data 形态，命中即返回。 */
-    private static boolean tryOne(Context ctx, String pkg, String cls, String authUrl,
-                                  List<String> forms, String tag) {
+    /**
+     * 对一个组件依次试各种 data 形态。
+     *
+     * 判定成色的依据是「启动后前台还在不在游戏里」：
+     * LaunchState: UNKNOWN 且前台仍是 shq，说明组件收下就结束了，数据被丢弃；
+     * 前台变成游戏的某个 Activity，才算真的落地。
+     */
+    private static int tryOne(Context ctx, String pkg, String cls, String authUrl,
+                              List<String> forms, String tag) {
         for (int i = 0; i < forms.size(); i++) {
             String data = forms.get(i);
-            String out = runSu(amStart(pkg, cls, authUrl, data, ctx));
-            boolean started = okAm(out);
-            LoginDiag.add("DISPATCH", tag + " " + shortName(pkg, cls)
-                    + " [" + (i == 0 ? "auth" : "tauth") + "] -> "
-                    + (started ? "已接收" : "被拒") + " " + oneLine(out));
-            if (started && waitForeground(pkg, 2)) {
-                return true;
+            String out = runSu(amStart(pkg, cls, authUrl, data));
+            boolean accepted = okAm(out);
+            boolean unknown = isLaunchUnknown(out);
+            String who = shortName(pkg, cls) + " [" + (i == 0 ? "auth" : "tauth") + "]";
+            if (!accepted) {
+                LoginDiag.add("DISPATCH", tag + " " + who + " -> 被拒 " + oneLine(out));
+                continue;
+            }
+            boolean front = waitForeground(pkg, 2);
+            if (front) {
+                LoginDiag.add("DISPATCH", tag + " " + who + " -> 落地，前台已是游戏");
+                return RESULT_LANDED;
+            }
+            if (unknown) {
+                LoginDiag.add("DISPATCH", tag + " " + who + " -> 收下即结束（LaunchState UNKNOWN），换下一个");
+            } else {
+                LoginDiag.add("DISPATCH", tag + " " + who + " -> 收到但游戏没起来 " + oneLine(out));
             }
         }
-        return false;
+        return RESULT_NONE;
+    }
+
+    /** 主界面只负责唤醒，成功也只算 WOKE。 */
+    private static int tryMain(Context ctx, String pkg, String main, String authUrl,
+                               List<String> forms) {
+        String data = forms.isEmpty() ? authUrl : forms.get(0);
+        String out = runSu(amStart(pkg, main, authUrl, data));
+        boolean accepted = okAm(out);
+        LoginDiag.add("DISPATCH", "B 主界面 " + shortName(pkg, main) + " -> "
+                + (accepted ? "已接收" : "被拒") + " " + oneLine(out));
+        if (!accepted) {
+            return RESULT_NONE;
+        }
+        return waitForeground(pkg, 3) ? RESULT_WOKE : RESULT_NONE;
+    }
+
+    /** "LaunchState: UNKNOWN" 表示起来就结束，等于没处理。 */
+    private static boolean isLaunchUnknown(String out) {
+        if (out == null) {
+            return false;
+        }
+        return out.contains("LaunchState: UNKNOWN");
     }
 
     /** 候选 data 形态：原始 auth:// 与 QQ 真正用的 tencent&lt;appid&gt;://tauth。 */
@@ -409,7 +466,6 @@ public class GameLaunch {
         return out;
     }
 
-    /** 取 access_token 开头那一段查询串。 */
     private static String queryOf(String url) {
         if (url == null) {
             return "";
@@ -476,7 +532,6 @@ public class GameLaunch {
         return sb.toString();
     }
 
-    /** 手动指定组件：myPrefs 的 dispatch_class_<游戏名>。支持 类名 或 包名/类名。 */
     private static String manualComponent(Context ctx, String gameName) {
         if (ctx == null || gameName == null) {
             return "";
@@ -501,7 +556,7 @@ public class GameLaunch {
         }
     }
 
-    /** 结果回传通道只看 getCallingActivity，referrer 有值不代表有通道。 */
+    /** getCallingActivity 只记录，不作为成败判断 —— 它不代表对方在等结果。 */
     private static void logChannel(Context ctx) {
         if (!(ctx instanceof Activity)) {
             LoginDiag.add("DISPATCH", "调用方不是 Activity，无法判断结果通道");
@@ -512,12 +567,10 @@ public class GameLaunch {
             c = ((Activity) ctx).getCallingActivity();
         } catch (Throwable ignored) {
         }
-        LoginDiag.add("DISPATCH", "结果回传通道: " + (c == null
-                ? "无（对方用 startActivity / NEW_TASK 唤起，setResult 到不了游戏）"
-                : c.flattenToShortString() + "（startActivityForResult）"));
+        LoginDiag.add("DISPATCH", "getCallingActivity=" + (c == null ? "null" : c.flattenToShortString())
+                + "（只作参考，不代表游戏在等结果）");
     }
 
-    /** 游戏是否自己注册了 auth:// 的 intent-filter。 */
     private static boolean hasAuthFilter(Context c, String pkg, String authUrl) {
         try {
             Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(authUrl));
@@ -529,8 +582,7 @@ public class GameLaunch {
         }
     }
 
-    /** 拼 am start 命令。cls 为空时退化成包内 VIEW 解析。 */
-    private static String amStart(String pkg, String cls, String authUrl, String data, Context ctx) {
+    private static String amStart(String pkg, String cls, String authUrl, String data) {
         StringBuilder sb = new StringBuilder("am start -W");
         if (cls != null && !cls.isEmpty()) {
             sb.append(" -n ").append(pkg).append('/').append(cls);
@@ -549,7 +601,7 @@ public class GameLaunch {
         return sb.toString();
     }
 
-    /** am -W 的成功判定：有 Status: ok 或 Activity: 才算成功，出现 Error 一律算失败。 */
+    /** am -W 的成功判定：有 Status: ok 或 Activity: 才算投递成功。 */
     private static boolean okAm(String out) {
         if (out == null || out.isEmpty()) {
             return false;
@@ -563,12 +615,11 @@ public class GameLaunch {
         return low.contains("status: ok") || low.contains("activity: ");
     }
 
-    /** 轮询等游戏到前台。 */
     private static boolean waitForeground(String pkg, int tries) {
         for (int i = 0; i < tries; i++) {
             if (i > 0) {
                 try {
-                    Thread.sleep(500);
+                    Thread.sleep(350);
                 } catch (InterruptedException ignored) {
                 }
             }
@@ -579,7 +630,6 @@ public class GameLaunch {
         return false;
     }
 
-    /** 当前前台是不是这个游戏。 */
     private static boolean gameForeground(String pkg) {
         String dump = runSu("dumpsys window | grep -m 1 -E 'mCurrentFocus|mFocusedApp'");
         String comp = componentOf(dump);
@@ -587,11 +637,12 @@ public class GameLaunch {
             dump = runSu("dumpsys activity activities | grep -m 1 -E 'topResumedActivity|mResumedActivity'");
             comp = componentOf(dump);
         }
-        LoginDiag.add("DISPATCH", "当前前台: " + (comp.isEmpty() ? "未知" : comp));
-        return !comp.isEmpty() && comp.startsWith(pkg + "/");
+        boolean hit = !comp.isEmpty() && comp.startsWith(pkg + "/");
+        LoginDiag.add("DISPATCH", "前台: " + (comp.isEmpty() ? "未知" : comp)
+                + (hit ? " ✓" : ""));
+        return hit;
     }
 
-    /** 从 dumpsys 文本里挑出形如 com.pkg/.Act 的组件名。 */
     private static String componentOf(String dump) {
         if (dump == null || dump.isEmpty()) {
             return "";
@@ -624,7 +675,6 @@ public class GameLaunch {
                 || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '$' || ch == '-';
     }
 
-    /** 游戏主界面：先用 MAIN/LAUNCHER 查，查不到再按类名猜。 */
     public static String mainActivity(Context c, String pkg) {
         if (c == null || pkg == null || pkg.isEmpty()) {
             return "";
@@ -651,7 +701,6 @@ public class GameLaunch {
         return "";
     }
 
-    /** 只把游戏切回前台，不送 token。 */
     public static boolean bringToFront(Context ctx, String pkg) {
         if (ctx == null || pkg == null || pkg.isEmpty()) {
             return false;
@@ -678,7 +727,6 @@ public class GameLaunch {
         return false;
     }
 
-    /** 把活动清单写到文件，方便下次手动挑组件。 */
     private static void dumpActivitiesToFile(Context ctx, String gameName, String pkg,
                                             List<String> all, String appid) {
         if (ctx == null || all == null || all.isEmpty()) {
@@ -700,7 +748,7 @@ public class GameLaunch {
             sb.append("# 共 ").append(all.size()).append(" 个 Activity").append(LF).append(LF);
             List<String> ranked = findAuthActivities(ctx, pkg);
             if (!ranked.isEmpty()) {
-                sb.append("## 疑似登录组件（优先试这些）").append(LF);
+                sb.append("## 疑似登录组件（自动尝试的顺序）").append(LF);
                 for (String s : ranked) {
                     sb.append(s).append(LF);
                 }
@@ -713,7 +761,6 @@ public class GameLaunch {
             fos = new FileOutputStream(f, false);
             fos.write(sb.toString().getBytes("UTF-8"));
             fos.flush();
-            LoginDiag.add("DISPATCH", "组件清单已写入 " + f.getAbsolutePath());
         } catch (Throwable t) {
             LoginDiag.add("DISPATCH", "写组件清单失败: " + t);
         } finally {
@@ -755,7 +802,7 @@ public class GameLaunch {
             if (sb.length() > 0) {
                 sb.append(", ");
             }
-            sb.append(list.get(i));
+            sb.append(shortName("", list.get(i)));
         }
         if (list.size() > max) {
             sb.append(" ...");
@@ -768,8 +815,15 @@ public class GameLaunch {
             return "";
         }
         String t = s.replace(LF, ' ').replace(CR, ' ').trim();
-        if (t.length() > 300) {
-            t = t.substring(0, 300) + "...";
+        int i = t.indexOf("LaunchState");
+        if (i > 0) {
+            int end = t.indexOf("Activity:", i);
+            if (end > i) {
+                t = t.substring(0, i).trim() + " " + t.substring(end).trim();
+            }
+        }
+        if (t.length() > 180) {
+            t = t.substring(0, 180) + "...";
         }
         return t.isEmpty() ? "(无输出)" : t;
     }
