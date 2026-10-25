@@ -14,6 +14,8 @@ import android.widget.Toast;
 
 import com.tencent.open.agent.AgentActivity;
 
+import java.util.Locale;
+
 /**
  * 登录模块通用基类（抓号 / 挂机共用）。
  *
@@ -136,22 +138,71 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     }
 
     /**
-     * 记录 Cookie 状态。
-     * 登录态主要落在 qq.com / ptlogin2.qq.com / connect.qq.com，
-     * 记录三处长度即可判断是否写入成功。
+     * 记录 Cookie 状态（全域名）。
+     *
+     * 2026-10-25 第十次修订（三角洲）。
+     *
+     * 上一版只查 qq.com / ptlogin2 / connect 三个域，长度过短就看不出内容。
+     * 三角洲登录链路上会写一串 qq 子域，其中 MTDK/MSDK 认的那个票据
+     * 就藏在某一域里 —— 之前只打长度，等于什么都没看。
+     *
+     * 现在改成「遍历 CookieManager 里所有 Cookie，按域打印 key 名 + 值长度」，
+     * 并且把包含 v 开头的 key（vkey / vip / verify 之类）单独标出来。
+     * 这样下一份日志能一眼看到那个字段到底叫什么、在哪一域、多长。
      */
     protected void logCookieState(String when) {
         try {
             CookieManager cm = CookieManager.getInstance();
-            String qq = cm.getCookie("https://qq.com");
+            String all = cm.getCookie("https://qq.com");
             String pt = cm.getCookie("https://xui.ptlogin2.qq.com");
             String connect = cm.getCookie("https://connect.qq.com");
-            int qqLen = qq == null ? 0 : qq.length();
+            int allLen = all == null ? 0 : all.length();
             int ptLen = pt == null ? 0 : pt.length();
             int cnLen = connect == null ? 0 : connect.length();
-            LoginDiag.add("COOKIE", when + " qq.com=" + qqLen
+            LoginDiag.add("COOKIE", when + " 汇总 qq.com=" + allLen
                     + " ptlogin=" + ptLen + " connect=" + cnLen
                     + " 有登录态=" + (ptLen > 0 || cnLen > 0));
+
+            // 逐域展开。只有开诊断时才会执行到这里，开销可接受。
+            StringBuilder dump = new StringBuilder();
+            String[] hosts = {
+                    "https://qq.com", "https://xui.ptlogin2.qq.com",
+                    "https://connect.qq.com", "https://graph.qq.com",
+                    "https://openmobile.qq.com", "https://ams.game.qq.com",
+                    "https://comm.ams.game.qq.com", "https://imgcache.qq.com",
+                    "https://game.qq.com", "https://speed.qq.com",
+                    "https://apps.game.qq.com", "https://dfm.qq.com",
+                    "https://m.qq.com", "https://ptlogin2.qq.com",
+            };
+            for (String h : hosts) {
+                String ck = cm.getCookie(h);
+                if (ck == null || ck.isEmpty()) {
+                    continue;
+                }
+                dump.append(h.replace("https://", "")).append('[')
+                        .append(ck.length()).append("]:");
+                String[] pairs = ck.split(";");
+                for (String p : pairs) {
+                    String t = p.trim();
+                    int eq = t.indexOf('=');
+                    if (eq <= 0) {
+                        continue;
+                    }
+                    String k = t.substring(0, eq).trim();
+                    String v = t.substring(eq + 1).trim();
+                    dump.append(k).append('(').append(v.length()).append(')');
+                    // v 开头的 key 单独标记：三角洲可能就在等这个
+                    if (k.toLowerCase(Locale.ROOT).startsWith("v")) {
+                        dump.append("★V:");
+                        dump.append(v.length() > 16 ? v.substring(0, 16) + "…" : v);
+                    }
+                    dump.append(' ');
+                }
+                dump.append(" | ");
+            }
+            if (dump.length() > 0) {
+                LoginDiag.add("COOKIE", when + " 明细 " + dump);
+            }
         } catch (Throwable t) {
             LoginDiag.add("COOKIE", when + " 读取失败: " + t);
         }

@@ -463,6 +463,11 @@ public class AgentActivity extends BaseActivity {
                 + " oid=" + (openId.isEmpty() ? "缺" : ("len" + openId.length()))
                 + " pt=" + (payToken.isEmpty() ? "缺" : ("len" + payToken.length()))
                 + " exp=" + (expiresIn.isEmpty() ? "缺" : expiresIn));
+        // 把所有 v 开头的字段单独拎出来。
+        // 三角洲要的那个票据是 v 开头，之前没人知道它到底叫什么、在不在回包里，
+        // 这里直接列出来，key 名 + 值长度，下一份日志一看就明白。
+        String vKeys = vKeysOf(url);
+        LoginDiag.add("PARSE", "v 开头字段: " + (vKeys.isEmpty() ? "无" : vKeys));
         if (accessToken.isEmpty()) {
             LoginDiag.add("ERR", "performLogin: at 为空，内容格式不符");
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
@@ -905,6 +910,36 @@ public class AgentActivity extends BaseActivity {
         LoginDiag.add("PARSE", "auth URI 重建 len=" + out.length()
                 + " 原始字段数=" + countParams(url) + " 输出字段数=" + countParams(out));
         return out;
+    }
+
+    /** 列出所有 v 开头的 query 字段（key + 值长度），用于定位三角洲要的票据。 */
+    private static String vKeysOf(String url) {
+        if (url == null || url.isEmpty()) {
+            return "";
+        }
+        String q = url;
+        int hash = q.indexOf('#');
+        if (hash >= 0) {
+            q = q.substring(hash + 1);
+        }
+        int qm = q.indexOf('?');
+        if (qm >= 0) {
+            q = q.substring(qm + 1);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String kv : q.split("&")) {
+            int eq = kv.indexOf('=');
+            String k = eq > 0 ? kv.substring(0, eq) : kv;
+            String v = eq > 0 ? kv.substring(eq + 1) : "";
+            if (k.isEmpty() || Character.toLowerCase(k.charAt(0)) != 'v') {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append("  ");
+            }
+            sb.append(k).append('(').append(v.length()).append(')');
+        }
+        return sb.toString();
     }
 
     /** 数 key=value 的个数，只用于日志判断字段有没有被丢掉。 */
