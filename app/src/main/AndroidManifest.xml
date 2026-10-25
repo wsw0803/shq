@@ -142,6 +142,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+    
+        <!-- Xposed 模块声明。没有这三条，LSPosed 不会把本包当模块，
+             xposed_init 也不会被加载，进程内注入整条路失效。 -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription"
+            android:value="进程内证书链绕过：hook Conscrypt checkTrustedRecursive，供三角洲等 MSDK 游戏登录使用" />
+        <meta-data android:name="xposedminversion" android:value="82" />
     </application>
 
 </manifest>
