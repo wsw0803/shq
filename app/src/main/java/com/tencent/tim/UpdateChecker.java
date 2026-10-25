@@ -271,6 +271,7 @@ public class UpdateChecker {
                 one.body = stripFirstLine(msg).trim();
                 // 过滤 CI 自动提交
                 if (one.title.startsWith("chore: update latest apk")) continue;
+                if (one.title.startsWith("chore: version ")) continue;
                 if (one.title.startsWith("chore(core):")) continue;
                 out.add(one);
             }

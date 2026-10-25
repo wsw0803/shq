@@ -24,3 +24,10 @@ ci_logs/
 ci_logs.zip
 *.bak
 *.tmp
+
+# CI 产物
+# release/latest.apk 曾被每次构建提交进 git，历史已累积到 49MB，
+# 每次 checkout 都要拉这些再也用不到的旧 APK。
+# 现在 APK 只作为 Release 附件发布，仓库里只保留 release/version.json。
+release/latest.apk
+out/

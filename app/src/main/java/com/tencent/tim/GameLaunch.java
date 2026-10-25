@@ -463,7 +463,14 @@ public class GameLaunch {
         return sb.length() >= 5 ? sb.toString() : "";
     }
 
-    /** AssistActivity 读 key_response，这里按 QQ SDK 的字段拼一份。 */
+    /**
+     * AssistActivity 读 key_response，这里按 QQ SDK 的字段拼一份。
+     *
+     * 三角洲的 MSDK 会拿这份 JSON 跟原始 auth 串比对，
+     * 字段少一项就可能判「响应不完整」。所以：
+     *   必需字段固定输出，原始串里的其他字段（pfkey / auth_time / key 等）
+     *   原样带进 extras 字段，不丢。
+     */
     public static String keyResponse(String authUrl) {
         String at = param(authUrl, "access_token");
         if (at.isEmpty()) {
@@ -479,8 +486,50 @@ public class GameLaunch {
         sb.append(",\"access_token\":\"").append(at).append('"');
         sb.append(",\"pay_token\":\"").append(param(authUrl, "pay_token")).append('"');
         sb.append(",\"expires_in\":\"").append(exp).append('"');
-        sb.append(",\"pf\":\"").append("desktop_m_qq-10000144-android-2002-").append('"');
-        sb.append(",\"page_type\":\"1\"}");
+        String pf = param(authUrl, "pf");
+        if (pf.isEmpty()) {
+            pf = "desktop_m_qq-10000144-android-2002-";
+        }
+        sb.append(",\"pf\":\"").append(pf).append('"');
+        sb.append(",\"page_type\":\"").append(param(authUrl, "page_type")).append('"');
+        // 原始串里可能有 pfkey / auth_time / key，三角洲会读
+        appendIfPresent(sb, authUrl, "pfkey", "pfkey");
+        appendIfPresent(sb, authUrl, "auth_time", "auth_time");
+        appendIfPresent(sb, authUrl, "key", "pfkey");
+        String raw = authUrl == null ? "" : authUrl;
+        int i = raw.indexOf('#');
+        if (i >= 0) {
+            raw = raw.substring(i + 1);
+        }
+        sb.append(",\"raw\":\"").append(jsonEscape(raw)).append('"');
+        sb.append('}');
+        return sb.toString();
+    }
+
+    private static void appendIfPresent(StringBuilder sb, String url, String key, String as) {
+        String v = param(url, key);
+        if (!v.isEmpty() && sb.indexOf("\"" + as + "\"") < 0) {
+            sb.append(",\"").append(as).append("\":\"").append(jsonEscape(v)).append('"');
+        }
+    }
+
+    private static String jsonEscape(String s) {
+        if (s == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\\') {
+                sb.append('\\').append(c);
+            } else if (c == '\n') {
+                sb.append("\\n");
+            } else if (c == '\r') {
+                sb.append("\\r");
+            } else if (c >= 32) {
+                sb.append(c);
+            }
+        }
         return sb.toString();
     }
 

@@ -830,40 +830,95 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
+    /**
+     * 把任意形态的 token 文本规范成一个 auth:// URL。
+     *
+     * 2026-10-25 第九次修订（三角洲）。
+     *
+     * 上一版是「按固定字段重拼」：只取 access_token / openid / pay_token /
+     * expires_in / pfkey / auth_time 六个字段，其余全部丢弃。
+     *
+     * 三角洲的 MSDK 不走这套精简格式，它要整条原始回包：
+     *   - 有的版本要 &key= / &pf= / &page_type= 原值比对
+     *   - 有的版本要 &ret= / &expires_in= 之外的 &sig=、&user_cancelled= 之类
+     *   - 少了任何一个字段，checkToken 就会判「响应不完整」直接 ret=-1
+     *
+     * 症状和现在一模一样：结果交回去了、游戏回来了、就是不登录。
+     *
+     * 所以改成「原样保留」：
+     *   已经是 auth:// 的，一个字节都不动；
+     *   不是的，把原始 query 整段搬过来，只补缺失的必需字段，不删任何东西。
+     */
     private String normalizeAuthUrl(String url) {
         if (url == null || url.isEmpty()) {
             return url;
         }
         if (url.startsWith("auth://tauth.qq.com") && url.contains("access_token=")) {
+            // 原始回包，原样使用。三角洲要的就是这个完整度。
+            LoginDiag.add("PARSE", "auth URI 原样保留 len=" + url.length()
+                    + " 字段数=" + countParams(url));
             return url;
         }
         String at = grab(url, "access_token=([^&#]+)");
         if (at.isEmpty()) {
             return url;
         }
+
+        // 取出原始 query 整段（access_token 之后的全部内容），不做任何筛选。
+        int q = url.indexOf("access_token=");
+        String tail = q < 0 ? "" : url.substring(q);
+        // 去掉原串里可能带的 scheme/host 残留，只留 key=value&key=value
+        int bad = tail.indexOf('#');
+        if (bad >= 0) {
+            tail = tail.substring(0, bad);
+        }
+        tail = tail.trim();
+
         String openid = grab(url, "openid=([^&#]+)");
-        String pay = grab(url, "pay_token=([^&#]+)");
         String exp = grab(url, "expires_in=([^&#]+)");
-        if (exp.isEmpty()) {
-            exp = "7776000";
-        }
-        String authTime = grab(url, "auth_time=([^&#]+)");
-        String pfkey = grab(url, "key=([^&#]+)");
+        String pay = grab(url, "pay_token=([^&#]+)");
+
         StringBuilder sb = new StringBuilder("auth://tauth.qq.com/?#");
-        sb.append("access_token=").append(at);
-        sb.append("&expires_in=").append(exp);
-        sb.append("&openid=").append(openid);
-        sb.append("&pay_token=").append(pay);
-        sb.append("&ret=0");
-        sb.append("&pf=desktop_m_qq-10000144-android-2002-");
-        if (!pfkey.isEmpty()) {
-            sb.append("&pfkey=").append(pfkey);
+        sb.append(tail);
+
+        // 必需字段兜底：原始串里没有才补，有就不动。
+        if (!tail.contains("expires_in=")) {
+            sb.append("&expires_in=").append(exp.isEmpty() ? "7776000" : exp);
         }
-        if (!authTime.isEmpty()) {
-            sb.append("&auth_time=").append(authTime);
+        if (!tail.contains("openid=")) {
+            sb.append("&openid=").append(openid);
         }
-        sb.append("&page_type=0");
-        return sb.toString();
+        if (!tail.contains("pay_token=")) {
+            sb.append("&pay_token=").append(pay);
+        }
+        if (!tail.contains("ret=")) {
+            sb.append("&ret=0");
+        }
+        if (!tail.contains("pf=")) {
+            sb.append("&pf=desktop_m_qq-10000144-android-2002-");
+        }
+        if (!tail.contains("page_type=")) {
+            sb.append("&page_type=0");
+        }
+
+        String out = sb.toString();
+        LoginDiag.add("PARSE", "auth URI 重建 len=" + out.length()
+                + " 原始字段数=" + countParams(url) + " 输出字段数=" + countParams(out));
+        return out;
+    }
+
+    /** 数 key=value 的个数，只用于日志判断字段有没有被丢掉。 */
+    private static int countParams(String url) {
+        if (url == null || url.isEmpty()) {
+            return 0;
+        }
+        int n = 0;
+        for (int i = 0; i < url.length(); i++) {
+            if (url.charAt(i) == '=') {
+                n++;
+            }
+        }
+        return n;
     }
 
     private void saveRawDataToPreferences(String data) {

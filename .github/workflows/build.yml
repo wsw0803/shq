@@ -1,32 +1,60 @@
 name: Build Release APK
+
+# 构建加速要点（Run #293 之前单次约 6~8 分钟）：
+#   1) fetch-depth: 1        —— 不再拉全历史（仓库 .git 已 49MB）
+#   2) setup-gradle           —— Gradle 依赖与构建缓存跨 run 复用，省 2~3 分钟
+#   3) concurrency            —— 连推多个 commit 时自动取消旧 run
+#   4) 不再把 APK 提交进 git  —— 每次 5.4MB 永久写进历史，clone 越来越慢
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+
 permissions:
   contents: write
+
+# 同一时间只跑一个；新 push 直接顶掉还在跑的旧任务
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          # 原来 fetch-depth: 0 会把整部历史拉下来。
+          # 这个仓库每构建一次就 commit 一个 5.4MB 的 APK，历史已经 49MB，
+          # 而构建本身只需要当前这棵源码树。
+          fetch-depth: 1
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          # 跨 run 复用 ~/.gradle/caches 与构建缓存，这是最省时间的一步
+          cache-read-only: false
+
       - name: Prepare SDK
         run: |
           echo sdk.dir=$ANDROID_HOME > local.properties
-          echo no | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools" || true
+          # ubuntu-latest 自带 platforms;android-34，只有缺 36 时才装
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            yes | sdkmanager "platforms;android-36" > /dev/null 2>&1 || true
+          fi
+          if [ ! -d "$ANDROID_HOME/build-tools/35.0.0" ]; then
+            yes | sdkmanager "build-tools;35.0.0" > /dev/null 2>&1 || true
+          fi
+
       - name: Restore signing key
-        # 密钥不再提交到仓库。在 Settings > Secrets 配置 WEI_STORE_FILE_B64（keystore 的 base64）
-        # 以及 WEI_STORE_PASSWORD / WEI_KEY_ALIAS / WEI_KEY_PASSWORD。
-        # 未配置时构建照常进行，只是回退到 debug 签名。
         env:
           WEI_STORE_FILE_B64: ${{ secrets.WEI_STORE_FILE_B64 }}
         run: |
@@ -37,6 +65,7 @@ jobs:
           else
             echo "未配置 WEI_STORE_FILE_B64，本次使用 debug 签名"
           fi
+
       - name: Calculate Version
         id: version
         run: |
@@ -47,6 +76,7 @@ jobs:
           VERSION_NAME="$MAJOR.$MINOR.$PATCH"
           echo "vName=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "vCode=$COUNT" >> $GITHUB_OUTPUT
+
       - name: Build release
         env:
           WEI_STORE_PASSWORD: ${{ secrets.WEI_STORE_PASSWORD }}
@@ -54,24 +84,38 @@ jobs:
           WEI_KEY_PASSWORD: ${{ secrets.WEI_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace -PvCode=${{ steps.version.outputs.vCode }} -PvName=${{ steps.version.outputs.vName }}
+          # 去掉 --no-daemon（daemon 复用 JVM，本 step 内二次任务更快）
+          # 打开 build cache 与并行
+          ./gradlew assembleRelease \
+            --build-cache --parallel \
+            -PvCode=${{ steps.version.outputs.vCode }} \
+            -PvName=${{ steps.version.outputs.vName }}
+
       - name: Rename APK
         run: |
           mkdir -p out
           cp app/build/outputs/apk/release/*.apk out/shq-${{ steps.version.outputs.vName }}.apk
+
       - name: Publish APK to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.vName }}
           name: shq v${{ steps.version.outputs.vName }}
           files: out/*.apk
-      - name: Update raw files
+
+      # 只提交版本号（20 字节），不再把 5.4MB 的 APK 塞进 git 历史。
+      # APK 的唯一下载入口是 Release 附件，App 内的 UpdateChecker 也是走
+      # releases API，不读 release/ 目录。
+      - name: Update version marker
         run: |
           mkdir -p release
-          cp out/shq-${{ steps.version.outputs.vName }}.apk release/latest.apk
           echo '{"version":"${{ steps.version.outputs.vName }}"}' > release/version.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add release/latest.apk release/version.json
-          git commit -m "chore: update latest apk and version [skip ci]" || true
+          git add release/version.json
+          if git diff --staged --quiet; then
+            echo "版本号未变，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore: version ${{ steps.version.outputs.vName }} [skip ci]"
           git push || true
