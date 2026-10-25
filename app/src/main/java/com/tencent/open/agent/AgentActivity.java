@@ -37,21 +37,24 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 上号模式的策略（2026-10-25 修订）：
+ * 上号模式（2026-10-25 第三次修订）：
  *
- * 1) 先看有没有真正的结果回传通道 getCallingActivity()。
- *    有通道 → setResult 后立刻 finish，不要 finishAndRemoveTask，
- *            否则结果会随任务一起丢掉。
- *    没通道 → 游戏用 NEW_TASK 唤起（三角洲就是这样），setResult 到不了，
- *            必须主动派发（GameLaunch）。referrer 有值不代表有通道。
+ * 上一版错在「有回传通道就只 setResult、不派发」：
  *
- * 2) 派发一律放到后台线程。派发里面有 su、dumpsys、轮询前台，
- *    放主线程必然 ANR。
+ *   [RETURN] 结果通道=有，走 setResult
  *
- * 3) 按真实结果提示，不再一律喊「登录成功」。
+ * 但同一次 logcat 里，三角洲从头到尾没有任何一条 START u0，
+ * 只出现在 OplusRecentsAnimationController 的 task 记录中，
+ * 最后前台是 shq 的 SettingsActivity。也就是 setResult 根本没到游戏。
  *
- * 4) 长按「执行登录」可手动指定游戏的登录组件
- *    （写入 myPrefs.dispatch_class_<游戏>），自动挑选不准时不用重新打包。
+ * 根因：getCallingActivity() 非空只说明「系统记录了一个调用方」，
+ * 不等于对方在用 startActivityForResult 等结果。ColorOS 在 NEW_TASK
+ * 唤起时也会把这个字段填上，于是上一版的判断被它骗了。
+ *
+ * 现在的规则：
+ *   setResult 照发（万一真有通道，白送的机会不能丢），
+ *   但同时一定主动派发，最后以「游戏是否真的到了前台」作为成功依据。
+ *   派发放在后台线程：里面有 su、dumpsys、轮询前台，主线程做必然 ANR。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -145,7 +148,8 @@ public class AgentActivity extends BaseActivity {
                 + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
                 + " 游戏包名=" + (GameLaunch.hasPackage(getSelectedGameName())
                 ? GameLaunch.packageOf(getSelectedGameName()) : "未配置")
-                + " 带token=" + (incoming != null));
+                + " 带token=" + (incoming != null)
+                + " 回传通道=" + (callingActivityName() == null ? "无" : "有"));
 
         if ("login".equals(currentMode)) {
             setupLoginMode();
@@ -498,8 +502,11 @@ public class AgentActivity extends BaseActivity {
                 + " 一致=" + appid.equals(chosenAppid)
                 + " mode=" + mode
                 + " 外部唤起=" + launchedExternally
-                + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage));
+                + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
+                + " getCallingActivity=" + (callingActivityName() == null ? "null" : callingActivityName()));
 
+        // setResult 照发。真有回传通道时它是零成本的机会，
+        // 但不能把它当成主要手段 —— 见下方注释。
         Intent resultIntent = new Intent();
         resultIntent.putExtra("key_response", json.toString());
         setResult(RESULT_OK, resultIntent);
@@ -510,18 +517,16 @@ public class AgentActivity extends BaseActivity {
             return;
         }
 
-        // ---- 上号模式 ----
-        final boolean hasChannel = hasResultChannel();
-        LoginDiag.add("RETURN", "结果通道=" + (hasChannel ? "有，走 setResult" : "无，必须主动派发"));
-        if (hasChannel) {
-            // 有回传通道：直接交回游戏，别删任务，否则结果一起丢
-            Toast.makeText(this, "登录成功，已交回 " + gameName, Toast.LENGTH_SHORT).show();
-            finishLater(600);
-            return;
-        }
+        // ---- 上号模式：一定主动派发 ----
+        //
+        // 上一版看到 getCallingActivity() 非空就只 setResult、跳过派发，
+        // 结果 logcat 里三角洲一条 START u0 都没有，token 石沉大海。
+        // ColorOS 在 NEW_TASK 唤起时也会把这个字段填上，凭它判断不可靠。
+        // 现在：只要配置了包名就派发，最终以「游戏是否到前台」为准。
         if (!GameLaunch.hasPackage(gameName)) {
-            LoginDiag.add("DISPATCH", "「" + gameName + "」未配置包名，无法派发");
-            Toast.makeText(this, "「" + gameName + "」未配置包名，游戏收不到 token", Toast.LENGTH_LONG).show();
+            LoginDiag.add("DISPATCH", "「" + gameName + "」未配置包名，只能靠 setResult");
+            Toast.makeText(this, "「" + gameName + "」未配置包名，游戏收不到 token",
+                    Toast.LENGTH_LONG).show();
             finishLater(2500);
             return;
         }
@@ -542,8 +547,9 @@ public class AgentActivity extends BaseActivity {
                     return;
                 }
                 if (ok) {
-                    Toast.makeText(this, "已交给 " + gameName + "，请看游戏", Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "派发完成（游戏已在前台或 token 已在剪贴板）");
+                    Toast.makeText(this, "已交给 " + gameName + "，请看游戏",
+                            Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "派发成功，游戏已在前台");
                 } else {
                     Toast.makeText(this,
                             "交付失败：auth 已复制到剪贴板，请在游戏内手动粘贴",
@@ -555,23 +561,23 @@ public class AgentActivity extends BaseActivity {
         }).start();
     }
 
-    /** getCallingActivity 有值才说明对方在等结果；referrer 有值不算。 */
-    private boolean hasResultChannel() {
+    /** 调用方组件名；null 表示系统没记。仅用于日志，不参与成败判断。 */
+    private String callingActivityName() {
         try {
             ComponentName c = getCallingActivity();
-            return c != null;
+            return c == null ? null : c.flattenToShortString();
         } catch (Throwable t) {
-            return false;
+            return null;
         }
     }
 
-    /** 统一收尾：只有「上号 + 外部唤起 + 没有回传通道」才删任务，避免退回 shq 挡住游戏。 */
+    /** 统一收尾。上号且外部唤起时删任务，避免退回 shq 挡住游戏。 */
     private void finishLater(long delay) {
         ui.postDelayed(() -> {
             if (isFinishing()) {
                 return;
             }
-            boolean removeTask = "login".equals(currentMode) && launchedExternally && !hasResultChannel();
+            boolean removeTask = "login".equals(currentMode) && launchedExternally;
             if (removeTask && Build.VERSION.SDK_INT >= 21) {
                 finishAndRemoveTask();
             } else {
