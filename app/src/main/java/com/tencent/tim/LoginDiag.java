@@ -120,8 +120,6 @@ public class LoginDiag {
      */
     private static final String[] STRONG = {
             "key_response",
-            "ret=",
-            "errcode",
             "tauth",
             "authagent",
             "assistactivity",
@@ -140,7 +138,13 @@ public class LoginDiag {
             "refresh_token",
             "appid error",
             "appid不匹配",
-            "signature",
+            "opensdk_log",
+            "msdkcallback",
+            "ret=-1",
+            "ret = -1",
+            "ret=-2",
+            "ret = -2",
+            "errcode=",
     };
 
     /**
@@ -168,6 +172,35 @@ public class LoginDiag {
             "chatty",
             "choreographer",
             "freeze uid",
+            // 三角洲这一轮暴露的高频噪音：全是返回 ret=0 的性能日志，
+            // 把「ret=-1」这种真正的判决挤掉了。
+            "schedassist",
+            "audioboost",
+            "oplustouchdaemon",
+            "performanceservice",
+            "astscreen",
+            "bufferqueue",
+            "blastbufferqueue",
+            "surfacecontrol",
+            "viewrootimpl",
+            "dynamicframerate",
+            "openGLRenderer",
+            "hwui",
+            "pal:",
+            "ahal_",
+            "sensors-hal",
+            "osense",
+            "lowmemorykiller",
+            "conferencescene",
+            "activityadapter",
+            "broadcastqueue",
+            "notification_bubbles",
+            "setting ",
+            "cwbclient",
+            "receiver.module",
+            "playerbase",
+            "heaptask",
+            "vri[",
     };
 
     /**
@@ -498,10 +531,20 @@ public class LoginDiag {
     private static void appendBuckets(StringBuilder sb, List<Bucket> list, int cap) {
         boolean trimmed = false;
         if (list.size() > cap) {
-            list = new ArrayList<Bucket>(list.subList(list.size() - cap, list.size()));
+            // 超长时保留「头尾」两段：头部是最早的判决，尾部是最后一跳。
+            // 之前只留尾部，导致 AssistActivity 刚起来那几行（onCreate /
+            // onActivityResult 的入口）被截掉，只剩 onStop / onDestroy。
+            int head = cap / 3;
+            int tail = cap - head;
+            List<Bucket> merged = new ArrayList<Bucket>();
+            merged.addAll(list.subList(0, head));
+            Bucket gap = new Bucket("… 中间省略 " + (list.size() - cap) + " 条 …");
+            merged.add(gap);
+            merged.addAll(list.subList(list.size() - tail, list.size()));
+            list = merged;
             trimmed = true;
         }
-        if (trimmed) sb.append("(只显示最近 ").append(cap).append(" 条)\n");
+        if (trimmed) sb.append("(超过 ").append(cap).append(" 条，保留头尾)\n");
         for (Bucket b : list) {
             sb.append(b.text);
             if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
@@ -527,10 +570,17 @@ public class LoginDiag {
      * 目标游戏进程的日志。
      *
      * 这是上一版最大的盲区：token 交回游戏之后，被不被接受、为什么被拒绝，
-     * 全部记录在 com.tencent.tmgp.xxx 自己的进程里。我们一直在读自己的进程，
-     * 所以永远只能看到「已交回」，看不到「交回之后发生了什么」。
+     * 全部记录在 com.tencent.tmgp.xxx 自己的进程里。
      *
-     * 这里按 pid 直读游戏进程，命中强关键词的视为判决行优先输出。
+     * 2026-10-25 第十一次修订（三角洲）。
+     *
+     * 上一版用 `-t 4000 --pid=X`，实际只捞到 126 行 —— 因为 -t 是先截断
+     * 整个缓冲区再按 pid 过滤，游戏进程存活久，4000 行里几乎没有它的。
+     * 结果最关键的那一帧（AssistActivity 有没有收到 onActivityResult）
+     * 正好落在窗口外，等于白抓。
+     *
+     * 改成按时间来：用本次诊断开始的时刻做 -T 锚点，只读「诊断期间」的全部
+     * 游戏日志。窗口精确、不丢行，也不会被开机以来的历史淹没。
      */
     private static String gameLog(Context c, int maxLines) {
         String pkg = "";
@@ -548,15 +598,31 @@ public class LoginDiag {
             return "游戏进程不在（" + pkg + "），没有判决可读\n";
         }
         String pidArg = pids.replaceAll("\\s+", ",");
-        String dump = runSuCmd("logcat -d -v threadtime -b main,system,crash -t "
-                + maxLines + " --pid=" + pidArg);
-        if (dump == null || dump.isEmpty()) {
-            dump = runSuCmd("logcat -d -v threadtime -t " + maxLines
-                    + " --pid=" + pidArg.split(",")[0]);
+
+        // 时间锚点：诊断开始前 30 秒，覆盖登录页打开的那一刻
+        long anchor;
+        synchronized (LoginDiag.class) {
+            anchor = startedAt > 0 ? startedAt - 30000L
+                    : System.currentTimeMillis() - 180000L;
         }
+        String since = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.CHINA)
+                .format(new Date(anchor));
+
+        StringBuilder dumpSb = new StringBuilder();
+        // 按时间读，不用 -t。多缓冲区各读一次，crash 里的堆栈也要。
+        String[] bufs = {"main", "system", "crash", "events"};
+        int raw = 0;
+        for (String b : bufs) {
+            String part = runSuCmd("logcat -d -v threadtime -b " + b
+                    + " -T '" + since + "' --pid=" + pidArg);
+            if (part != null && !part.isEmpty()) {
+                dumpSb.append(part);
+            }
+        }
+        String dump = dumpSb.toString();
+
         Map<String, Bucket> strong = new LinkedHashMap<String, Bucket>();
         Map<String, Bucket> ctx = new LinkedHashMap<String, Bucket>();
-        int raw = 0;
         int dropped = 0;
         if (dump != null) {
             for (String rawLine : dump.split("\n")) {
@@ -579,6 +645,7 @@ public class LoginDiag {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("包名 ").append(pkg).append(" pid=").append(pidArg)
+                .append(" 起始 ").append(since)
                 .append("，读取 ").append(raw).append(" 行，证据 ").append(strong.size())
                 .append(" 条，上下文 ").append(ctx.size()).append(" 条");
         if (dropped > 0) sb.append("，丢弃噪声 ").append(dropped).append(" 行");
@@ -589,13 +656,13 @@ public class LoginDiag {
             sb.append("(没有判决行。说明游戏进程根本没回调 SDK 的登录结果 —— ")
                     .append("token 大概率不是被 AssistActivity 消费，而是被系统丢了)\n");
         } else {
-            appendBuckets(sb, new ArrayList<Bucket>(strong.values()), 80);
+            appendBuckets(sb, new ArrayList<Bucket>(strong.values()), maxLines);
         }
         sb.append("\n[上下文 · 游戏侧]\n");
         if (ctx.isEmpty()) {
             sb.append("(无)\n");
         } else {
-            appendBuckets(sb, new ArrayList<Bucket>(ctx.values()), 60);
+            appendBuckets(sb, new ArrayList<Bucket>(ctx.values()), 120);
         }
         return sb.toString();
     }

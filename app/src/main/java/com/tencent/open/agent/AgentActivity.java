@@ -516,8 +516,13 @@ public class AgentActivity extends BaseActivity {
          * 上一版只给了 extras，data 是 null。如果游戏里这份 SDK 走的是 data 分支，
          * 它拿到的就是 null，于是「结果交回去了、游戏也回来了、但就是不登录」——
          * 和日志里观察到的现象完全一致。两条路一起给，哪种解析都能命中。
+         *
+         * 注意：这里用的是 saved 的原串，一个字节都不改。
+         * 之前为了「规范」把 ?# 换成 #，长度从 306 变成 305 ——
+         * 有的 SDK 会把拿到的 data 跟原始回包做字符串比对，
+         * 少一个字符就判不一致。原样最安全。
          */
-        String dataUri = saved == null ? "" : saved.replace("auth://tauth.qq.com/?#", "auth://tauth.qq.com/#");
+        String dataUri = saved == null ? "" : saved;
         resultIntent.setData(android.net.Uri.parse(dataUri));
         // 一些 MSDK 版本还会检查这两个标记位，缺了就当「用户取消」处理。
         resultIntent.putExtra("ret", 0);
@@ -633,12 +638,40 @@ public class AgentActivity extends BaseActivity {
      *
      * 有真实回传通道时不能删任务，否则结果会跟着任务一起丢；
      * 只在「上号 + 外部唤起 + 没通道」时 finishAndRemoveTask，避免退回 shq 挡住游戏。
+     *
+     * 2026-10-25 第十二次修订（三角洲）。
+     *
+     * 上一份日志里，游戏进程内 AssistActivity 的完整生命周期是：
+     *   --> onCreate / onStart / onResume
+     *   --> onStop
+     *   --> onDestroy
+     * 中间**没有 onActivityResult**。
+     *
+     * 也就是说：我们 setResult 了，但 AssistActivity 不是被 finish() 通知的，
+     * 而是被系统直接销毁的 —— 它的 onActivityResult 压根没被调用，
+     * 于是 token 从来没有送到 IUiListener，游戏永远停在未登录。
+     *
+     * 原因是 finishLater() 里用的是 finishAndRemoveTask / finish，
+     * 而这条路径在个别 ROM 上会让调用方（AssistActivity）走 onDestroy
+     * 而不是 onActivityResult。要让它收到结果，必须满足两个条件：
+     *   一、我们的 Activity 必须先于调用方 finish，且不能移除所在任务
+     *   二、调用方必须还活着 —— 不能被系统回收
+     *
+     * 所以这里改成：setResult 之后立刻 finish()（不留延时窗口给系统动手），
+     * 并且在 finish 前把 resultCode 之外的东西也准备好。
+     * 延时只保留给「需要弹 Toast 让用户看见」的场景。
      */
     private void finishLater(long delay) {
         final boolean login = "login".equals(currentMode);
         final boolean external = launchedExternally;
         final boolean channel = hasRealChannel();
         final String gameName = getSelectedGameName();
+
+        // 有真实回传通道时，越快 finish 越好。
+        // 延时越长，AssistActivity 越可能先被系统挂在后台然后 onStop 掉，
+        // 我们在它 onStop 之后才 finish，结果就永远送不到了。
+        final long realDelay = channel ? Math.min(delay, 150L) : delay;
+
         ui.postDelayed(() -> {
             if (isFinishing()) {
                 return;
@@ -652,7 +685,7 @@ public class AgentActivity extends BaseActivity {
             if (login) {
                 watchGameBack(gameName);
             }
-        }, delay);
+        }, realDelay);
     }
 
     /**
