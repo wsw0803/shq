@@ -1,5 +1,6 @@
 package com.tencent.tim;
 
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
@@ -13,6 +14,21 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.List;
 
+/**
+ * 设置页。
+ *
+ * 本次修复（2026-10-25）：
+ *
+ * 1) 不再被系统当成「开机后的入口」。
+ *    之前重启手机后从桌面点图标会直接落在设置页：系统把任务栈原样恢复，
+ *    而栈顶恰好是设置页，点图标只是把旧任务栈提到前台。
+ *    现在两道保险：
+ *      - Manifest 给 MainActivity 加了 clearTaskOnLaunch，从桌面进入一律清到主页；
+ *      - 这里再兜一层：如果本页被单独恢复成任务根（栈底没有主页），
+ *        直接跳回主页并结束自己。正常从主页点进来时 isTaskRoot() 为 false，不受影响。
+ *
+ * 2) 当前主题按钮会标注「当前」，不用退出去再猜现在是哪个主题。
+ */
 public class SettingsActivity extends BaseActivity {
 
     private static final int REQ_PICK_BG = 1001;
@@ -24,6 +40,15 @@ public class SettingsActivity extends BaseActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // 被系统恢复成任务栈根界面 = 不是从主页正常进来的，直接回主页
+        if (isTaskRoot()) {
+            Intent home = new Intent(this, MainActivity.class);
+            home.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(home);
+            finish();
+            return;
+        }
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
 
@@ -62,19 +87,22 @@ public class SettingsActivity extends BaseActivity {
         setupDiag();
 
         seekDpi.setOnSeekBarChangeListener(new L() {
-            @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
+            @Override
+            public void onProgressChanged(SeekBar sb, int v, boolean u) {
                 tvDpi.setText("DPI: " + (v + 50) + "%");
             }
         });
         seekGlass.setOnSeekBarChangeListener(new L() {
-            @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
+            @Override
+            public void onProgressChanged(SeekBar sb, int v, boolean u) {
                 Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_GLASS, v).apply();
                 labels();
                 Ui.apply(SettingsActivity.this);
             }
         });
         seekBright.setOnSeekBarChangeListener(new L() {
-            @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
+            @Override
+            public void onProgressChanged(SeekBar sb, int v, boolean u) {
                 Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_BRIGHT, v).apply();
                 labels();
                 Ui.apply(SettingsActivity.this);
@@ -86,10 +114,11 @@ public class SettingsActivity extends BaseActivity {
             final int v = i;
             Button b = findViewById(thIds[i]);
             b.setOnClickListener(x -> {
-                Ui.prefs(this).edit().putInt(Ui.KEY_THEME, v).apply();
+                Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_THEME, v).apply();
                 recreate();
             });
         }
+        markThemeButtons();
 
         back.setOnClickListener(v -> finish());
         reset.setOnClickListener(v -> {
@@ -107,6 +136,23 @@ public class SettingsActivity extends BaseActivity {
         });
     }
 
+    /** 让当前主题按钮一眼看出来。 */
+    private void markThemeButtons() {
+        int cur = Ui.prefs(this).getInt(Ui.KEY_THEME, 0);
+        int[] thIds = {R.id.th_dark, R.id.th_light, R.id.th_auto};
+        for (int i = 0; i < thIds.length; i++) {
+            Button b = findViewById(thIds[i]);
+            if (b == null) continue;
+            String base = stripCurrent(String.valueOf(b.getText()));
+            b.setText(i == cur ? (base + " · 当前") : base);
+        }
+    }
+
+    private String stripCurrent(String s) {
+        int i = s.indexOf(" · 当前");
+        return i < 0 ? s : s.substring(0, i);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -117,32 +163,26 @@ public class SettingsActivity extends BaseActivity {
         final Switch sw = findViewById(R.id.sw_diag);
         tvDiagFiles = findViewById(R.id.tv_diag_files);
         if (sw == null) return;
-
         sw.setChecked(LoginDiag.isEnabled(this));
         sw.setOnCheckedChangeListener((btn, on) -> {
             LoginDiag.setEnabled(this, on);
             if (on) {
-                android.widget.Toast.makeText(this,
-                        "已开启，操作完成后关闭即可自动保存日志",
+                android.widget.Toast.makeText(this, "已开启，操作完成后关闭即可自动保存日志",
                         android.widget.Toast.LENGTH_LONG).show();
             } else {
-                android.widget.Toast.makeText(this,
-                        "已关闭，本次日志已自动保存",
+                android.widget.Toast.makeText(this, "已关闭，本次日志已自动保存",
                         android.widget.Toast.LENGTH_LONG).show();
                 btn.postDelayed(this::refreshDiagFiles, 800);
             }
         });
-
         Button export = findViewById(R.id.btn_diag_export);
         if (export != null) {
             export.setOnClickListener(v -> showDiagList());
         }
-
         Button clear = findViewById(R.id.btn_diag_clear);
         if (clear != null) {
             clear.setOnClickListener(v -> confirmDeleteAll());
         }
-
         refreshDiagFiles();
     }
 
@@ -159,7 +199,6 @@ public class SettingsActivity extends BaseActivity {
 
     /**
      * 日志列表：点选复制内容，长按删除该条。
-     * 删除是这次新增的能力，之前只能查看不能删。
      */
     private void showDiagList() {
         final List<File> all = LoginDiag.listLogs(this);
@@ -169,22 +208,19 @@ public class SettingsActivity extends BaseActivity {
                     android.widget.Toast.LENGTH_LONG).show();
             return;
         }
-
         String[] items = new String[all.size()];
         for (int i = 0; i < all.size(); i++) {
             File f = all.get(i);
             long kb = Math.max(1, f.length() / 1024);
-            items[i] = f.getName() + "  (" + kb + " KB)";
+            items[i] = f.getName() + " (" + kb + " KB)";
         }
-
         final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
                 .setTitle("诊断日志（点选复制 / 长按删除）")
                 .setItems(items, (d, which) -> {
                     File f = all.get(which);
                     String content = LoginDiag.readFile(f);
                     if (content.isEmpty()) {
-                        android.widget.Toast.makeText(this, "读取失败",
-                                android.widget.Toast.LENGTH_SHORT).show();
+                        android.widget.Toast.makeText(this, "读取失败", android.widget.Toast.LENGTH_SHORT).show();
                         return;
                     }
                     try {
@@ -203,7 +239,6 @@ public class SettingsActivity extends BaseActivity {
                 .setNegativeButton("关闭", null)
                 .create();
 
-        // 长按列表项删除对应文件
         dlg.setOnShowListener(d -> {
             android.widget.ListView lv = dlg.getListView();
             if (lv == null) return;
@@ -214,8 +249,7 @@ public class SettingsActivity extends BaseActivity {
                         .setMessage("确定删除 " + target.getName() + " ？")
                         .setPositiveButton("删除", (dd, ww) -> {
                             boolean ok = LoginDiag.deleteLog(target);
-                            android.widget.Toast.makeText(this,
-                                    ok ? "已删除" : "删除失败",
+                            android.widget.Toast.makeText(this, ok ? "已删除" : "删除失败",
                                     android.widget.Toast.LENGTH_SHORT).show();
                             dlg.dismiss();
                             refreshDiagFiles();
@@ -226,15 +260,13 @@ public class SettingsActivity extends BaseActivity {
                 return true;
             });
         });
-
         dlg.show();
     }
 
     private void confirmDeleteAll() {
         final List<File> all = LoginDiag.listLogs(this);
         if (all.isEmpty()) {
-            android.widget.Toast.makeText(this, "没有可删除的日志",
-                    android.widget.Toast.LENGTH_SHORT).show();
+            android.widget.Toast.makeText(this, "没有可删除的日志", android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
         new android.app.AlertDialog.Builder(this)
@@ -243,8 +275,7 @@ public class SettingsActivity extends BaseActivity {
                 .setPositiveButton("全部删除", (d, w) -> {
                     int n = LoginDiag.deleteAllLogs(this);
                     LoginDiag.clear();
-                    android.widget.Toast.makeText(this,
-                            "已删除 " + n + " 份",
+                    android.widget.Toast.makeText(this, "已删除 " + n + " 份",
                             android.widget.Toast.LENGTH_SHORT).show();
                     refreshDiagFiles();
                 })
@@ -269,7 +300,9 @@ public class SettingsActivity extends BaseActivity {
         input.setText(Net.getManualProxy(this));
         input.setHint("例如 127.0.0.1:7890");
         input.setSingleLine(true);
-
+        // 输入框自己定色：AlertDialog 跟系统主题走，不一定浅不一定深
+        input.setTextColor(Ui.isLightMode(this) ? 0xFF121C2A : 0xFFE6EEF8);
+        input.setHintTextColor(0xFF8A9BB8);
         new android.app.AlertDialog.Builder(this)
                 .setTitle("更新下载代理")
                 .setMessage("填写本地 SOCKS 代理 host:port，用于下载 xray 核心与更新包。\n留空表示不使用。")
@@ -301,7 +334,8 @@ public class SettingsActivity extends BaseActivity {
                         .apply();
             } else {
                 Ui.prefs(this).edit().putString(Ui.KEY_BG_URI, uri.toString()).apply();
-                android.widget.Toast.makeText(this, "背景已设置（未能复制到本地，重启后可能失效）",
+                android.widget.Toast.makeText(this,
+                        "背景已设置（未能复制到本地，重启后可能失效）",
                         android.widget.Toast.LENGTH_LONG).show();
             }
             Ui.apply(this);
@@ -324,8 +358,14 @@ public class SettingsActivity extends BaseActivity {
         } catch (Exception e) {
             return false;
         } finally {
-            try { if (out != null) out.close(); } catch (Exception ignored) {}
-            try { if (in != null) in.close(); } catch (Exception ignored) {}
+            try {
+                if (out != null) out.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (in != null) in.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -345,10 +385,15 @@ public class SettingsActivity extends BaseActivity {
     }
 
     private abstract class L implements SeekBar.OnSeekBarChangeListener {
-        @Override public void onStartTrackingTouch(SeekBar sb) {}
-        @Override public void onStopTrackingTouch(SeekBar sb) {
+        @Override
+        public void onStartTrackingTouch(SeekBar sb) {
+        }
+
+        @Override
+        public void onStopTrackingTouch(SeekBar sb) {
             if (sb.getId() == R.id.seek_dpi) {
-                Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_DPI, sb.getProgress() + 50).apply();
+                Ui.prefs(SettingsActivity.this).edit()
+                        .putInt(Ui.KEY_DPI, sb.getProgress() + 50).apply();
                 Ui.applyDpi(SettingsActivity.this);
             }
         }

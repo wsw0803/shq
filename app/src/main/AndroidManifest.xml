@@ -39,9 +39,24 @@
         android:requestLegacyExternalStorage="true"
         tools:ignore="UnusedAttribute">
 
+        <!--
+            主页。
+
+            clearTaskOnLaunch="true" 是本轮修复「重启后打开直接进设置页」的关键：
+            系统会把上次的任务栈原样恢复（栈顶停在设置页），此时从桌面点图标
+            只是把旧任务栈提到前台，于是看到的第一屏就是设置页。
+            加上这个属性后，从桌面进入一律先把任务栈清到主页，
+            设置页只能从主页点「设置」进入。
+
+            alwaysRetainTaskState="false" 让系统在长时间闲置后不再保留整栈，
+            避免恢复出一个和当前配置不符的旧界面。
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
+            android:clearTaskOnLaunch="true"
+            android:alwaysRetainTaskState="false"
             android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -57,7 +72,6 @@
             startActivityForResult 的结果目标，一旦使用，
             游戏通过 auth:// 唤起本界面后，本界面的 setResult(RESULT_OK)
             会被系统直接丢弃，游戏永远收不到 token。
-            这正是「提示登录成功但游戏没反应」的根因。
 
             使用 singleTop 即可：重复唤起时复用栈顶，同时保留结果回传能力。
             另外显式声明 taskAffinity 为空串，让本界面尽量落在调用方的任务栈里，
@@ -81,9 +95,16 @@
             </intent-filter>
         </activity>
 
+        <!--
+            设置页：只有从主页点进来才可能出现。
+            deliverResultToCallers 与 isTaskRoot 兜底一起用，
+            保证它永远不会成为启动落地页。
+        -->
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
+            android:launchMode="standard"
+            android:excludeFromRecents="true"
             android:screenOrientation="portrait" />
 
         <provider
