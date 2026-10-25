@@ -1,5 +1,7 @@
 package com.tencent.tim;
 
+import com.tencent.tim.core.GamePlan;
+
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -276,6 +278,17 @@ public class GameLaunch {
      * 直接派发，返回成色（RESULT_NONE / RESULT_WOKE / RESULT_LANDED）。
      */
     public static int dispatchEx(Context ctx, String gameName, String authUrl, String appid) {
+        // 三角洲这类游戏的登录在 MSDK 进程内完成校验，没有「外部投递」入口。
+        // 继续走下面这套 startActivity 流程，唯一的结果是拉起
+        // pixui.WebViewActivity → 拿不到 url → destroySurface → 黑屏，
+        // 还会留下一个空任务栈。所以在入口直接拒绝，不做无谓尝试。
+        if (!GamePlan.canDispatchExternally(gameName)) {
+            GamePlan plan = GamePlan.ofGame(gameName);
+            LoginDiag.add("DISPATCH", "「" + gameName + "」不支持外部投递"
+                    + (plan == null ? "" : "：" + plan.note));
+            return RESULT_NONE;
+        }
+
         String pkg = packageOf(gameName);
         if (pkg.isEmpty()) {
             LoginDiag.add("DISPATCH", "未配置「" + gameName + "」的包名，跳过");

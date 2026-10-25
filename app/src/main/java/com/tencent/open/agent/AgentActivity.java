@@ -1,5 +1,8 @@
 package com.tencent.open.agent;
 
+import com.tencent.tim.core.GamePlan;
+import com.tencent.tim.core.ShqXposedBridge;
+
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -608,6 +611,31 @@ public class AgentActivity extends BaseActivity {
             Toast.makeText(this, "「" + gameName + "」未配置包名，游戏收不到 token",
                     Toast.LENGTH_LONG).show();
             finishLater(2500);
+            return;
+        }
+
+        // 三角洲这类游戏没有外部投递入口，继续往下走只会拉起内部 WebViewActivity
+        // 然后 destroySurface，表现为黑屏。在这里就停下，并把原因说清楚，
+        // 而不是让用户以为「正在交付」等一个必然失败的结果。
+        if (GamePlan.needsInProcess(gameName)) {
+            String pkg = GameLaunch.packageOf(gameName);
+            int n = ShqXposedBridge.hookedMethodCount(pkg);
+            String why;
+            if (n > 0) {
+                why = "「" + gameName + "」需进程内注入，证书链已接管 " + n + " 个重载；\n"
+                        + "请在 LSPosed 中勾选本模块作用域后，直接在游戏内登录";
+            } else if (n == ShqXposedBridge.UNKNOWN) {
+                // 没 root / 状态文件不存在 —— 无法确认，不谎报成功也不谎报失败
+                why = "「" + gameName + "」需进程内注入，无法确认是否已接管。\n"
+                        + "请确认已在 LSPosed 启用本模块并勾选作用域，然后直接在游戏内登录";
+            } else {
+                why = "「" + gameName + "」需进程内注入，但当前未检测到 Xposed 接管。\n"
+                        + "请在 LSPosed 中启用本模块，作用域勾选 " + gameName + "，重启游戏";
+            }
+            Toast.makeText(this, why, Toast.LENGTH_LONG).show();
+            LoginDiag.add("DISPATCH", "「" + gameName + "」需进程内注入，已跳过外部投递"
+                    + "（hooked=" + n + "）");
+            finishLater(3500);
             return;
         }
 

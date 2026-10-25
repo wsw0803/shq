@@ -70,6 +70,7 @@ public class XposedEntry implements IXposedHookLoadPackage {
 
         int n = hookTrustManager();
         log(TM_METHOD + " 已接管 " + n + " 个重载");
+        writeStatus(n);
 
         hookUrlCapture(lpparam);
     }
@@ -230,6 +231,35 @@ public class XposedEntry implements IXposedHookLoadPackage {
     /** 供后续 MSDK 回灌读取。 */
     public static String lastAuthUrl() {
         return lastAuthUrl;
+    }
+
+    /**
+     * 把接管数写进目标进程自己的 files 目录，供本 App 用 root 读取。
+     *
+     * 不引 android.content.Context 的编译期依赖：本类要能在没有
+     * android.jar 的环境下独立编译校验，所以这里全程反射。
+     */
+    private static void writeStatus(int n) {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object app = at.getMethod("currentApplication").invoke(null);
+            if (app == null) {
+                return;
+            }
+            Object dir = app.getClass().getMethod("getFilesDir").invoke(app);
+            if (!(dir instanceof java.io.File)) {
+                return;
+            }
+            java.io.File f = new java.io.File((java.io.File) dir, "shq_xposed.status");
+            java.io.FileWriter w = new java.io.FileWriter(f, false);
+            try {
+                w.write("hooked=" + n);
+            } finally {
+                w.close();
+            }
+        } catch (Throwable t) {
+            log("写状态失败: " + t);
+        }
     }
 
     private static void log(String s) {
