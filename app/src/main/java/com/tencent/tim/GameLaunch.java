@@ -739,6 +739,53 @@ public class GameLaunch {
         return "";
     }
 
+    /**
+     * 给 MSDK 发一条登录结果广播。
+     *
+     * 三角洲的 MSDK 在部分版本里不只看 AssistActivity 的 onActivityResult，
+     * 还要收到一条进程内广播才会真正推进登录状态机。
+     * 日志证据：AssistActivity 走完 onActivityResult 立刻 onDestroy，
+     * 而游戏进程里 SDK 没有任何后续日志 —— 它没被唤醒。
+     *
+     * 这里把常见的几种 action 都发一遍，字段用 MSDK 认的名字。
+     * 发错了不会有害（没人监听就当无事发生），发对了就能接上。
+     */
+    public static void notifyMsdkBroadcast(Context ctx, String gameName, String authUrl, String appid) {
+        if (ctx == null) {
+            return;
+        }
+        String pkg = packageOf(gameName);
+        if (pkg.isEmpty()) {
+            LoginDiag.add("BCAST", "「" + gameName + "」未配置包名，跳过广播");
+            return;
+        }
+        String[] actions = {
+                "com.tencent.msdk.login.SUCCESS",
+                "com.tencent.msdk.LOGIN_RESULT",
+                "com.tencent.itop.login.result",
+                pkg + ".msdk.LOGIN_RESULT",
+        };
+        int sent = 0;
+        for (String action : actions) {
+            try {
+                Intent it = new Intent(action);
+                it.setPackage(pkg);
+                it.putExtra("appid", appid);
+                it.putExtra("access_token", param(authUrl, "access_token"));
+                it.putExtra("openid", param(authUrl, "openid"));
+                it.putExtra("pay_token", param(authUrl, "pay_token"));
+                it.putExtra("expires_in", param(authUrl, "expires_in"));
+                it.putExtra("auth", authUrl);
+                it.putExtra("ret", 0);
+                ctx.sendBroadcast(it);
+                sent++;
+            } catch (Throwable t) {
+                LoginDiag.add("BCAST", action + " 失败: " + t);
+            }
+        }
+        LoginDiag.add("BCAST", "已发 " + sent + "/" + actions.length + " 条登录广播 -> " + pkg);
+    }
+
     public static boolean bringToFront(Context ctx, String pkg) {
         if (ctx == null || pkg == null || pkg.isEmpty()) {
             return false;

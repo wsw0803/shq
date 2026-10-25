@@ -698,37 +698,97 @@ public class LoginDiag {
      * MSDKCallback、Tencent、QQAuth。用 | 拼成正则一次抓完。
      * 不设 -T，抓最近的；不设 -t 上限太大也没意义，用 2000 行做 tail。
      */
+    /**
+     * SDK tag 全量抓取。
+     *
+     * 上一版写成 logcat ... -s "openSDK_LOG|MSDK|tauth"，
+     * 这是错的：logcat 的 -s 后面每个参数就是一个 tag 名，
+     * 竖线是字面字符，不会当正则拆分。于是它去找一个名字里
+     * 真的带 "|" 的 tag，当然一条都没有 —— 输出恒为空。
+     *
+     * 那一刻的结论「SDK 没走到回调处理」也因此站不住脚。
+     *
+     * 正确做法：logcat 只管把最近的日志吐出来，tag 匹配放在 Java 侧做。
+     * 这样既不受 -s 语义限制，也不受 --pid 与 -s 联用时的版本差异影响。
+     */
     private static String sdkByTag(String pidArg) {
-        String tagRe = "openSDK_LOG|openSDK|tauth|MSDK|MSDKCallback|Tencent|QQAuth|AuthAgent|TAuth";
-        String out = runSuCmd("logcat -d -v threadtime -b main,system -t 2000 --pid="
-                + pidArg + " -s " + tagRe);
+        String[] tags = {
+                "openSDK_LOG", "openSDK", "tauth", "TAuth", "MSDK", "MSDKCallback",
+                "QQAuth", "AuthAgent", "AuthAgentActivity", "Tencent",
+                "AssistActivity", "UserInfo", "QQToken",
+        };
+        // 先按 pid 抓；抓不到再退到全量，随后在 Java 侧双重过滤
+        String out = runSuCmd("logcat -d -v threadtime -b main,system,events -t 6000 --pid="
+                + pidArg);
+        String scope = "pid=" + pidArg;
         if (out == null || out.trim().isEmpty()) {
-            // -s 与 --pid 同时用，某些 logcat 版本会全部过滤掉。
-            // 退回：不加 --pid，只按 tag 抓，再在 Java 侧按包名/pid 标记。
-            out = runSuCmd("logcat -d -v threadtime -b main,system -t 2000 -s " + tagRe);
+            out = runSuCmd("logcat -d -v threadtime -b main,system,events -t 6000");
+            scope = "全量";
         }
-        if (out == null || out.trim().isEmpty()) {
-            return "(该进程在最近 logcat 里没有任何 openSDK / MSDK 日志)\n"
-                    + "(这本身就说明 SDK 没走到回调处理 —— 结果收下了但没进登录逻辑)\n";
-        }
+
         Map<String, Bucket> kept = new LinkedHashMap<String, Bucket>();
         int raw = 0;
-        for (String line : out.split("\n")) {
-            raw++;
-            String t = trim(bodyOf(line));
-            if (t.isEmpty()) continue;
-            Bucket b = kept.get(t);
-            if (b == null) kept.put(t, new Bucket(t));
-            else b.count++;
+        int matched = 0;
+        if (out != null) {
+            for (String line : out.split("\n")) {
+                raw++;
+                if (line == null || line.isEmpty()) continue;
+                if (!hasAnyTag(line, tags)) continue;
+                String t = trim(bodyOf(line));
+                if (t.isEmpty()) continue;
+                matched++;
+                Bucket b = kept.get(t);
+                if (b == null) kept.put(t, new Bucket(t));
+                else b.count++;
+            }
         }
+
         StringBuilder sb = new StringBuilder();
-        sb.append("读取 ").append(raw).append(" 行，去重后 ").append(kept.size()).append(" 条\n");
+        sb.append("范围 ").append(scope).append("，读取 ").append(raw)
+                .append(" 行，命中 tag ").append(matched)
+                .append(" 行，去重后 ").append(kept.size()).append(" 条\n");
+        if (kept.isEmpty()) {
+            sb.append("(真的没有 SDK tag。可能原因：\n")
+                    .append(" 一、这版 MSDK 用 Tag 前缀而非上述名字，需要补 tag；\n")
+                    .append(" 二、SDK 日志被游戏自己关了（正式包常见），\n")
+                    .append("    这种情况只能靠「游戏内表现」判断，日志里不会有答案)\n");
+            return sb.toString();
+        }
         for (Bucket b : kept.values()) {
             sb.append(b.text);
             if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
             sb.append('\n');
         }
         return sb.toString();
+    }
+
+    /** threadtime 行里的 tag 是第 7 列，判断是否命中白名单。 */
+    private static boolean hasAnyTag(String line, String[] tags) {
+        String[] cols = line.split("\\s+");
+        // "10-25 21:20:07.123  1234  5678 D Tag: msg" → 索引 5 是级别，6 是 tag
+        String tag = null;
+        if (cols.length > 6) {
+            tag = cols[6];
+        }
+        if (tag == null || tag.isEmpty()) {
+            return false;
+        }
+        if (tag.endsWith(":")) {
+            tag = tag.substring(0, tag.length() - 1);
+        }
+        for (String t : tags) {
+            if (tag.equals(t)) {
+                return true;
+            }
+            if (tag.startsWith(t)) {
+                return true;
+            }
+            // openSDK_LOG.AssistActivity_80554093 这种带后缀的 tag
+            if (tag.contains(t)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean looksLikeGame(String line) {
