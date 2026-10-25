@@ -1,11 +1,14 @@
 package com.tencent.open.agent;
 
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.Window;
@@ -22,7 +25,6 @@ import com.tencent.tim.LoginDiag;
 import com.tencent.tim.NormalWebViewClient;
 import com.tencent.tim.R;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -35,12 +37,21 @@ import java.util.regex.Pattern;
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 上号模式的处理策略（重要）：
+ * 上号模式的策略（2026-10-25 修订）：
  *
- * 有的游戏用 startActivity + NEW_TASK 唤起本应用，referrer 有值，
- * 但根本没有结果回传通道，setResult 到不了游戏。三角洲就是这种。
- * 因此上号模式下不能把希望寄托在 setResult 上，
- * 必须主动把 auth 派发给游戏（GameLaunch）。setResult 只作兼容保留。
+ * 1) 先看有没有真正的结果回传通道 getCallingActivity()。
+ *    有通道 → setResult 后立刻 finish，不要 finishAndRemoveTask，
+ *            否则结果会随任务一起丢掉。
+ *    没通道 → 游戏用 NEW_TASK 唤起（三角洲就是这样），setResult 到不了，
+ *            必须主动派发（GameLaunch）。referrer 有值不代表有通道。
+ *
+ * 2) 派发一律放到后台线程。派发里面有 su、dumpsys、轮询前台，
+ *    放主线程必然 ANR。
+ *
+ * 3) 按真实结果提示，不再一律喊「登录成功」。
+ *
+ * 4) 长按「执行登录」可手动指定游戏的登录组件
+ *    （写入 myPrefs.dispatch_class_<游戏>），自动挑选不准时不用重新打包。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -49,23 +60,26 @@ public class AgentActivity extends BaseActivity {
     private static final Pattern TOKEN_PATTERN = Pattern.compile(
             "access_token=([^&]+)(?:&expires_in=([^&]+))?&openid=([^&]+)&pay_token=([^&]+)");
 
+    private final Handler ui = new Handler(Looper.getMainLooper());
+
     private WebView webView;
     private ScrollView loginScroll;
     private EditText plainText;
     private Button pasteLoginButton;
     private Button manualLoginButton;
+
     private String currentMode;
     private Window mWindow;
     private String callerPackage = "";
     private boolean launchedExternally = false;
+    /** 正在派发，避免连点重复派发。 */
+    private boolean dispatching = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         requestWindowFeature(1);
         setRequestedOrientation(0);
-
         this.mWindow = getWindow();
         if (Build.VERSION.SDK_INT >= 28) {
             this.mWindow.getAttributes().layoutInDisplayCutoutMode = 1;
@@ -75,33 +89,34 @@ public class AgentActivity extends BaseActivity {
         if (Build.VERSION.SDK_INT >= 21) {
             getWindow().setNavigationBarColor(getResources().getColor(0x0106000b));
         }
-
         setContentView(R.layout.activity_agent);
-
         webView = findViewById(R.id.webview);
         loginScroll = findViewById(R.id.login_scroll);
         plainText = findViewById(R.id.plain_text);
         pasteLoginButton = findViewById(R.id.btn_paste);
         manualLoginButton = findViewById(R.id.btn_manual_login);
-
         try {
             com.tencent.tim.Ui.apply(this);
             try {
                 android.view.View bgc = findViewById(R.id.bg_custom);
-                if (bgc != null) bgc.setVisibility(android.view.View.GONE);
+                if (bgc != null) {
+                    bgc.setVisibility(android.view.View.GONE);
+                }
             } catch (Throwable ignored) {
             }
         } catch (Throwable ignored) {
         }
-
         android.widget.Button pickToken = findViewById(R.id.btn_pick_token);
         if (pickToken != null) {
             pickToken.setOnClickListener(v -> showPickToken());
         }
-
         plainText.addTextChangedListener(new android.text.TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
             public void afterTextChanged(android.text.Editable ed) {
                 updateAutoGameHint(ed == null ? "" : ed.toString());
             }
@@ -112,29 +127,25 @@ public class AgentActivity extends BaseActivity {
         if (intent != null) {
             modeFromIntent = intent.getStringExtra("mode");
         }
-
         resolveCaller(intent);
-
         if (modeFromIntent != null && !modeFromIntent.isEmpty()) {
             currentMode = modeFromIntent;
         } else {
             SharedPreferences prefs = getSharedPreferences("myPrefs", MODE_PRIVATE);
             currentMode = prefs.getString("pd_key", "capture");
-            if (intent != null && intent.getData() != null) {
-                String url = intent.getData().toString();
-                if (url.startsWith("auth:")) {
-                    plainText.setText(url);
-                    Toast.makeText(this, "检测到游戏登录请求", Toast.LENGTH_SHORT).show();
-                }
-            }
         }
+
+        // 外部唤起且 Intent 已带 access_token：说明游戏把登录回调甩了过来，
+        // 直接当成一次登录处理，不用等人再粘一遍。
+        String incoming = incomingAuth(intent);
 
         LoginDiag.add("AGENT", "mode=" + currentMode
                 + " game=" + getSelectedGameName()
                 + " 外部唤起=" + launchedExternally
                 + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage)
                 + " 游戏包名=" + (GameLaunch.hasPackage(getSelectedGameName())
-                        ? GameLaunch.packageOf(getSelectedGameName()) : "未配置"));
+                ? GameLaunch.packageOf(getSelectedGameName()) : "未配置")
+                + " 带token=" + (incoming != null));
 
         if ("login".equals(currentMode)) {
             setupLoginMode();
@@ -145,6 +156,34 @@ public class AgentActivity extends BaseActivity {
         } else {
             setupCaptureMode();
         }
+
+        if (incoming != null) {
+            plainText.setText(incoming);
+            Toast.makeText(this, "检测到游戏登录回调", Toast.LENGTH_SHORT).show();
+            ui.postDelayed(() -> performLogin(incoming), 300);
+        }
+    }
+
+    /** 从唤起 Intent 里取 auth 数据；没有 access_token 就不算回调。 */
+    private String incomingAuth(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        try {
+            String data = intent.getDataString();
+            String extra = intent.getStringExtra("auth");
+            if (extra == null || extra.isEmpty()) {
+                extra = intent.getStringExtra("key_response");
+            }
+            if (data != null && data.contains("access_token=")) {
+                return data;
+            }
+            if (extra != null && extra.contains("access_token=")) {
+                return extra;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     private void resolveCaller(Intent intent) {
@@ -157,7 +196,9 @@ public class AgentActivity extends BaseActivity {
             if (ref.startsWith("android-app://")) {
                 pkg = ref.substring("android-app://".length());
                 int cut = pkg.indexOf('/');
-                if (cut > 0) pkg = pkg.substring(0, cut);
+                if (cut > 0) {
+                    pkg = pkg.substring(0, cut);
+                }
             }
             if (!pkg.isEmpty() && !getPackageName().equals(pkg)) {
                 callerPackage = pkg;
@@ -165,8 +206,7 @@ public class AgentActivity extends BaseActivity {
             }
             if (intent != null && intent.getData() != null) {
                 String scheme = intent.getData().getScheme();
-                if (scheme != null
-                        && (scheme.equalsIgnoreCase("auth")
+                if (scheme != null && (scheme.equalsIgnoreCase("auth")
                         || scheme.equalsIgnoreCase("tencent")
                         || scheme.equalsIgnoreCase("qq"))) {
                     launchedExternally = true;
@@ -182,8 +222,7 @@ public class AgentActivity extends BaseActivity {
         if (hasFocus && mWindow != null) {
             if ("login".equals(currentMode)) {
                 mWindow.getDecorView().setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
             } else {
                 mWindow.getDecorView().setSystemUiVisibility(5894);
             }
@@ -197,26 +236,35 @@ public class AgentActivity extends BaseActivity {
                 getWindow().setNavigationBarColor(Color.parseColor("#0A0F1A"));
             }
             mWindow.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
-
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
             webView.setVisibility(View.GONE);
             loginScroll.setVisibility(View.VISIBLE);
             loadRawDataFromPreferences();
-
             String input = plainText.getText() == null ? "" : plainText.getText().toString();
             LoginDiag.add("LOGIN", "game=" + getSelectedGameName()
                     + " 已选appid=" + getSelectedGameAppid()
                     + " 输入长度=" + input.length()
                     + " 含token=" + input.contains("access_token="));
-
             if (pasteLoginButton != null) {
                 pasteLoginButton.setOnClickListener(v -> pasteAndLogin());
             }
             if (manualLoginButton != null) {
                 manualLoginButton.setOnClickListener(v -> {
                     LoginDiag.add("LOGIN", "点击执行登录");
-                    performLogin(plainText.getText().toString());
+                    String text = plainText.getText() == null ? "" : plainText.getText().toString();
+                    if (text.isEmpty() || !text.contains("access_token=")) {
+                        Toast.makeText(this, "请先填入 token（可点「选择Token」）", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (dispatching) {
+                        Toast.makeText(this, "正在派发，请稍候", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    performLogin(text);
+                });
+                manualLoginButton.setOnLongClickListener(v -> {
+                    showDispatchPicker();
+                    return true;
                 });
             }
         } catch (Exception e) {
@@ -239,7 +287,6 @@ public class AgentActivity extends BaseActivity {
             webView.getSettings().setDisplayZoomControls(false);
             webView.getSettings().setDomStorageEnabled(true);
             webView.setWebViewClient(new NormalWebViewClient(this));
-
             String url = getLoginUrl();
             LoginDiag.add("CAPTURE", "url appid=" + com.tencent.tim.TokenStore.appidOfUrl(url));
             if (url != null && !url.isEmpty()) {
@@ -268,7 +315,6 @@ public class AgentActivity extends BaseActivity {
             webView.getSettings().setDisplayZoomControls(false);
             webView.getSettings().setDomStorageEnabled(true);
             webView.setWebViewClient(new HangUpWebViewClient(this));
-
             String url = getLoginUrl();
             LoginDiag.add("HANGUP", "url appid=" + com.tencent.tim.TokenStore.appidOfUrl(url));
             if (url != null && !url.isEmpty()) {
@@ -302,8 +348,72 @@ public class AgentActivity extends BaseActivity {
             LoginDiag.add("LOGIN", "选中 Token game=" + e.game + " appid=" + e.appid);
             plainText.setText(url2);
             updateAutoGameHint(url2);
-            performLogin(url2);
         });
+    }
+
+    /** 长按「执行登录」：手动挑一个游戏的登录组件，记住下次直接用。 */
+    private void showDispatchPicker() {
+        final String game = getSelectedGameName();
+        final String pkg = GameLaunch.packageOf(game);
+        if (pkg.isEmpty()) {
+            Toast.makeText(this, "「" + game + "」还没有配置包名，无法列组件", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "正在读取 " + pkg + " 的组件…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final java.util.List<String> all = GameLaunch.activitiesOf(this, pkg);
+            final java.util.List<String> cands = GameLaunch.findAuthActivities(this, pkg);
+            ui.post(() -> showDispatchDialog(game, pkg, all, cands));
+        }).start();
+    }
+
+    private void showDispatchDialog(final String game, final String pkg,
+                                    java.util.List<String> all, java.util.List<String> cands) {
+        if (isFinishing()) {
+            return;
+        }
+        if (all == null || all.isEmpty()) {
+            Toast.makeText(this, "没读到 " + pkg + " 的组件，需要 root 或包可见性", Toast.LENGTH_LONG).show();
+            LoginDiag.add("DISPATCH", "读取组件为空: " + pkg);
+            return;
+        }
+        final java.util.List<String> items = new java.util.ArrayList<>();
+        items.add("清除手动指定（恢复自动挑选）");
+        if (cands != null) {
+            for (String s : cands) {
+                if (!items.contains(s)) {
+                    items.add(s);
+                }
+            }
+        }
+        for (String s : all) {
+            if (!items.contains(s)) {
+                items.add(s);
+            }
+        }
+        String[] arr = new String[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            arr[i] = items.get(i);
+        }
+        LoginDiag.add("DISPATCH", "打开组件选择器 game=" + game + " pkg=" + pkg
+                + " 条目=" + items.size());
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("选择 " + game + " 的登录组件")
+                .setItems(arr, (d, which) -> {
+                    SharedPreferences sp = getSharedPreferences("myPrefs", MODE_PRIVATE);
+                    String key = "dispatch_class_" + game;
+                    if (which == 0) {
+                        sp.edit().remove(key).apply();
+                        LoginDiag.add("DISPATCH", "已清除手动组件: " + game);
+                        Toast.makeText(this, "已恢复自动挑选", Toast.LENGTH_SHORT).show();
+                    } else {
+                        String cls = items.get(which);
+                        sp.edit().putString(key, cls).apply();
+                        LoginDiag.add("DISPATCH", "手动指定组件 " + game + " -> " + cls);
+                        Toast.makeText(this, "已记住: " + cls, Toast.LENGTH_LONG).show();
+                    }
+                })
+                .show();
     }
 
     private void updateAutoGameHint(String url) {
@@ -313,17 +423,20 @@ public class AgentActivity extends BaseActivity {
     public void pasteAndLogin() {
         try {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (clipboard != null && clipboard.hasPrimaryClip()) {
-                String text = clipboard.getPrimaryClip().getItemAt(0).getText().toString();
+            if (clipboard != null && clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip() != null
+                    && clipboard.getPrimaryClip().getItemAt(0) != null) {
+                CharSequence cs = clipboard.getPrimaryClip().getItemAt(0).getText();
+                String text = cs == null ? "" : cs.toString();
                 if (!TextUtils.isEmpty(text)) {
                     LoginDiag.add("LOGIN", "粘贴登录，长度=" + text.length()
                             + " 含token=" + text.contains("access_token="));
                     plainText.setText(text);
                     performLogin(text);
-                    Toast.makeText(this, "已从剪切板粘贴并登录", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "已从剪贴板粘贴并登录", Toast.LENGTH_SHORT).show();
                 }
             } else {
-                Toast.makeText(this, "剪切板没有内容", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "剪贴板没有内容", Toast.LENGTH_SHORT).show();
             }
         } catch (Exception e) {
             LoginDiag.add("ERR", "pasteAndLogin: " + e);
@@ -342,25 +455,28 @@ public class AgentActivity extends BaseActivity {
             Toast.makeText(this, "数据为空", Toast.LENGTH_SHORT).show();
             return;
         }
-
         String accessToken = grab(url, "access_token=([^&\\s#]+)");
         String expiresIn = grab(url, "expires_in=([^&\\s#]+)");
         String openId = grab(url, "openid=([^&\\s#]+)");
         String payToken = grab(url, "pay_token=([^&\\s#]+)");
-
         LoginDiag.add("PARSE", "at=" + (accessToken.isEmpty() ? "缺" : ("len" + accessToken.length()))
                 + " oid=" + (openId.isEmpty() ? "缺" : ("len" + openId.length()))
                 + " pt=" + (payToken.isEmpty() ? "缺" : ("len" + payToken.length()))
                 + " exp=" + (expiresIn.isEmpty() ? "缺" : expiresIn));
-
         if (accessToken.isEmpty()) {
             LoginDiag.add("ERR", "performLogin: at 为空，内容格式不符");
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
             return;
         }
 
+        final String saved = normalizeAuthUrl(url);
+        final String gameName = getSelectedGameName();
+        final String appid = appidFrom(url);
+        final String chosenAppid = getSelectedGameAppid();
+        final String mode = currentMode != null ? currentMode : "capture";
+
+        JSONObject json = new JSONObject();
         try {
-            JSONObject json = new JSONObject();
             json.put("access_token", accessToken);
             json.put("openid", openId);
             json.put("pay_token", payToken);
@@ -368,63 +484,100 @@ public class AgentActivity extends BaseActivity {
             json.put("ret", "0");
             json.put("pf", "desktop_m_qq-10000144-android-2002-");
             json.put("page_type", "1");
-
-            String saved = normalizeAuthUrl(url);
-            saveRawDataToPreferences(saved);
-
-            String gameName = getSelectedGameName();
-            String appid = appidFrom(url);
-            String chosenAppid = getSelectedGameAppid();
-
-            LoginDiag.add("RESULT", "game=" + gameName
-                    + " tokenAppid=" + appid
-                    + " 已选appid=" + chosenAppid
-                    + " 一致=" + appid.equals(chosenAppid)
-                    + " mode=" + currentMode
-                    + " 外部唤起=" + launchedExternally
-                    + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage));
-
-            if (!"login".equals(currentMode)) {
-                saveAccountToFile(saved, appid, currentMode != null ? currentMode : "抓号模式");
-            } else {
-                // 上号模式：先主动派发。
-                // 不能因为 referrer 有值就以为 setResult 能回传 ——
-                // 有的游戏用 NEW_TASK 唤起，根本没有结果通道。
-                boolean sent = false;
-                if (GameLaunch.hasPackage(gameName)) {
-                    try {
-                        sent = GameLaunch.dispatch(this, gameName, saved);
-                    } catch (Throwable t) {
-                        LoginDiag.add("DISPATCH", "派发异常: " + t);
-                    }
-                } else {
-                    LoginDiag.add("DISPATCH", "「" + gameName + "」未配置包名，只能依赖 setResult");
-                }
-
-                if (sent) {
-                    Toast.makeText(this, "已发送到 " + gameName + "，请查看游戏",
-                            Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "已直接派发给游戏");
-                } else if (launchedExternally) {
-                    Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "派发失败，回退 setResult（调用方 "
-                            + callerPackage + "）");
-                } else {
-                    Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
-                    LoginDiag.add("RETURN", "派发失败且非外部唤起，游戏很可能收不到");
-                }
-            }
-
-            Intent resultIntent = new Intent();
-            resultIntent.putExtra("key_response", json.toString());
-            setResult(RESULT_OK, resultIntent);
-
-            new android.os.Handler().postDelayed(() -> finish(), 2500);
-        } catch (JSONException e) {
+        } catch (Throwable e) {
             LoginDiag.add("ERR", "JSON: " + e);
-            e.printStackTrace();
             Toast.makeText(this, "JSON处理错误", Toast.LENGTH_SHORT).show();
+            return;
         }
+
+        saveRawDataToPreferences(saved);
+
+        LoginDiag.add("RESULT", "game=" + gameName
+                + " tokenAppid=" + appid
+                + " 已选appid=" + chosenAppid
+                + " 一致=" + appid.equals(chosenAppid)
+                + " mode=" + mode
+                + " 外部唤起=" + launchedExternally
+                + " 调用方=" + (callerPackage.isEmpty() ? "无" : callerPackage));
+
+        Intent resultIntent = new Intent();
+        resultIntent.putExtra("key_response", json.toString());
+        setResult(RESULT_OK, resultIntent);
+
+        if (!"login".equals(mode)) {
+            saveAccountToFile(saved, appid, mode);
+            finishLater(1200);
+            return;
+        }
+
+        // ---- 上号模式 ----
+        final boolean hasChannel = hasResultChannel();
+        LoginDiag.add("RETURN", "结果通道=" + (hasChannel ? "有，走 setResult" : "无，必须主动派发"));
+        if (hasChannel) {
+            // 有回传通道：直接交回游戏，别删任务，否则结果一起丢
+            Toast.makeText(this, "登录成功，已交回 " + gameName, Toast.LENGTH_SHORT).show();
+            finishLater(600);
+            return;
+        }
+        if (!GameLaunch.hasPackage(gameName)) {
+            LoginDiag.add("DISPATCH", "「" + gameName + "」未配置包名，无法派发");
+            Toast.makeText(this, "「" + gameName + "」未配置包名，游戏收不到 token", Toast.LENGTH_LONG).show();
+            finishLater(2500);
+            return;
+        }
+
+        dispatching = true;
+        Toast.makeText(this, "正在交付给 " + gameName + "…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            boolean sent = false;
+            try {
+                sent = GameLaunch.dispatch(this, gameName, saved, appid);
+            } catch (Throwable t) {
+                LoginDiag.add("DISPATCH", "派发异常: " + t);
+            }
+            final boolean ok = sent;
+            ui.post(() -> {
+                dispatching = false;
+                if (isFinishing()) {
+                    return;
+                }
+                if (ok) {
+                    Toast.makeText(this, "已交给 " + gameName + "，请看游戏", Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "派发完成（游戏已在前台或 token 已在剪贴板）");
+                } else {
+                    Toast.makeText(this,
+                            "交付失败：auth 已复制到剪贴板，请在游戏内手动粘贴",
+                            Toast.LENGTH_LONG).show();
+                    LoginDiag.add("RETURN", "派发失败，已回退剪贴板");
+                }
+                finishLater(ok ? 900 : 2500);
+            });
+        }).start();
+    }
+
+    /** getCallingActivity 有值才说明对方在等结果；referrer 有值不算。 */
+    private boolean hasResultChannel() {
+        try {
+            ComponentName c = getCallingActivity();
+            return c != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 统一收尾：只有「上号 + 外部唤起 + 没有回传通道」才删任务，避免退回 shq 挡住游戏。 */
+    private void finishLater(long delay) {
+        ui.postDelayed(() -> {
+            if (isFinishing()) {
+                return;
+            }
+            boolean removeTask = "login".equals(currentMode) && launchedExternally && !hasResultChannel();
+            if (removeTask && Build.VERSION.SDK_INT >= 21) {
+                finishAndRemoveTask();
+            } else {
+                finish();
+            }
+        }, delay);
     }
 
     private String appidFrom(String url) {
@@ -451,18 +604,24 @@ public class AgentActivity extends BaseActivity {
     }
 
     private String normalizeAuthUrl(String url) {
-        if (url == null || url.isEmpty()) return url;
-        if (url.startsWith("auth://tauth.qq.com") && url.contains("access_token=")) return url;
-
+        if (url == null || url.isEmpty()) {
+            return url;
+        }
+        if (url.startsWith("auth://tauth.qq.com") && url.contains("access_token=")) {
+            return url;
+        }
         String at = grab(url, "access_token=([^&#]+)");
-        if (at.isEmpty()) return url;
+        if (at.isEmpty()) {
+            return url;
+        }
         String openid = grab(url, "openid=([^&#]+)");
         String pay = grab(url, "pay_token=([^&#]+)");
         String exp = grab(url, "expires_in=([^&#]+)");
-        if (exp.isEmpty()) exp = "7776000";
+        if (exp.isEmpty()) {
+            exp = "7776000";
+        }
         String authTime = grab(url, "auth_time=([^&#]+)");
         String pfkey = grab(url, "key=([^&#]+)");
-
         StringBuilder sb = new StringBuilder("auth://tauth.qq.com/?#");
         sb.append("access_token=").append(at);
         sb.append("&expires_in=").append(exp);
@@ -470,20 +629,28 @@ public class AgentActivity extends BaseActivity {
         sb.append("&pay_token=").append(pay);
         sb.append("&ret=0");
         sb.append("&pf=desktop_m_qq-10000144-android-2002-");
-        if (!pfkey.isEmpty()) sb.append("&pfkey=").append(pfkey);
-        if (!authTime.isEmpty()) sb.append("&auth_time=").append(authTime);
+        if (!pfkey.isEmpty()) {
+            sb.append("&pfkey=").append(pfkey);
+        }
+        if (!authTime.isEmpty()) {
+            sb.append("&auth_time=").append(authTime);
+        }
         sb.append("&page_type=0");
         return sb.toString();
     }
 
     private String withAppid(String url) {
-        if (url == null || url.contains("appid=") || url.contains("client_id=")) return url;
+        if (url == null || url.contains("appid=") || url.contains("client_id=")) {
+            return url;
+        }
         String a = "";
         try {
             a = com.tencent.tim.TokenStore.appidOfGame(getSelectedGameName());
         } catch (Exception ignored) {
         }
-        if (a == null || a.isEmpty()) a = "1104466820";
+        if (a == null || a.isEmpty()) {
+            a = "1104466820";
+        }
         return url + (url.indexOf("?") >= 0 ? "&" : "?") + "appid=" + a;
     }
 
@@ -517,18 +684,20 @@ public class AgentActivity extends BaseActivity {
                 final String aidShown = (appid == null || appid.isEmpty()) ? "未知" : appid;
                 String line = com.tencent.tim.TokenStore.joinLine("", time, aidShown, url, mode);
                 final boolean ok = com.tencent.tim.TokenStore.saveGameEntry(gameName, line);
-                LoginDiag.add("SAVE", "game=" + gameName + " appid=" + aidShown
-                        + " ok=" + ok + (ok ? "" : (" err=" + com.tencent.tim.TokenStore.lastError)));
+                LoginDiag.add("SAVE", "game=" + gameName + " appid=" + aidShown + " ok=" + ok
+                        + (ok ? "" : (" err=" + com.tencent.tim.TokenStore.lastError)));
                 final String g = gameName;
-                runOnUiThread(() -> {
+                ui.post(() -> {
+                    if (isFinishing()) {
+                        return;
+                    }
                     if (ok) {
-                        Toast.makeText(AgentActivity.this,
+                        Toast.makeText(this,
                                 "已保存 " + g + " appid=" + aidShown + " -> "
                                         + com.tencent.tim.TokenStore.gameFile(g).getAbsolutePath(),
                                 Toast.LENGTH_LONG).show();
                     } else {
-                        Toast.makeText(AgentActivity.this,
-                                "保存失败: " + com.tencent.tim.TokenStore.lastError,
+                        Toast.makeText(this, "保存失败: " + com.tencent.tim.TokenStore.lastError,
                                 Toast.LENGTH_LONG).show();
                     }
                 });
