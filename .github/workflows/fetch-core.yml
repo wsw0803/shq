@@ -23,10 +23,11 @@ permissions:
 
 jobs:
   fetch:
-    runs-on: ubuntu-latest
+    # 与 build.yml 一致，固定 runner 版本，不跟随 ubuntu-latest 迁移
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve version
         id: ver
