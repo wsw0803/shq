@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -466,51 +467,103 @@ public class GameLaunch {
     /**
      * AssistActivity 读 key_response，这里按 QQ SDK 的字段拼一份。
      *
-     * 三角洲的 MSDK 会拿这份 JSON 跟原始 auth 串比对，
-     * 字段少一项就可能判「响应不完整」。所以：
-     *   必需字段固定输出，原始串里的其他字段（pfkey / auth_time / key 等）
-     *   原样带进 extras 字段，不丢。
+     * 2026-10-25 第十三次修订（三角洲）。
+     *
+     * 上一版是「枚举已知字段」：写死了 openid / access_token / pay_token /
+     * expires_in / pf / page_type，外加三个可选的 pfkey / auth_time / key。
+     *
+     * 问题在于：日志里明明白白写着「字段数=10」，而我们只枚举了 9 个
+     * （还漏了 ret）。也就是说原始回包里至少有一个字段从来没进过 key_response。
+     * 三角洲的 MSDK 认不认这个 token，取决于它能不能从 JSON 里拿到完整信息，
+     * 少一个字段就判「响应不完整」。
+     *
+     * 现在改成「原样铺开」：
+     *   把原始 query 的每一个 key=value 都写进 JSON，key 名保持原样，
+     *   再补上 SDK 必需但原串没有的字段。一个都不丢，也不用再靠枚举猜。
      */
     public static String keyResponse(String authUrl) {
         String at = param(authUrl, "access_token");
         if (at.isEmpty()) {
             return "";
         }
-        String exp = param(authUrl, "expires_in");
-        if (exp.isEmpty()) {
-            exp = "7776000";
-        }
+        // 原始 query 里的全部字段，按原顺序、原 key 名写进去
+        LinkedHashMap<String, String> kv = params(authUrl);
+
+        // SDK 必需字段兜底
+        putIfAbsent(kv, "ret", "0");
+        putIfAbsent(kv, "openid", param(authUrl, "openid"));
+        putIfAbsent(kv, "access_token", at);
+        putIfAbsent(kv, "pay_token", param(authUrl, "pay_token"));
+        putIfAbsent(kv, "expires_in", "7776000");
+        putIfAbsent(kv, "pf", "desktop_m_qq-10000144-android-2002-");
+        putIfAbsent(kv, "page_type", "1");
+        // key 与 pfkey 是两个不同的字段，上一版把它们写成了同一个名字，
+        // 导致 pfkey 永远写不进去（appendIfPresent 的重复检查直接命中）。
+        putIfAbsent(kv, "pfkey", param(authUrl, "key"));
+
         StringBuilder sb = new StringBuilder();
-        sb.append("{\"ret\":\"0\"");
-        sb.append(",\"openid\":\"").append(param(authUrl, "openid")).append('"');
-        sb.append(",\"access_token\":\"").append(at).append('"');
-        sb.append(",\"pay_token\":\"").append(param(authUrl, "pay_token")).append('"');
-        sb.append(",\"expires_in\":\"").append(exp).append('"');
-        String pf = param(authUrl, "pf");
-        if (pf.isEmpty()) {
-            pf = "desktop_m_qq-10000144-android-2002-";
+        sb.append('{');
+        boolean first = true;
+        for (java.util.Map.Entry<String, String> e : kv.entrySet()) {
+            if (!first) {
+                sb.append(',');
+            }
+            first = false;
+            sb.append('"').append(jsonEscape(e.getKey())).append("\":\"")
+                    .append(jsonEscape(e.getValue())).append('"');
         }
-        sb.append(",\"pf\":\"").append(pf).append('"');
-        sb.append(",\"page_type\":\"").append(param(authUrl, "page_type")).append('"');
-        // 原始串里可能有 pfkey / auth_time / key，三角洲会读
-        appendIfPresent(sb, authUrl, "pfkey", "pfkey");
-        appendIfPresent(sb, authUrl, "auth_time", "auth_time");
-        appendIfPresent(sb, authUrl, "key", "pfkey");
+        // 原始 query 也附一份，供逐字符比对的 SDK 校验
         String raw = authUrl == null ? "" : authUrl;
         int i = raw.indexOf('#');
         if (i >= 0) {
             raw = raw.substring(i + 1);
         }
-        sb.append(",\"raw\":\"").append(jsonEscape(raw)).append('"');
+        if (!kv.containsKey("raw")) {
+            sb.append(",\"raw\":\"").append(jsonEscape(raw)).append('"');
+        }
         sb.append('}');
         return sb.toString();
     }
 
-    private static void appendIfPresent(StringBuilder sb, String url, String key, String as) {
-        String v = param(url, key);
-        if (!v.isEmpty() && sb.indexOf("\"" + as + "\"") < 0) {
-            sb.append(",\"").append(as).append("\":\"").append(jsonEscape(v)).append('"');
+    /** 把 URL 的 query 拆成有序 key→value，key 名原样保留。 */
+    public static LinkedHashMap<String, String> params(String url) {
+        LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
+        if (url == null || url.isEmpty()) {
+            return out;
         }
+        String q = url;
+        int hash = q.indexOf('#');
+        if (hash >= 0) {
+            q = q.substring(hash + 1);
+        } else {
+            int qm = q.indexOf('?');
+            if (qm >= 0) {
+                q = q.substring(qm + 1);
+            }
+        }
+        for (String seg : q.split("&")) {
+            if (seg.isEmpty()) {
+                continue;
+            }
+            int eq = seg.indexOf('=');
+            String k = eq > 0 ? seg.substring(0, eq) : seg;
+            String v = eq > 0 ? seg.substring(eq + 1) : "";
+            if (k.isEmpty() || out.containsKey(k)) {
+                continue;
+            }
+            out.put(k, v);
+        }
+        return out;
+    }
+
+    private static void putIfAbsent(LinkedHashMap<String, String> kv, String k, String v) {
+        if (kv.containsKey(k)) {
+            return;
+        }
+        if (v == null || v.isEmpty()) {
+            return;
+        }
+        kv.put(k, v);
     }
 
     private static String jsonEscape(String s) {

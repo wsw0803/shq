@@ -527,13 +527,25 @@ public class AgentActivity extends BaseActivity {
         // 一些 MSDK 版本还会检查这两个标记位，缺了就当「用户取消」处理。
         resultIntent.putExtra("ret", 0);
         resultIntent.putExtra("action", "login");
+        // 额外把每个字段单独塞一个 extra。
+        // 各版本 SDK 取值方式不同：有的读 key_response 整个 JSON，
+        // 有的读 data，还有的直接 getStringExtra("access_token")。
+        // 三种都给，哪种都能拿到。
+        try {
+            for (java.util.Map.Entry<String, String> en
+                    : com.tencent.tim.GameLaunch.params(saved).entrySet()) {
+                resultIntent.putExtra(en.getKey(), en.getValue());
+            }
+        } catch (Throwable ignored) {
+        }
+
         setResult(RESULT_OK, resultIntent);
 
         LoginDiag.add("RETURN", "resultIntent: data="
                 + (dataUri.isEmpty() ? "空" : "len" + dataUri.length())
                 + " extras=[key_response len" + json.toString().length()
                 + ", auth len" + (saved == null ? 0 : saved.length())
-                + "] resultCode=RESULT_OK");
+                + "] resultCode=RESULT_OK 字段=" + fieldList(saved));
 
         if (!"login".equals(mode)) {
             saveAccountToFile(saved, appid, mode);
@@ -943,6 +955,26 @@ public class AgentActivity extends BaseActivity {
         LoginDiag.add("PARSE", "auth URI 重建 len=" + out.length()
                 + " 原始字段数=" + countParams(url) + " 输出字段数=" + countParams(out));
         return out;
+    }
+
+    /**
+     * 把 auth 里的每个 key 列出来（只列名字，值不落盘）。
+     *
+     * 上一版只打「字段数=10」，看不出到底是哪 10 个。
+     * 三角洲要的那个 v 开头的东西在不在、叫什么，必须看到 key 名才能判断。
+     */
+    private static String fieldList(String url) {
+        if (url == null || url.isEmpty()) {
+            return "无";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String k : com.tencent.tim.GameLaunch.params(url).keySet()) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(k);
+        }
+        return sb.toString();
     }
 
     /** 列出所有 v 开头的 query 字段（key + 值长度），用于定位三角洲要的票据。 */

@@ -664,6 +664,70 @@ public class LoginDiag {
         } else {
             appendBuckets(sb, new ArrayList<Bucket>(ctx.values()), 120);
         }
+
+        // 原始尾段：不筛选、不合并，最后 60 行照抄。
+        // 这是最后一道保险 —— 如果关键词表漏了 SDK 真正打的那行，
+        // 至少还能从原始日志里肉眼看出来。
+        sb.append("\n[原始尾段 · 未过滤]\n");
+        if (dump == null || dump.isEmpty()) {
+            sb.append("(空)\n");
+        } else {
+            String[] all = dump.split("\n");
+            int from = Math.max(0, all.length - 60);
+            for (int i = from; i < all.length; i++) {
+                String t = trim(bodyOf(all[i]));
+                if (!t.isEmpty()) {
+                    sb.append(t).append('\n');
+                }
+            }
+        }
+
+        // SDK 全量段：不受时间窗口限制，直接按 tag 抓。
+        // 上一轮日志里 openSDK_LOG 还在，这一轮一条都没有 ——
+        // 说明按时间读的窗口没覆盖到 SDK 打日志的那一刻。
+        // 这一段不带 -T，改按 tag 白名单 + 较大 tail，专捞 openSDK / MSDK。
+        sb.append("\n[SDK 全量 · 按 tag，不受时间窗限制]\n");
+        sb.append(sdkByTag(pidArg));
+        return sb.toString();
+    }
+
+    /**
+     * 按 tag 直接抓 SDK 日志，不用时间窗。
+     *
+     * QQ 互联 / MSDK 的日志 tag 是固定几个：openSDK_LOG、tauth、MSDK、
+     * MSDKCallback、Tencent、QQAuth。用 | 拼成正则一次抓完。
+     * 不设 -T，抓最近的；不设 -t 上限太大也没意义，用 2000 行做 tail。
+     */
+    private static String sdkByTag(String pidArg) {
+        String tagRe = "openSDK_LOG|openSDK|tauth|MSDK|MSDKCallback|Tencent|QQAuth|AuthAgent|TAuth";
+        String out = runSuCmd("logcat -d -v threadtime -b main,system -t 2000 --pid="
+                + pidArg + " -s " + tagRe);
+        if (out == null || out.trim().isEmpty()) {
+            // -s 与 --pid 同时用，某些 logcat 版本会全部过滤掉。
+            // 退回：不加 --pid，只按 tag 抓，再在 Java 侧按包名/pid 标记。
+            out = runSuCmd("logcat -d -v threadtime -b main,system -t 2000 -s " + tagRe);
+        }
+        if (out == null || out.trim().isEmpty()) {
+            return "(该进程在最近 logcat 里没有任何 openSDK / MSDK 日志)\n"
+                    + "(这本身就说明 SDK 没走到回调处理 —— 结果收下了但没进登录逻辑)\n";
+        }
+        Map<String, Bucket> kept = new LinkedHashMap<String, Bucket>();
+        int raw = 0;
+        for (String line : out.split("\n")) {
+            raw++;
+            String t = trim(bodyOf(line));
+            if (t.isEmpty()) continue;
+            Bucket b = kept.get(t);
+            if (b == null) kept.put(t, new Bucket(t));
+            else b.count++;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("读取 ").append(raw).append(" 行，去重后 ").append(kept.size()).append(" 条\n");
+        for (Bucket b : kept.values()) {
+            sb.append(b.text);
+            if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
+            sb.append('\n');
+        }
         return sb.toString();
     }
 
