@@ -25,20 +25,24 @@ import java.util.regex.Pattern;
  *
  * 三个原则：
  *
- * 1) 全文件只有一个时间。
- *    原来是每行前挂 HH:mm:ss.SSS，logcat 段里再挂一次 HH:mm:ss，
- *    满屏都是时间，真正要看的内容反而看不清。
- *    现在时间只出现在头部一行，正文只保留 [标签] 内容，靠行序表达先后。
- *
- * 2) logcat 只留「能说明 app 干了什么」的行。
+ * 1) 全文件只有一个时间（头部那行），正文只留 [标签] 内容。
+ * 2) 系统 logcat 只留「能说明 app 干了什么」的行（白名单）。
  *    ColorOS 上 PERFHAL / SchedAssist / gameoptHal / lowmemorykiller
- *    每秒钟能刷几十条带 failed 的无害日志，一旦放宽就会把真正的
- *    START u0 挤出去。所以用白名单，只认组件启动、崩溃、权限这几类。
+ *    每秒几十条带 failed 的无害日志，放宽就会把真正的 START u0 挤出去。
+ * 3) 白名单不能空手而归：零命中时退化为最近 30 条去重后的 Tag: 消息。
  *
- * 3) 白名单不能空手而归。
- *    上一版出现过「保留 0 条」—— 白名单一个都没命中，用户什么都看不到。
- *    现在保留一份兜底：没有任何命中时，退化为最近 30 条去重后的 Tag: 消息。
- *    宁可粗糙，也不能让日志变空。
+ * 本次新增（2026-10-25 第八次修订）：
+ *
+ * 「腾讯 SDK 日志」独立一段。
+ *
+ * 前面几轮修的都是进程层面的机制：组件选择、黑屏、回传通道、收尾看门狗。
+ * 这些现在都对了（日志证明结果交回、游戏回到前台），但游戏内仍未登录。
+ * 问题已经下沉到「腾讯 SDK 为什么拒绝这个 token」，而这一点只有 SDK 自己的
+ * 日志能回答。系统 logcat 的白名单为了压噪音把 msdk / tauth / gcloud 全滤掉了，
+ * 等于把唯一的证据也滤掉了。
+ *
+ * 所以单独抓一段：不看黑白名单，只认 SDK 相关关键词，
+ * 原样保留 60 条，专门用来读 SDK 的报错。
  */
 public class LoginDiag {
 
@@ -50,7 +54,7 @@ public class LoginDiag {
     private static final int MAX_FILES = 30;
     private static final int MAX_EVENTS = 600;
 
-    /** logcat 取多少行原始日志来筛。 */
+    /** 系统 logcat 取多少行来筛。 */
     private static final int LOGCAT_RAW = 2000;
 
     /** 命中白名单时最多保留多少条。 */
@@ -59,12 +63,17 @@ public class LoginDiag {
     /** 白名单零命中时的兜底条数。 */
     private static final int LOGCAT_FALLBACK = 30;
 
+    /** SDK 段取多少行。窗口放大，登录流程可能很长。 */
+    private static final int SDK_RAW = 6000;
+
+    /** SDK 段最多保留多少条。 */
+    private static final int SDK_UNIQUE = 60;
+
     private static final List<String> events = new ArrayList<String>();
     private static long startedAt = 0L;
     private static volatile boolean enabled = false;
     private static volatile boolean loaded = false;
 
-    /** 文件名精确到分钟；正文里不再出现任何逐行时间。 */
     private static final SimpleDateFormat NAME_TS = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.CHINA);
     private static final SimpleDateFormat FULL_TS = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA);
 
@@ -72,11 +81,7 @@ public class LoginDiag {
     private static final Pattern LOGCAT_HEAD = Pattern.compile(
             "^\\d{2}-\\d{2}\\s+(\\d{2}:\\d{2}:\\d{2})\\.\\d{3}\\s+\\d+\\s+\\d+\\s+[VDIWEFA]\\s+");
 
-    /**
-     * 白名单：命中任意一条才进「重点」区。
-     *
-     * 全部围绕「app 到底启动了什么、被什么拒了、有没有崩」。
-     */
+    /** 系统日志白名单：只认「启动了什么、被什么拒了、有没有崩」。 */
     private static final String[] KEEP = {
             "START u0",
             "LaunchState",
@@ -99,10 +104,30 @@ public class LoginDiag {
             "WebView",
             "chromium",
             "xray",
-            "tauth",
-            "auth://",
-            "MSDK",
+    };
+
+    /**
+     * SDK 关键词。命中即收录，不做白名单判断 —— 这一段的目的就是读 SDK 报错，
+     * 任何「看起来像噪音」的过滤都可能正好滤掉那句 ret=-1。
+     */
+    private static final String[] SDK_KEYS = {
             "msdk",
+            "tauth",
+            "authagent",
+            "assistactivity",
+            "authactivity",
+            "opensdk",
+            "qqauth",
+            "gcloud",
+            "itop",
+            "com.tencent.tauth",
+            "com.tencent.connect",
+            "com.itop.gcloud",
+            "key_response",
+            "access_token",
+            "openid",
+            "pay_token",
+            "login",
     };
 
     private static SharedPreferences prefs(Context c) {
@@ -120,7 +145,6 @@ public class LoginDiag {
         return enabled;
     }
 
-    /** 开启：清空缓冲开始记录。关闭：先取快照再清空，后台落盘。 */
     public static void setEnabled(final Context c, boolean on) {
         if (c == null) return;
         prefs(c).edit().putBoolean(KEY_ENABLED, on).apply();
@@ -153,7 +177,7 @@ public class LoginDiag {
         startedAt = System.currentTimeMillis();
     }
 
-    /** 事件行不再带时间，只留 [标签] 内容。 */
+    /** 事件行不带时间，只留 [标签] 内容。 */
     public static synchronized void add(String tag, String detail) {
         if (!enabled) return;
         if (events.size() >= MAX_EVENTS) {
@@ -180,7 +204,6 @@ public class LoginDiag {
         return d != null ? d : c.getFilesDir();
     }
 
-    /** 列出已有日志，按时间从新到旧。 */
     public static List<File> listLogs(Context c) {
         List<File> out = new ArrayList<File>();
         try {
@@ -220,7 +243,6 @@ public class LoginDiag {
         return n;
     }
 
-    /** 文件名只到分钟，同分钟撞名时补 _2、_3，不覆盖已有文件。 */
     private static File newLogFile(Context c, long stampMs) {
         File dir = logDir(c);
         try {
@@ -252,7 +274,6 @@ public class LoginDiag {
         File out = newLogFile(c, started);
         StringBuilder sb = new StringBuilder();
         sb.append("=== shq 诊断日志 ===\n");
-        // 全文件唯一的一个时间点
         sb.append("时间: ").append(FULL_TS.format(
                 new Date(started > 0 ? started : System.currentTimeMillis()))).append("\n");
         sb.append("Android: ").append(android.os.Build.VERSION.RELEASE)
@@ -265,9 +286,15 @@ public class LoginDiag {
         sb.append("事件数: ").append(snap.size()).append("\n\n");
         sb.append("--- 事件轨迹 ---\n");
         for (String line : snap) sb.append(line).append('\n');
-        sb.append("\n--- su logcat ---\n");
+
+        sb.append("\n--- 腾讯 SDK 日志（原样，未按白名单过滤）---\n");
+        String sdk = sdkLog(SDK_RAW);
+        sb.append(sdk.isEmpty() ? "(无 root 或抓取失败)\n" : sdk);
+
+        sb.append("\n--- su logcat（白名单筛选）---\n");
         String log = suLogcat(LOGCAT_RAW);
         sb.append(log.isEmpty() ? "(无 root 或抓取失败)\n" : log);
+
         FileOutputStream fos = null;
         try {
             fos = new FileOutputStream(out, false);
@@ -332,10 +359,74 @@ public class LoginDiag {
     }
 
     /**
-     * 取 logcat 并压缩：白名单筛选 → 去掉行首时间/pid → 相同内容合并。
+     * 腾讯 SDK 专用：只按关键词收，不做白名单判断。
      *
-     * 白名单一条都没命中时，退化为最近 LOGCAT_FALLBACK 条去重后的 Tag: 消息，
-     * 保证不会出现「保留 0 条」这种什么都看不到的结果。
+     * 这一段的意义是「让 SDK 自己开口」。游戏内登录失败，原因通常写在这里：
+     * appid 不匹配、token 无效、签名校验失败、服务端 ret 非 0 ……
+     */
+    private static String sdkLog(int maxLines) {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "logcat -d -v threadtime -t " + maxLines});
+            BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            Map<String, Bucket> kept = new LinkedHashMap<String, Bucket>();
+            int raw = 0;
+            String ln;
+            while ((ln = br.readLine()) != null) {
+                raw++;
+                if (!looksLikeSdk(ln)) continue;
+                String body = bodyOf(ln);
+                if (body == null || body.isEmpty()) continue;
+                String line = trim(body);
+                if (line.isEmpty()) continue;
+                Bucket b = kept.get(line);
+                if (b == null) kept.put(line, new Bucket(line));
+                else b.count++;
+            }
+            br.close();
+            try {
+                p.waitFor();
+            } catch (Exception ignored) {
+            }
+            if (kept.isEmpty()) {
+                return "读取 " + raw + " 行，没有命中 SDK 关键词\n"
+                        + "(说明登录流程可能根本没进到 SDK，或 SDK 没打日志)\n";
+            }
+            List<Bucket> list = new ArrayList<Bucket>(kept.values());
+            boolean trimmed = false;
+            if (list.size() > SDK_UNIQUE) {
+                list = new ArrayList<Bucket>(list.subList(list.size() - SDK_UNIQUE, list.size()));
+                trimmed = true;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("读取 ").append(raw).append(" 行，命中 ").append(kept.size()).append(" 条");
+            if (trimmed) sb.append("，只显示最近 ").append(SDK_UNIQUE).append(" 条");
+            sb.append('\n');
+            for (Bucket b : list) {
+                sb.append(b.text);
+                if (b.count > 1) sb.append("  (").append(b.count - 1).append(" 次重复已合并)");
+                sb.append('\n');
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (p != null) p.destroy();
+        }
+    }
+
+    private static boolean looksLikeSdk(String line) {
+        if (line == null) return false;
+        String low = line.toLowerCase(Locale.ROOT);
+        for (String k : SDK_KEYS) {
+            if (low.contains(k)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 系统日志白名单压缩：白名单筛选 → 去掉行首时间/pid → 相同内容合并。
+     * 零命中时退化为最近 LOGCAT_FALLBACK 条，避免出现「保留 0 条」。
      */
     private static String suLogcat(int maxLines) {
         Process p = null;
@@ -359,12 +450,6 @@ public class LoginDiag {
                     else b.count++;
                 } else {
                     others.add(line);
-                    if (others.size() > 400) {
-                        // 只留尾部，前面的老日志没意义
-                        List<String> tmp = new ArrayList<String>(others);
-                        others.clear();
-                        for (int i = tmp.size() - 300; i < tmp.size(); i++) others.add(tmp.get(i));
-                    }
                 }
             }
             br.close();
@@ -378,12 +463,10 @@ public class LoginDiag {
             if (list.isEmpty()) {
                 sb.append("读取 ").append(raw).append(" 行，无关键行，显示最近 ")
                         .append(LOGCAT_FALLBACK).append(" 条原始日志\n");
-                List<String> tail = new ArrayList<String>(others);
-                int from = Math.max(0, tail.size() - LOGCAT_FALLBACK);
-                for (int i = from; i < tail.size(); i++) {
-                    sb.append(tail.get(i)).append('\n');
-                }
-                if (tail.isEmpty()) sb.append("(这段时间没有可读的 logcat)\n");
+                List<String> all = new ArrayList<String>(others);
+                int from = Math.max(0, all.size() - LOGCAT_FALLBACK);
+                for (int i = from; i < all.size(); i++) sb.append(all.get(i)).append('\n');
+                if (all.isEmpty()) sb.append("(这段时间没有可读的 logcat)\n");
                 return sb.toString();
             }
             boolean trimmed = false;
@@ -417,7 +500,6 @@ public class LoginDiag {
             if (m.find()) {
                 s = s.substring(m.end());
             } else {
-                // 兼容没有毫秒字段或格式略有差异的行
                 int sp = s.indexOf(' ');
                 if (sp > 0 && sp <= 6) s = s.substring(sp + 1);
                 int first = s.indexOf(' ');
@@ -428,7 +510,7 @@ public class LoginDiag {
         return s.trim();
     }
 
-    /** 去掉行内可能存在的第二处时间，保证一行最多一个时间（正文里一个都不留）。 */
+    /** 去掉行内可能残留的第二处时间。 */
     private static String trim(String s) {
         String r = s;
         try {
@@ -437,7 +519,7 @@ public class LoginDiag {
         } catch (Throwable ignored) {
         }
         r = r.trim();
-        if (r.length() > 240) r = r.substring(0, 240) + "...";
+        if (r.length() > 260) r = r.substring(0, 260) + "...";
         return r;
     }
 
