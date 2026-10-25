@@ -2,6 +2,7 @@ package com.tencent.open.agent;
 
 import android.content.ClipboardManager;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -27,42 +28,29 @@ import com.tencent.tim.R;
 
 import org.json.JSONObject;
 
-import java.io.File;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * 上号 / 抓号 / 挂机 三种模式的界面。
  *
- * 上号模式（2026-10-25 第六次修订）。
+ * 上号模式（2026-10-25 第七次修订）。
  *
- * 上一版的黑屏，根因是两个错误叠在一起：
+ * 上一版已经不再启动游戏内部界面，黑屏消失，但留下一个观测盲区：
+ * setResult 之后我们 finish()，**没有任何代码去确认游戏有没有回来**。
+ * 日志到「只走 setResult」就断了，如果 AssistActivity 没把结果交给游戏主逻辑，
+ * 用户会停在空白桌面 —— 外观上和黑屏一样。
  *
- * 1) 有真实回传通道，却去启动了游戏的内部界面。
+ * 现在补一个看门狗：finish 之后继续轮询前台最多 3 秒，
+ *   - 游戏回来了 → 记「返回后前台: dfm/...GameActivity ✓」；
+ *   - 游戏没回来 → 记日志并主动 bringToFront，不会卡在桌面。
  *
- *    getCallingActivity = com.tencent.tmgp.dfm/com.tencent.connect.common.AssistActivity
- *
- *    AssistActivity 是 QQ SDK 里收结果、回调 IUiListener 的组件，它确实在
- *    startActivityForResult 等我们。这种情况下正确做法只有一个：setResult 后
- *    立刻 finish，一个多余界面都别启动。
- *    结果代码去 began 了 MSDK 的 WebViewActivity —— 那是「内部页」，
- *    靠 Intent 里的 url / title 参数渲染，我们给不出，它起来就
- *    destroySurface 退出，留下空任务栈 → 黑屏。
- *
- * 2) 「收下并停在前台」被当成了成功，没有区分「稳住」和「一闪而过」。
- *
- * 现在的规则：
- *
- *   有真实回传通道 → 只 setResult + finish，绝不碰游戏内部界面。
- *   （真实通道的判定：调用方是游戏包名，且落在 AssistActivity /
- *    AuthActivity / AuthorityActivity 这类回调组件上。）
- *
- *   没有真实通道 → 才交给 GameLaunch 兜底，而它现在也只试回调组件，
- *    内部 UI 页（webview / wechat / pay / splash ...）一律排除，
- *    并且落地后要再等一会儿确认前台稳住，避免再黑屏。
+ * 同时保留上一版成果：有真实回传通道时只 setResult，不碰游戏内部界面。
  */
 public class AgentActivity extends BaseActivity {
 
@@ -70,6 +58,9 @@ public class AgentActivity extends BaseActivity {
     private static final String KEY_RAW_TEXT = "raw_text";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
+
+    /** 收尾看门狗用：Activity 已 finish 后不能再拿它当 Context。 */
+    private static Context appCtx;
 
     private WebView webView;
     private ScrollView loginScroll;
@@ -86,6 +77,7 @@ public class AgentActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        appCtx = getApplicationContext();
         requestWindowFeature(1);
         setRequestedOrientation(0);
         this.mWindow = getWindow();
@@ -504,7 +496,6 @@ public class AgentActivity extends BaseActivity {
 
         Intent resultIntent = new Intent();
         resultIntent.putExtra("key_response", json.toString());
-        // QQ SDK 的 AssistActivity 会优先读 key_response，也兼容 auth 字段
         resultIntent.putExtra("auth", saved);
         setResult(RESULT_OK, resultIntent);
 
@@ -514,12 +505,6 @@ public class AgentActivity extends BaseActivity {
             return;
         }
 
-        // ---- 上号模式 ----
-        //
-        // 先判断真实回传通道，有就直接交回去，绝不启动游戏内部界面。
-        // 上一版的 WebViewActivity 就是这么把屏幕搞黑的：
-        // 它是 MSDK 内部页，缺 url 参数，起来就 destroySurface 退出，
-        // 留下空任务栈，用户看到的是黑屏。
         if (hasRealChannel()) {
             LoginDiag.add("RETURN", "真实回传通道 " + callingActivityName() + "，只走 setResult");
             Toast.makeText(this, "已交回 " + gameName + "，请看游戏", Toast.LENGTH_SHORT).show();
@@ -575,14 +560,7 @@ public class AgentActivity extends BaseActivity {
         }).start();
     }
 
-    /**
-     * 真实回传通道：调用方是游戏包名，并且落在回调组件上。
-     *
-     * 判据来自实际日志：三角洲唤起时 getCallingActivity 是它自己的
-     * com.tencent.connect.common.AssistActivity，这是 QQ SDK 收结果的地方。
-     * 而 ColorOS 在 NEW_TASK 唤起时可能把调用方填成别的包（甚至自己），
-     * 那种情况不能当成有通道。
-     */
+    /** 真实回传通道：调用方是游戏包名，并且落在回调组件上。 */
     private boolean hasRealChannel() {
         try {
             ComponentName c = getCallingActivity();
@@ -594,7 +572,6 @@ public class AgentActivity extends BaseActivity {
             if (pkg == null || pkg.equals(getPackageName())) {
                 return false;
             }
-            // 调用方必须就是我们要交付的那个游戏
             String target = GameLaunch.packageOf(getSelectedGameName());
             if (!target.isEmpty() && !target.equals(pkg)) {
                 LoginDiag.add("RETURN", "调用方是 " + pkg + "，与目标游戏 " + target + " 不是同一个");
@@ -611,7 +588,6 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
-    /** 调用方组件名；null 表示系统没记。 */
     private String callingActivityName() {
         try {
             ComponentName c = getCallingActivity();
@@ -624,22 +600,143 @@ public class AgentActivity extends BaseActivity {
     /**
      * 统一收尾。
      *
-     * 只有「上号 + 外部唤起 + 没有真实回传通道」才删任务：
-     * 有通道时必须让结果随着任务栈一起交回游戏，删了任务结果就丢了。
+     * 有真实回传通道时不能删任务，否则结果会跟着任务一起丢；
+     * 只在「上号 + 外部唤起 + 没通道」时 finishAndRemoveTask，避免退回 shq 挡住游戏。
      */
     private void finishLater(long delay) {
+        final boolean login = "login".equals(currentMode);
+        final boolean external = launchedExternally;
+        final boolean channel = hasRealChannel();
+        final String gameName = getSelectedGameName();
         ui.postDelayed(() -> {
             if (isFinishing()) {
                 return;
             }
-            boolean hasChannel = hasRealChannel();
-            boolean removeTask = "login".equals(currentMode) && launchedExternally && !hasChannel;
+            boolean removeTask = login && external && !channel;
             if (removeTask && Build.VERSION.SDK_INT >= 21) {
                 finishAndRemoveTask();
             } else {
                 finish();
             }
+            if (login) {
+                watchGameBack(gameName);
+            }
         }, delay);
+    }
+
+    /**
+     * 收尾看门狗：finish 之后确认游戏有没有真的回来。
+     *
+     * 之前日志到「只走 setResult」就断了，看不出结果是否被游戏接受、
+     * 游戏有没有回到前台。这里补上，并在游戏没回来时主动切回去，
+     * 避免用户停在空白桌面（外观上和黑屏一样）。
+     */
+    private void watchGameBack(final String gameName) {
+        final String pkg = GameLaunch.packageOf(gameName);
+        if (pkg.isEmpty()) {
+            return;
+        }
+        new Thread(() -> {
+            String comp = "";
+            boolean back = false;
+            for (int i = 0; i < 6; i++) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException ignored) {
+                }
+                comp = foregroundOf();
+                if (comp.startsWith(pkg + "/")) {
+                    back = true;
+                    break;
+                }
+            }
+            if (back) {
+                LoginDiag.add("RETURN", "返回后前台: " + comp + " ✓ 游戏已回到前台");
+                return;
+            }
+            LoginDiag.add("RETURN", "返回后前台: "
+                    + (comp.isEmpty() ? "未知" : comp) + " → 游戏没回来，主动切回");
+            Context c = appCtx;
+            if (c != null) {
+                boolean ok = GameLaunch.bringToFront(c, pkg);
+                LoginDiag.add("RETURN", "主动切回游戏=" + ok);
+            }
+        }).start();
+    }
+
+    private static String foregroundOf() {
+        String dump = runSu("dumpsys window | grep -m 1 -E 'mCurrentFocus|mFocusedApp'");
+        String comp = componentOf(dump);
+        if (comp.isEmpty()) {
+            dump = runSu("dumpsys activity activities | grep -m 1 -E 'topResumedActivity|mResumedActivity'");
+            comp = componentOf(dump);
+        }
+        return comp;
+    }
+
+    private static String componentOf(String dump) {
+        if (dump == null || dump.isEmpty()) {
+            return "";
+        }
+        int i = 0;
+        while (true) {
+            int slash = dump.indexOf('/', i);
+            if (slash < 0) {
+                return "";
+            }
+            int b = slash;
+            while (b > 0 && isCompChar(dump.charAt(b - 1))) {
+                b--;
+            }
+            int e = slash + 1;
+            while (e < dump.length() && isCompChar(dump.charAt(e))) {
+                e++;
+            }
+            String left = dump.substring(b, slash);
+            String right = dump.substring(slash + 1, e);
+            if (left.indexOf('.') > 0 && !right.isEmpty() && right.charAt(0) != '0') {
+                return left + "/" + right;
+            }
+            i = slash + 1;
+        }
+    }
+
+    private static boolean isCompChar(char ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+                || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '$' || ch == '-';
+    }
+
+    private static String runSu(String cmd) {
+        final char lf = (char) 10;
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes(cmd + " 2>&1");
+            os.write(lf);
+            os.writeBytes("exit");
+            os.write(lf);
+            os.flush();
+            os.close();
+            StringBuilder sb = new StringBuilder();
+            BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String ln;
+            while ((ln = br.readLine()) != null) {
+                sb.append(ln).append(lf);
+            }
+            br.close();
+            try {
+                p.waitFor();
+            } catch (InterruptedException ignored) {
+            }
+            return sb.toString().trim();
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (p != null) {
+                p.destroy();
+            }
+        }
     }
 
     private String appidFrom(String url) {
@@ -753,26 +850,5 @@ public class AgentActivity extends BaseActivity {
                 e.printStackTrace();
             }
         }).start();
-    }
-
-    private boolean isTokenExists(File file, String token) {
-        try {
-            Scanner scanner = new Scanner(file);
-            while (scanner.hasNextLine()) {
-                if (scanner.nextLine().contains(token)) {
-                    scanner.close();
-                    return true;
-                }
-            }
-            scanner.close();
-        } catch (Exception e) {
-            // 文件不存在
-        }
-        return false;
-    }
-
-    private String getAccessTokenFromUrl(String line) {
-        Matcher matcher = Pattern.compile("access_token=([^&\\s]+)").matcher(line);
-        return matcher.find() ? matcher.group(1) : null;
     }
 }
