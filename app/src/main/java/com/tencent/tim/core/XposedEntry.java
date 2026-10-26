@@ -185,8 +185,26 @@ public class XposedEntry implements IXposedHookLoadPackage {
                         protected void beforeHookedMethod(MethodHookParam param) {
                             if (param.args != null && param.args.length > 0
                                     && QQ_PKG.equals(param.args[0])) {
-                                param.setResult(null);   // 当作未安装
-                                log("getPackageInfo 隐藏 " + QQ_PKG);
+                                /*
+                                 * 必须抛 NameNotFoundException，不能 setResult(null)。
+                                 *
+                                 * 曾经返回 null，结果 QQ SDK 的
+                                 * com.tencent.open.utils.Util.getPackageInfo
+                                 * 直接读 info.versionName，抛：
+                                 *   Attempt to read from field
+                                 *   'java.lang.String android.content.pm.PackageInfo.versionName'
+                                 *   on a null object reference
+                                 * 游戏侧收到 NPE，登录流程就断在这里。
+                                 *
+                                 * getPackageInfo 的正常语义是「查不到就抛
+                                 * NameNotFoundException」，SDK 的 catch 分支
+                                 * 才会把 QQ 当作未安装。
+                                 */
+                                param.setThrowable(
+                                        new android.content.pm.PackageManager
+                                                .NameNotFoundException(QQ_PKG));
+                                log("getPackageInfo 隐藏 " + QQ_PKG
+                                        + "（抛 NameNotFoundException）");
                             }
                         }
                     });
