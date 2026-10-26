@@ -74,6 +74,9 @@ public class GameLaunch {
     /** 候选上限。回调组件一般只有两三个，留点余量即可。 */
     private static final int MAX_TRIES = 4;
 
+    /** 冒充的包名，用于 from_activity。 */
+    private static final String SELF_PKG = "com.tencent.tim";
+
     private static final char LF = (char) 10;
     private static final char CR = (char) 13;
 
@@ -512,6 +515,11 @@ public class GameLaunch {
         // key 与 pfkey 是两个不同的字段，上一版把它们写成了同一个名字，
         // 导致 pfkey 永远写不进去（appendIfPresent 的重复检查直接命中）。
         putIfAbsent(kv, "pfkey", param(authUrl, "key"));
+        // from_activity：老八 MyWebViewClient 里确有此字段
+        // （与 access_token/expires_in/openid/pay_token/page_type/key_response
+        //   同一批解出，不是猜的）。
+        // 取值是发起授权的组件。我们冒充 TIM，所以给自己的包名。
+        putIfAbsent(kv, "from_activity", SELF_PKG);
 
         StringBuilder sb = new StringBuilder();
         sb.append('{');

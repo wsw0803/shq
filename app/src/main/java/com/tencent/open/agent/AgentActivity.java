@@ -561,9 +561,10 @@ public class AgentActivity extends BaseActivity {
          */
         String dataUri = saved == null ? "" : saved;
         resultIntent.setData(android.net.Uri.parse(dataUri));
-        // 一些 MSDK 版本还会检查这两个标记位，缺了就当「用户取消」处理。
+        // 老八 MyWebViewClient 解出的字段清单里只有 ret，没有 action。
+        // action 是我们自己加的，已移除。
+        // ret 有，保留 —— 缺了有 SDK 会当「用户取消」处理。
         resultIntent.putExtra("ret", 0);
-        resultIntent.putExtra("action", "login");
         // 额外把每个字段单独塞一个 extra。
         // 各版本 SDK 取值方式不同：有的读 key_response 整个 JSON，
         // 有的读 data，还有的直接 getStringExtra("access_token")。
