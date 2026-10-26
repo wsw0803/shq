@@ -74,9 +74,6 @@ public class GameLaunch {
     /** 候选上限。回调组件一般只有两三个，留点余量即可。 */
     private static final int MAX_TRIES = 4;
 
-    /** 冒充的包名，用于 from_activity。 */
-    private static final String SELF_PKG = "com.tencent.tim";
-
     private static final char LF = (char) 10;
     private static final char CR = (char) 13;
 
@@ -496,53 +493,48 @@ public class GameLaunch {
      *   把原始 query 的每一个 key=value 都写进 JSON，key 名保持原样，
      *   再补上 SDK 必需但原串没有的字段。一个都不丢，也不用再靠枚举猜。
      */
+    /**
+     * 生成 QQ/腾讯 MSDK 使用的 key_response。
+     *
+     * 老八 MyWebViewClient 的 smali 已还原确认：它只写 7 个固定字段，
+     * 顺序也是固定的：access_token / openid / pay_token / expires_in /
+     * ret / pf / page_type。
+     *
+     * 不能把原始回调里的所有 query 字段原样塞进来：
+     * pfkey、auth_time、appid、raw、from_activity 都不属于老八的
+     * key_response JSON。三角洲的 MSDK 会按这个固定响应结构解析。
+     */
     public static String keyResponse(String authUrl) {
-        String at = param(authUrl, "access_token");
-        if (at.isEmpty()) {
+        String accessToken = param(authUrl, "access_token");
+        if (accessToken.isEmpty()) {
             return "";
         }
-        // 原始 query 里的全部字段，按原顺序、原 key 名写进去
-        LinkedHashMap<String, String> kv = params(authUrl);
+        String openid = param(authUrl, "openid");
+        String payToken = param(authUrl, "pay_token");
+        String expiresIn = param(authUrl, "expires_in");
+        if (expiresIn.isEmpty()) {
+            expiresIn = "7776000";
+        }
 
-        // SDK 必需字段兜底
-        putIfAbsent(kv, "ret", "0");
-        putIfAbsent(kv, "openid", param(authUrl, "openid"));
-        putIfAbsent(kv, "access_token", at);
-        putIfAbsent(kv, "pay_token", param(authUrl, "pay_token"));
-        putIfAbsent(kv, "expires_in", "7776000");
-        putIfAbsent(kv, "pf", "desktop_m_qq-10000144-android-2002-");
-        putIfAbsent(kv, "page_type", "1");
-        // key 与 pfkey 是两个不同的字段，上一版把它们写成了同一个名字，
-        // 导致 pfkey 永远写不进去（appendIfPresent 的重复检查直接命中）。
-        putIfAbsent(kv, "pfkey", param(authUrl, "key"));
-        // from_activity：老八 MyWebViewClient 里确有此字段
-        // （与 access_token/expires_in/openid/pay_token/page_type/key_response
-        //   同一批解出，不是猜的）。
-        // 取值是发起授权的组件。我们冒充 TIM，所以给自己的包名。
-        putIfAbsent(kv, "from_activity", SELF_PKG);
-
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(320);
         sb.append('{');
-        boolean first = true;
-        for (java.util.Map.Entry<String, String> e : kv.entrySet()) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append('"').append(jsonEscape(e.getKey())).append("\":\"")
-                    .append(jsonEscape(e.getValue())).append('"');
-        }
-        // 原始 query 也附一份，供逐字符比对的 SDK 校验
-        String raw = authUrl == null ? "" : authUrl;
-        int i = raw.indexOf('#');
-        if (i >= 0) {
-            raw = raw.substring(i + 1);
-        }
-        if (!kv.containsKey("raw")) {
-            sb.append(",\"raw\":\"").append(jsonEscape(raw)).append('"');
-        }
+        appendJsonPair(sb, "access_token", accessToken, true);
+        appendJsonPair(sb, "openid", openid, false);
+        appendJsonPair(sb, "pay_token", payToken, false);
+        appendJsonPair(sb, "expires_in", expiresIn, false);
+        appendJsonPair(sb, "ret", "0", false);
+        appendJsonPair(sb, "pf", "desktop_m_qq-10000144-android-2002-", false);
+        appendJsonPair(sb, "page_type", "1", false);
         sb.append('}');
         return sb.toString();
+    }
+
+    private static void appendJsonPair(StringBuilder sb, String key, String value, boolean first) {
+        if (!first) {
+            sb.append(',');
+        }
+        sb.append('"').append(jsonEscape(key)).append("\":\"")
+                .append(jsonEscape(value == null ? "" : value)).append('"');
     }
 
     /** 把 URL 的 query 拆成有序 key→value，key 名原样保留。 */

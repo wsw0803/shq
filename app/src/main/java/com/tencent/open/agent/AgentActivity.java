@@ -494,21 +494,17 @@ public class AgentActivity extends BaseActivity {
         /*
          * 2026-10-25 第十四次修订（三角洲）。
          *
-         * 上一版这里是手写死的 7 个字段：access_token / openid / pay_token /
-         * expires_in / ret / pf / page_type，正好拼出 len234 的 key_response。
+         * 老八 MyWebViewClient 的 smali 已还原确认：
+         * key_response 只包含 7 个固定字段，且顺序固定：
+         *   access_token / openid / pay_token / expires_in /
+         *   ret / pf / page_type
          *
-         * 但原始回包有 10 个字段（日志里「字段清单」写得清清楚楚）：
-         *   access_token expires_in openid pay_token ret pf pfkey auth_time
-         *   page_type appid
-         * 手工拼装把 pfkey / auth_time / appid 三个字段丢掉了。
-         * 三角洲的 MSDK 在 checkToken 时逐字段比对，少一个就判「响应不完整」，
-         * 表现正是：setResult 成功、AssistActivity 正常走完、游戏也回来了，
-         * 但就是不登录。
-         *
-         * GameLaunch.keyResponse() 本来就是「原样铺开全部字段」的实现，
-         * 之前只在 amStart 的兜底分支里用过，这条 setResult 主链路绕过了它。
-         * 现在两条链路共用同一份 JSON，字段不再有任何损耗。
+         * 原始回调虽然有 10 个字段，但 pfkey / auth_time / appid 等
+         * 并不属于老八的 key_response JSON，不能把 query 全量展开。
+         * GameLaunch.keyResponse() 现在严格生成这 7 个字段。
          */
+        // 老八的 key_response 不含 from_activity；它只读这个字段用于
+        // 自己的授权流程控制，不把它塞进回传 JSON。
         String keyResponseJson = com.tencent.tim.GameLaunch.keyResponse(saved);
         if (keyResponseJson == null || keyResponseJson.isEmpty()) {
             LoginDiag.add("ERR", "keyResponse 为空，退回手工拼装");
@@ -528,8 +524,7 @@ public class AgentActivity extends BaseActivity {
             }
             keyResponseJson = fallback.toString();
         }
-        LoginDiag.add("PARSE", "key_response 字段数="
-                + com.tencent.tim.GameLaunch.params(saved).size()
+        LoginDiag.add("PARSE", "key_response 固定字段数=7"
                 + " len=" + keyResponseJson.length());
 
         saveRawDataToPreferences(saved);
@@ -540,50 +535,17 @@ public class AgentActivity extends BaseActivity {
                 + " 一致=" + appid.equals(chosenAppid)
                 + " mode=" + mode);
 
+        // 严格对齐老八 MyWebViewClient：只回传 key_response。
+        // 老八的真实 smali 是 Intent.putExtra(key_response, json) ->
+        // setResult(RESULT_OK, intent) -> finish()，没有 auth/data/ret/action
+        // 或逐字段 extras。
         Intent resultIntent = new Intent();
         resultIntent.putExtra("key_response", keyResponseJson);
-        resultIntent.putExtra("auth", saved);
-        /*
-         * 关键补齐：把 auth URI 同时设成 Intent 的 data。
-         *
-         * QQ SDK 的 AssistActivity 在 onActivityResult 里是这么解析的（各版本有差异）：
-         *   旧版：data.getStringExtra("key_response") → 当 JSON 解析
-         *   新版：data.getDataString() → 解析 auth://tauth.qq.com/?#access_token=...
-         *
-         * 上一版只给了 extras，data 是 null。如果游戏里这份 SDK 走的是 data 分支，
-         * 它拿到的就是 null，于是「结果交回去了、游戏也回来了、但就是不登录」——
-         * 和日志里观察到的现象完全一致。两条路一起给，哪种解析都能命中。
-         *
-         * 注意：这里用的是 saved 的原串，一个字节都不改。
-         * 之前为了「规范」把 ?# 换成 #，长度从 306 变成 305 ——
-         * 有的 SDK 会把拿到的 data 跟原始回包做字符串比对，
-         * 少一个字符就判不一致。原样最安全。
-         */
-        String dataUri = saved == null ? "" : saved;
-        resultIntent.setData(android.net.Uri.parse(dataUri));
-        // 老八 MyWebViewClient 解出的字段清单里只有 ret，没有 action。
-        // action 是我们自己加的，已移除。
-        // ret 有，保留 —— 缺了有 SDK 会当「用户取消」处理。
-        resultIntent.putExtra("ret", 0);
-        // 额外把每个字段单独塞一个 extra。
-        // 各版本 SDK 取值方式不同：有的读 key_response 整个 JSON，
-        // 有的读 data，还有的直接 getStringExtra("access_token")。
-        // 三种都给，哪种都能拿到。
-        try {
-            for (java.util.Map.Entry<String, String> en
-                    : com.tencent.tim.GameLaunch.params(saved).entrySet()) {
-                resultIntent.putExtra(en.getKey(), en.getValue());
-            }
-        } catch (Throwable ignored) {
-        }
-
         setResult(RESULT_OK, resultIntent);
 
-        LoginDiag.add("RETURN", "resultIntent: data="
-                + (dataUri.isEmpty() ? "空" : "len" + dataUri.length())
-                + " extras=[key_response len" + keyResponseJson.length()
-                + ", auth len" + (saved == null ? 0 : saved.length())
-                + "] resultCode=RESULT_OK 字段=" + keyWithLen(saved));
+        LoginDiag.add("RETURN", "resultIntent: only key_response len"
+                + keyResponseJson.length()
+                + " resultCode=RESULT_OK 字段=" + keyWithLen(saved));
 
         if (!"login".equals(mode)) {
             saveAccountToFile(saved, appid, mode);
@@ -612,7 +574,9 @@ public class AgentActivity extends BaseActivity {
              * 照着老八做：只 setResult，别加戏。
              */
             Toast.makeText(this, "已交回 " + gameName + "，请看游戏", Toast.LENGTH_SHORT).show();
-            finishLater(500);
+            // 老八在真实回传通道里 setResult 后立即 finish。
+            // 不再延迟 500ms，也不再继续进入外部兜底逻辑。
+            finish();
             return;
         }
 
