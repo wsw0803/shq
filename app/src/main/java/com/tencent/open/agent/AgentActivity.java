@@ -593,23 +593,23 @@ public class AgentActivity extends BaseActivity {
         if (hasRealChannel()) {
             LoginDiag.add("RETURN", "真实回传通道 " + callingActivityName() + "，只走 setResult");
             /*
-             * 补一条广播。
+             * 广播已移除。
              *
-             * 这一轮日志已经把链路走到头了：
-             *   AssistActivity: onCreate → onResume → onStop
-             *                 → onRestart → onActivityResult → onDestroy
-             * 结果确确实实送到了，AssistActivity 也确实处理完就销毁了。
+             * 之前这里发 4 条广播：
+             *   com.tencent.msdk.login.SUCCESS
+             *   com.tencent.msdk.LOGIN_RESULT
+             *   com.tencent.itop.login.result
+             *   <pkg>.msdk.LOGIN_RESULT
              *
-             * 但游戏进程的 SDK 日志一条都没有 —— 说明 AssistActivity 把结果
-             * 收下之后，没有回到 MSDK 的登录回调，而是当作「一次性回执」结束了。
-             * 三角洲的 MSDK 走的是广播 + 回调这条线，光给它 onActivityResult
-             * 不够，它还要一个能对上 appid 的广播通知。
+             * 这四个 action 全是猜出来的字符串 —— 在老八 APK 解密出的
+             * 690 条真字符串里，一条都找不到。
              *
-             * 这里按 MSDK 的约定再补一条 action=login 的广播，
-             * 携带 appid 与 auth 数据。收到与否由 MSDK 自己决定，
-             * 我们只负责把该发的东西发出去。
+             * 老八的做法只有 setResult，没有任何广播。
+             * 我们多发这四条，可能让 MSDK 收到「登录成功」信号却拿不到
+             * 有效数据，反而干扰 setResult 的正常处理。
+             *
+             * 照着老八做：只 setResult，别加戏。
              */
-            GameLaunch.notifyMsdkBroadcast(this, getSelectedGameName(), saved, appid);
             Toast.makeText(this, "已交回 " + gameName + "，请看游戏", Toast.LENGTH_SHORT).show();
             finishLater(500);
             return;
