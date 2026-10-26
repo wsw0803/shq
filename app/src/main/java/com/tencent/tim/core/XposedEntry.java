@@ -31,8 +31,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *
  * 三处 findAndHookMethod 的参数组合也已确认：
  *
- *   hook 1: PackageManager.queryIntentActivities(Intent, int)
- *           参数含 Landroid/content/Intent; 与 Ljava/lang/Integer;->TYPE；
+ *   hook 1: android.app.ApplicationPackageManager#getPackageInfo(String, int)
+ *           与 #queryIntentActivities(Intent, int)
+ *           参数分别含 String/int、Intent/int；
  *           回调 $2 里做 Intent.getPackage().equals("com.tencent.mobileqq")
  *   hook 2: WebView.loadUrl
  *           回调 $3 只打日志，不阻断
@@ -85,8 +86,9 @@ public class XposedEntry implements IXposedHookLoadPackage {
         int ssl = hookTrustManager();
         log("checkTrustedRecursive 已接管 " + ssl + " 个重载");
 
-        int hide = hookQueryIntentActivities();
-        log("queryIntentActivities 已接管 " + hide + " 个重载（隐藏 " + QQ_PKG + "）");
+        int pkgHooks = hookPackageManager();
+        log("ApplicationPackageManager 已接管 " + pkgHooks
+                + " 个重载（getPackageInfo + queryIntentActivities，隐藏 " + QQ_PKG + "）");
 
         int url = hookUrlCapture(lpparam);
         log("WebView.loadUrl 已接管 " + url);
@@ -149,74 +151,119 @@ public class XposedEntry implements IXposedHookLoadPackage {
     // ------------------------------------------------------------------
 
     /**
-     * hook PackageManager.queryIntentActivities(Intent, int)。
+     * 老八的 $1 + $2：具体 hook android.app.ApplicationPackageManager，
+     * 不是抽象的 android.content.pm.PackageManager。
      *
-     * 老八的做法：在结果列表里把包名为 com.tencent.mobileqq 的项剔除。
-     * 这里沿用，但更保守 —— 只剔除 QQ，不动其他包，
-     * 避免影响游戏自身的组件查询。
+     *   $1: getPackageInfo(String, int)
+     *       查询 com.tencent.mobileqq 时返回 null，
+     *       让游戏把 QQ 当作未安装。
+     *
+     *   $2: queryIntentActivities(Intent, int)
+     *       结果里剔除 com.tencent.mobileqq；如果 Intent 明确指定 QQ，
+     *       直接返回空列表。
      */
-    private static int hookQueryIntentActivities() {
+    private static int hookPackageManager() {
         int hooked = 0;
         try {
-            Class<?> pm = XposedHelpers.findClass("android.content.pm.PackageManager", null);
+            Class<?> pm = XposedHelpers.findClass(
+                    "android.app.ApplicationPackageManager", null);
             for (Method m : pm.getDeclaredMethods()) {
-                if (!"queryIntentActivities".equals(m.getName())) {
-                    continue;
-                }
+                String name = m.getName();
                 Class<?>[] ps = m.getParameterTypes();
-                if (ps.length != 2) {
-                    continue;
-                }
-                if (!"android.content.Intent".equals(ps[0].getName())) {
-                    continue;
-                }
-                if (ps[1] != int.class) {
-                    continue;
-                }
-                try {
-                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            Object r = param.getResult();
-                            if (!(r instanceof List)) {
-                                return;
+
+                if ("getPackageInfo".equals(name)
+                        && ps.length == 2
+                        && ps[0] == String.class
+                        && ps[1] == int.class) {
+                    try {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                if (param.args != null && param.args.length > 0
+                                        && QQ_PKG.equals(param.args[0])) {
+                                    // 老八 $1 的屏蔽分支：setResult(null)
+                                    param.setResult(null);
+                                    log("getPackageInfo 隐藏 " + QQ_PKG);
+                                }
                             }
-                            try {
-                                filterQQ((List<?>) r);
-                            } catch (Throwable ignored) {
+                        });
+                        hooked++;
+                    } catch (Throwable t) {
+                        log("hook getPackageInfo 失败: " + t);
+                    }
+                    continue;
+                }
+
+                if ("queryIntentActivities".equals(name)
+                        && ps.length == 2
+                        && ps[0].getName().equals("android.content.Intent")
+                        && ps[1] == int.class) {
+                    try {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                Object result = param.getResult();
+                                if (!(result instanceof List)) {
+                                    return;
+                                }
+                                Object intent = param.args != null && param.args.length > 0
+                                        ? param.args[0] : null;
+                                if (intent != null && QQ_PKG.equals(intentPackage(intent))) {
+                                    param.setResult(new ArrayList<Object>());
+                                    log("queryIntentActivities 直接隐藏 " + QQ_PKG);
+                                    return;
+                                }
+                                List<?> source = (List<?>) result;
+                                ArrayList<Object> filtered = new ArrayList<Object>();
+                                for (Object item : source) {
+                                    if (!isQqResolveInfo(item)) {
+                                        filtered.add(item);
+                                    }
+                                }
+                                if (filtered.size() != source.size()) {
+                                    param.setResult(filtered);
+                                    log("queryIntentActivities 过滤 "
+                                            + (source.size() - filtered.size()) + " 个 QQ 结果");
+                                }
                             }
-                        }
-                    });
-                    hooked++;
-                } catch (Throwable t) {
-                    log("hook queryIntentActivities 失败: " + t);
+                        });
+                        hooked++;
+                    } catch (Throwable t) {
+                        log("hook queryIntentActivities 失败: " + t);
+                    }
                 }
             }
         } catch (Throwable t) {
-            log("queryIntentActivities 不可用: " + t);
+            log("ApplicationPackageManager 不可用: " + t);
         }
         return hooked;
     }
 
-    /** 从 ResolveInfo 列表里剔除 QQ。全程反射，不引 Android 类。 */
-    private static void filterQQ(List<?> list) {
-        Iterator<?> it = list.iterator();
-        while (it.hasNext()) {
-            Object ri = it.next();
-            if (ri == null) {
-                continue;
+    private static String intentPackage(Object intent) {
+        try {
+            Object value = intent.getClass().getMethod("getPackage").invoke(intent);
+            return value == null ? "" : String.valueOf(value);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** ResolveInfo.activityInfo.packageName == com.tencent.mobileqq。 */
+    private static boolean isQqResolveInfo(Object resolveInfo) {
+        if (resolveInfo == null) {
+            return false;
+        }
+        try {
+            Object activityInfo = resolveInfo.getClass().getField("activityInfo")
+                    .get(resolveInfo);
+            if (activityInfo == null) {
+                return false;
             }
-            try {
-                Object ai = ri.getClass().getField("activityInfo").get(ri);
-                if (ai == null) {
-                    continue;
-                }
-                Object pkg = ai.getClass().getField("packageName").get(ai);
-                if (QQ_PKG.equals(pkg)) {
-                    it.remove();
-                }
-            } catch (Throwable ignored) {
-            }
+            Object packageName = activityInfo.getClass().getField("packageName")
+                    .get(activityInfo);
+            return QQ_PKG.equals(packageName);
+        } catch (Throwable t) {
+            return false;
         }
     }
 
