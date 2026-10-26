@@ -78,16 +78,20 @@ android {
 }
 
 dependencies {
-    // libxposed API 102（LSPosed 新版 API）—— 必须 compileOnly。
+    // 经典 Xposed API —— 必须 compileOnly，绝不能打进 APK。
     //
-    // LSPosed 会检查模块 APK 里是否自带 API 类，一旦发现就拒绝加载：
-    //   Cannot load module: com.tencent.tim
-    //   The Xposed API classes are compiled into the module's APK.
+    // 两次踩坑记录：
+    //   1) 把 de.robv.android.xposed.* 桩类写进源码一起打包，LSPosed 报
+    //        The Xposed API classes are compiled into the module's APK.
+    //      直接拒绝加载。
+    //   2) 换成 libxposed 新版 API，报
+    //        ClassNotFoundException: io.github.libxposed.api.XposedModule
+    //      因为本模块走的是经典加载路径（xposedmodule + assets/xposed_init），
+    //      LSPosed 只会注入经典 API，跟 LSPosed 版本新旧无关。
     //
-    // 之前把 API 桩类写进源码一起打包，导致模块永远加载不起来。
-    // 现在用官方 AAR 且 compileOnly，API 类不进 APK。
-    // 注意它是 aar 不是 jar，Maven Central 上只有 .aar。
-    compileOnly 'io.github.libxposed:api:102.0.0'
+    // 所以：经典 API + compileOnly + 官方仓库，API 类不进 APK。
+    // 这个 artifact 在 Maven Central / google() 都没有，只有 api.xposed.info 有。
+    compileOnly 'de.robv.android.xposed:api:82'
 
     implementation libs.androidx.core
     implementation libs.androidx.appcompat
