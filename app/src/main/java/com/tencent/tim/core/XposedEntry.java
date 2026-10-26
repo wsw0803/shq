@@ -87,6 +87,10 @@ public class XposedEntry implements IXposedHookLoadPackage {
         int url = hookUrlCapture();
         log("WebView.loadUrl 已接管 " + url + " 个重载");
 
+        // 诊断用：看游戏侧 AssistActivity 收到什么、怎么处理。
+        int assist = hookAssistActivity(lpparam.classLoader);
+        log("AssistActivity.onActivityResult 已接管 " + assist + " 个重载");
+
         Diag.log("INPROC", "加载完成 ssl=" + ssl + " pms=" + pms + " url=" + url);
         writeStatus(ssl);
     }
@@ -323,6 +327,93 @@ public class XposedEntry implements IXposedHookLoadPackage {
     }
 
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // 诊断：看游戏侧 AssistActivity 如何消费 setResult
+    // ------------------------------------------------------------------
+
+    /**
+     * 老八没这一步，纯粹是为了定位「结果交回去了但不登录」。
+     *
+     * AssistActivity 是游戏里 QQ SDK 的收结果页。我们 setResult 之后，
+     * 它 onActivityResult 收到的到底是什么、又返回给了谁，
+     * 光看窗口事件看不出来。这里把 Intent 的 action / data / extra 键名
+     * 全部打出来，就能判断它期望的格式。
+     */
+    private static int hookAssistActivity(ClassLoader cl) {
+        Class<?> cls;
+        try {
+            cls = XposedHelpers.findClass(
+                    "com.tencent.connect.common.AssistActivity", cl);
+        } catch (Throwable t) {
+            log("找不到 AssistActivity: " + t);
+            return 0;
+        }
+        int hooked = 0;
+        for (Method m : cls.getDeclaredMethods()) {
+            if (!"onActivityResult".equals(m.getName())) {
+                continue;
+            }
+            if (m.getParameterTypes().length != 3) {
+                continue;
+            }
+            try {
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            Object rc = param.args[0];
+                            Object res = param.args[1];
+                            Object data = param.args[2];
+                            log("AssistActivity.onActivityResult requestCode=" + rc
+                                    + " resultCode=" + res);
+                            dumpIntent("AssistActivity收到", data);
+                        } catch (Throwable t) {
+                            log("dump 失败: " + t);
+                        }
+                    }
+                });
+                hooked++;
+            } catch (Throwable t) {
+                log("hook onActivityResult 失败: " + t);
+            }
+        }
+        return hooked;
+    }
+
+    /** 反射读 Intent，不依赖编译期类型。 */
+    private static void dumpIntent(String tag, Object intent) {
+        if (intent == null) {
+            log(tag + " intent=null");
+            return;
+        }
+        try {
+            Class<?> ic = intent.getClass();
+            Object action = ic.getMethod("getAction").invoke(intent);
+            Object data = ic.getMethod("getDataString").invoke(intent);
+            log(tag + " action=" + action + " data="
+                    + (data == null ? "null" : "len" + String.valueOf(data).length()));
+            Object extras = ic.getMethod("getExtras").invoke(intent);
+            if (extras == null) {
+                log(tag + " extras=null");
+                return;
+            }
+            Object keys = extras.getClass().getMethod("keySet").invoke(extras);
+            if (keys instanceof java.util.Set) {
+                StringBuilder sb = new StringBuilder();
+                for (Object k : (java.util.Set<?>) keys) {
+                    Object v = extras.getClass().getMethod("get", Object.class)
+                            .invoke(extras, k);
+                    sb.append(k).append('(')
+                            .append(v == null ? "null" : String.valueOf(v).length())
+                            .append(") ");
+                }
+                log(tag + " extras: " + sb);
+            }
+        } catch (Throwable t) {
+            log(tag + " dump 异常: " + t);
+        }
+    }
 
     /** 把接管数写进目标进程自己的 files 目录，供本 App 用 root 读取。 */
     private static void writeStatus(int n) {
