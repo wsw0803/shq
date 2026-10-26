@@ -175,6 +175,19 @@ public class SettingsActivity extends BaseActivity {
                 btn.postDelayed(this::refreshDiagFiles, 800);
             }
         });
+        // 长按日志开关切换「全局抓取」：完全不过滤，原始行全留。
+        // 不加新控件，避免改布局；排障时才需要，藏在这里够用。
+        sw.setOnLongClickListener(v -> {
+            boolean now = !LoginDiag.isRawAll(this);
+            LoginDiag.setRawAll(this, now);
+            android.widget.Toast.makeText(this,
+                    now ? "已开启全局抓取：不再过滤，所有日志原样保留"
+                        : "已关闭全局抓取：恢复白名单过滤",
+                    android.widget.Toast.LENGTH_LONG).show();
+            refreshDiagFiles();
+            return true;
+        });
+
         Button export = findViewById(R.id.btn_diag_export);
         if (export != null) {
             export.setOnClickListener(v -> showDiagList());
@@ -214,7 +227,10 @@ public class SettingsActivity extends BaseActivity {
             inprocPart = "游戏进程: 空（未注入或未运行）";
         }
 
-        tvDiagFiles.setText(appPart + "\n" + inprocPart);
+        String modePart = LoginDiag.isRawAll(this)
+                ? "模式: 全局抓取（不过滤）"
+                : "模式: 白名单过滤";
+        tvDiagFiles.setText(appPart + "\n" + inprocPart + "\n" + modePart);
     }
 
     /** 取当前用于诊断的游戏名，供上面拼包名。 */

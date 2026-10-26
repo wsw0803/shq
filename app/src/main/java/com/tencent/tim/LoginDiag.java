@@ -70,6 +70,8 @@ public class LoginDiag {
     private static final int SDK_UNIQUE = 60;
 
     private static final List<String> events = new ArrayList<String>();
+    /** 全局抓取模式。 */
+    private static boolean rawAll = false;
     private static long startedAt = 0L;
     private static volatile boolean enabled = false;
     private static volatile boolean loaded = false;
@@ -78,6 +80,12 @@ public class LoginDiag {
     private static final SimpleDateFormat FULL_TS = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA);
 
     /** logcat 行首："10-25 16:51:32.620  4358  5210 D " */
+    /** 全局抓取开关：开启后完全不过滤，原始行全部保留。 */
+    private static final String KEY_RAW_ALL = "diag_raw_all";
+
+    /** 全局模式下最多留多少行，防止 OOM。 */
+    private static final int RAW_ALL_MAX = 4000;
+
     private static final Pattern LOGCAT_HEAD = Pattern.compile(
             "^\\d{2}-\\d{2}\\s+(\\d{2}:\\d{2}:\\d{2})\\.\\d{3}\\s+\\d+\\s+\\d+\\s+[VDIWEFA]\\s+");
 
@@ -231,7 +239,19 @@ public class LoginDiag {
     public static void init(Context c) {
         if (c == null) return;
         enabled = prefs(c).getBoolean(KEY_ENABLED, false);
+        rawAll = prefs(c).getBoolean(KEY_RAW_ALL, false);
         loaded = true;
+    }
+
+    public static boolean isRawAll(Context c) {
+        if (!loaded) init(c);
+        return rawAll;
+    }
+
+    public static void setRawAll(Context c, boolean on) {
+        if (c == null) return;
+        prefs(c).edit().putBoolean(KEY_RAW_ALL, on).apply();
+        rawAll = on;
     }
 
     public static boolean isEnabled(Context c) {
@@ -483,6 +503,15 @@ public class LoginDiag {
                 if (body == null || body.isEmpty()) continue;
                 String line = trim(body);
                 if (line.isEmpty()) continue;
+                // 全局抓取模式：一行都不丢，原样保留。
+                if (rawAll) {
+                    if (strong.size() < RAW_ALL_MAX) {
+                        Bucket b = strong.get(line);
+                        if (b == null) strong.put(line, new Bucket(line));
+                        else b.count++;
+                    }
+                    continue;
+                }
                 boolean isStrong = isStrong(line);
                 if (!isStrong && isNoise(line)) {
                     dropped++;
@@ -645,6 +674,17 @@ public class LoginDiag {
                 if (body == null || body.isEmpty()) continue;
                 String line = trim(body);
                 if (line.isEmpty()) continue;
+                // 全局抓取模式：游戏进程的日志一行都不丢。
+                // MSDK 的判决往往藏在看起来像噪音的行里，
+                // 之前把它滤掉，导致完全看不到 SDK 在做什么。
+                if (rawAll) {
+                    if (strong.size() < RAW_ALL_MAX) {
+                        Bucket b = strong.get(line);
+                        if (b == null) strong.put(line, new Bucket(line));
+                        else b.count++;
+                    }
+                    continue;
+                }
                 boolean s = isStrong(line);
                 if (!s && isNoise(line)) {
                     dropped++;
