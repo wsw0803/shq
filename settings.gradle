@@ -11,6 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Xposed API 的官方仓库。Maven Central 和 google() 都没有这个包，
+        // 不加这条 compileOnly 依赖会解析失败。
+        maven { url 'https://api.xposed.info/' }
     }
 }
 

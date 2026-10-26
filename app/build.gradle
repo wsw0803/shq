@@ -78,6 +78,17 @@ android {
 }
 
 dependencies {
+    // libxposed API 102（LSPosed 新版 API）—— 必须 compileOnly。
+    //
+    // LSPosed 会检查模块 APK 里是否自带 API 类，一旦发现就拒绝加载：
+    //   Cannot load module: com.tencent.tim
+    //   The Xposed API classes are compiled into the module's APK.
+    //
+    // 之前把 API 桩类写进源码一起打包，导致模块永远加载不起来。
+    // 现在用官方 AAR 且 compileOnly，API 类不进 APK。
+    // 注意它是 aar 不是 jar，Maven Central 上只有 .aar。
+    compileOnly 'io.github.libxposed:api:102.0.0'
+
     implementation libs.androidx.core
     implementation libs.androidx.appcompat
     implementation libs.material
