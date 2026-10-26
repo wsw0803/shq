@@ -188,13 +188,50 @@ public class SettingsActivity extends BaseActivity {
 
     private void refreshDiagFiles() {
         if (tvDiagFiles == null) return;
+
+        // App 进程的日志（LoginDiag，静态内存 + 落盘）
         List<File> all = LoginDiag.listLogs(this);
+        String appPart;
         if (all.isEmpty()) {
-            tvDiagFiles.setText("暂无日志文件");
-            return;
+            appPart = "应用进程: 无";
+        } else {
+            File latest = all.get(0);
+            appPart = "应用进程: " + all.size() + " 份，最新 " + latest.getName();
         }
-        File latest = all.get(0);
-        tvDiagFiles.setText("已有 " + all.size() + " 份日志，最新: " + latest.getName());
+
+        // 游戏进程的日志（XposedEntry 经 Diag 写到游戏自己的 files 目录）
+        // 这是本轮重构的重点：以前靠导出整个 logcat，4MB 里几乎没有有效行，
+        // 还受 LSPosed 日志级别影响。现在直接读文件，条数一眼可见。
+        String pkg = com.tencent.tim.GameLaunch.packageOf(getSelectedGameForDiag());
+        int inproc = com.tencent.tim.core.ShqXposedBridge
+                .readInprocLog(pkg, 1).size();
+        String inprocPart;
+        if (pkg == null || pkg.isEmpty()) {
+            inprocPart = "游戏进程: 未选游戏";
+        } else if (inproc > 0) {
+            inprocPart = "游戏进程: 有日志 ✓";
+        } else {
+            inprocPart = "游戏进程: 空（未注入或未运行）";
+        }
+
+        tvDiagFiles.setText(appPart + "\n" + inprocPart);
+    }
+
+    /** 取当前用于诊断的游戏名，供上面拼包名。 */
+    private String getSelectedGameForDiag() {
+        try {
+            android.content.SharedPreferences sp =
+                    getSharedPreferences("myPrefs", MODE_PRIVATE);
+            // key 与 AgentActivity.getSelectedGameName() 保持一致，
+            // 是 selected_game_name 不是 selected_game，写错了会永远读到空。
+            String g = sp.getString("selected_game_name", "");
+            if (g == null || "未知游戏".equals(g)) {
+                return "";
+            }
+            return g;
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     /**

@@ -58,6 +58,57 @@ public final class ShqXposedBridge {
         }
     }
 
+
+    /**
+     * 读游戏进程写的诊断日志。
+     *
+     * XposedEntry 的 Diag 写到 /sdcard/Android/data/<游戏包名>/files/diag.log，
+     * 但那是另一个 App 的外部目录 —— Android 11+ 的分区存储下，
+     * 本 App 没有权限直接读。
+     *
+     * 用 root 读是唯一稳的路：su 可以跨应用目录。
+     * 没 root 就返回空，界面显示「无法读取」，不谎报。
+     *
+     * @param lines 最多返回多少行（取尾部）
+     */
+    public static java.util.List<String> readInprocLog(String pkg, int lines) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (pkg == null || pkg.isEmpty()) {
+            return out;
+        }
+        // 两个可能的路径：外部 files 优先（Diag 写的），退回内部 files
+        String[] paths = {
+                "/sdcard/Android/data/" + pkg + "/files/diag.log",
+                "/storage/emulated/0/Android/data/" + pkg + "/files/diag.log",
+                "/data/data/" + pkg + "/files/diag.log",
+        };
+        for (String path : paths) {
+            String body = runSu("tail -n " + Math.max(1, lines) + " " + path + " 2>/dev/null");
+            if (body != null && !body.trim().isEmpty()) {
+                for (String ln : body.split("\n")) {
+                    if (!ln.trim().isEmpty()) {
+                        out.add(ln);
+                    }
+                }
+                if (!out.isEmpty()) {
+                    return out;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 清空游戏进程的日志。 */
+    public static boolean clearInprocLog(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            return false;
+        }
+        runSu("rm -f /sdcard/Android/data/" + pkg + "/files/diag.log "
+                + "/storage/emulated/0/Android/data/" + pkg + "/files/diag.log "
+                + "/data/data/" + pkg + "/files/diag.log 2>/dev/null");
+        return true;
+    }
+
     /** 有 root 就执行，没有就返回 null。绝不抛。 */
     private static String runSu(String cmd) {
         Process p = null;

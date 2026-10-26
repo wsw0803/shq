@@ -312,10 +312,22 @@ public class XposedEntry implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * 双写。
+     *
+     * XposedBridge.log 走 logcat，需要 LSPosed 把日志级别开到详细
+     * 才看得到 —— 上一轮就是因为这个，导出的 4MB 日志里
+     * 一条 [SHQ-INPROC] 都没有。
+     *
+     * Diag 直接写文件，路径在游戏自己的外部 files 目录，
+     * 不受日志级别影响，进程被杀也留得下。
+     * 两条路都写，任一条可用就能定位问题。
+     */
     private static void log(String s) {
         try {
             XposedBridge.log(TAG + s);
         } catch (Throwable ignored) {
         }
+        Diag.log("INPROC", s);
     }
 }
