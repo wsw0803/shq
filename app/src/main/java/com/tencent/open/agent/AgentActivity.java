@@ -164,6 +164,55 @@ public class AgentActivity extends BaseActivity {
             plainText.setText(incoming);
             Toast.makeText(this, "检测到游戏登录回调", Toast.LENGTH_SHORT).show();
             ui.postDelayed(() -> performLogin(incoming), 300);
+        } else {
+            // 游戏把本页拉起来但没带 auth —— 这是最常见的情况：
+            // 游戏只是 startActivityForResult 等结果，auth 得我们自己给。
+            //
+            // 老八的做法就是有 token 就直接登录，不让人再点一次。
+            // 这里同理：从本地已保存的数据里取 token，取到就立刻走。
+            // 取不到再让人手动操作，避免无 token 时死等。
+            String local = localAuth();
+            if (local != null && !local.isEmpty()) {
+                String localGame = com.tencent.tim.TokenStore.gameOfUrl(local);
+                LoginDiag.add("AUTO", "未带 token，改用本地已保存"
+                        + (localGame.isEmpty() ? "" : "（" + localGame + "）")
+                        + " len=" + local.length());
+                plainText.setText(local);
+                ui.postDelayed(() -> performLogin(local), 300);
+            } else {
+                LoginDiag.add("AUTO", "未带 token 且本地无可用数据，等待手动操作");
+            }
+        }
+    }
+
+    /**
+     * 从本地取一条能直接用的 auth。
+     *
+     * 优先按当前选中的游戏取，取不到再退到「任意游戏最近一条」——
+     * 因为游戏拉起的时机可能早于用户切换游戏，这时先保证能登录。
+     */
+    private String localAuth() {
+        try {
+            String game = getSelectedGameName();
+            java.util.List<com.tencent.tim.TokenStore.Entry> list =
+                    (game == null || game.isEmpty() || "未知游戏".equals(game))
+                            ? com.tencent.tim.TokenStore.loadAll()
+                            : com.tencent.tim.TokenStore.loadGame(game);
+            if (list == null || list.isEmpty()) {
+                list = com.tencent.tim.TokenStore.loadAll();
+            }
+            if (list == null || list.isEmpty()) {
+                return null;
+            }
+            com.tencent.tim.TokenStore.Entry e = list.get(list.size() - 1);
+            String url = com.tencent.tim.TokenStore.rebuildUrl(e);
+            if (url == null || url.isEmpty()) {
+                return null;
+            }
+            return url;
+        } catch (Throwable t) {
+            LoginDiag.add("AUTO", "localAuth 失败: " + t);
+            return null;
         }
     }
 
