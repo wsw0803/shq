@@ -458,6 +458,42 @@ public class AgentActivity extends BaseActivity {
             Toast.makeText(this, "数据为空", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        /*
+         * 进程内注入型游戏（目前只有三角洲）在这里就结束。
+         *
+         * 这类游戏没有外部投递入口：下面的 normalizeAuthUrl、keyResponse、
+         * writeToPreferences、setResult 一整套对它们全是死代码 ——
+         * 三角洲的 MSDK 在游戏进程内做校验，外部塞过去的 auth 不会被消费，
+         * 唯一的效果是拉起 pixui.WebViewActivity 拿不到 url 后
+         * destroySurface，留下空任务栈 = 黑屏。
+         *
+         * 所以拦截必须放在最前面，连解析和落盘都不做。
+         * 判断用 GamePlan 的能力位，不是字符串比较，加新游戏时只改策略表。
+         */
+        {
+            final String g0 = getSelectedGameName();
+            if (GamePlan.needsInProcess(g0)) {
+                String pkg = GameLaunch.packageOf(g0);
+                int n = ShqXposedBridge.hookedMethodCount(pkg);
+                String why;
+                if (n > 0) {
+                    why = "「" + g0 + "」需进程内注入，证书链已接管 " + n + " 个重载；\n"
+                            + "请在 LSPosed 中勾选本模块作用域后，直接在游戏内登录";
+                } else if (n == ShqXposedBridge.UNKNOWN) {
+                    why = "「" + g0 + "」需进程内注入，无法确认是否已接管。\n"
+                            + "请确认已在 LSPosed 启用本模块并勾选作用域，然后直接在游戏内登录";
+                } else {
+                    why = "「" + g0 + "」需进程内注入，但当前未检测到 Xposed 接管。\n"
+                            + "请在 LSPosed 中启用本模块，作用域勾选 " + g0 + "，重启游戏";
+                }
+                Toast.makeText(this, why, Toast.LENGTH_LONG).show();
+                LoginDiag.add("DISPATCH", "「" + g0 + "」需进程内注入，已跳过外部投递"
+                        + "（hooked=" + n + "）");
+                finishLater(3500);
+                return;
+            }
+        }
         String accessToken = grab(url, "access_token=([^&\\s#]+)");
         String expiresIn = grab(url, "expires_in=([^&\\s#]+)");
         String openId = grab(url, "openid=([^&\\s#]+)");
@@ -611,31 +647,6 @@ public class AgentActivity extends BaseActivity {
             Toast.makeText(this, "「" + gameName + "」未配置包名，游戏收不到 token",
                     Toast.LENGTH_LONG).show();
             finishLater(2500);
-            return;
-        }
-
-        // 三角洲这类游戏没有外部投递入口，继续往下走只会拉起内部 WebViewActivity
-        // 然后 destroySurface，表现为黑屏。在这里就停下，并把原因说清楚，
-        // 而不是让用户以为「正在交付」等一个必然失败的结果。
-        if (GamePlan.needsInProcess(gameName)) {
-            String pkg = GameLaunch.packageOf(gameName);
-            int n = ShqXposedBridge.hookedMethodCount(pkg);
-            String why;
-            if (n > 0) {
-                why = "「" + gameName + "」需进程内注入，证书链已接管 " + n + " 个重载；\n"
-                        + "请在 LSPosed 中勾选本模块作用域后，直接在游戏内登录";
-            } else if (n == ShqXposedBridge.UNKNOWN) {
-                // 没 root / 状态文件不存在 —— 无法确认，不谎报成功也不谎报失败
-                why = "「" + gameName + "」需进程内注入，无法确认是否已接管。\n"
-                        + "请确认已在 LSPosed 启用本模块并勾选作用域，然后直接在游戏内登录";
-            } else {
-                why = "「" + gameName + "」需进程内注入，但当前未检测到 Xposed 接管。\n"
-                        + "请在 LSPosed 中启用本模块，作用域勾选 " + gameName + "，重启游戏";
-            }
-            Toast.makeText(this, why, Toast.LENGTH_LONG).show();
-            LoginDiag.add("DISPATCH", "「" + gameName + "」需进程内注入，已跳过外部投递"
-                    + "（hooked=" + n + "）");
-            finishLater(3500);
             return;
         }
 
