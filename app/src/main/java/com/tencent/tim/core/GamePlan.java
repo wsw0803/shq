@@ -6,16 +6,27 @@ import java.util.Map;
 /**
  * 每个游戏「怎么把 token 送进去」的策略表。
  *
- * 重构要点：原实现只有 GameLaunch 一条路——找到游戏的 auth 回调组件，
- * startActivity 把结果塞过去。对和平精英这类「真的在 startActivityForResult
- * 等我们」的游戏可行，对三角洲不可行：
+ * 每个游戏「怎么把 token 送进去」的策略表。
  *
- *   三角洲 com.tencent.tmgp.dfm 的登录在 MSDK 进程内完成校验，
- *   pixui.WebViewActivity 拿不到 Intent 里的 url 就直接 destroySurface，
- *   留下空任务栈 = 黑屏。它没有「外部投递入口」。
+ * 两个能力位：
+ *   external  —— 支持外部投递：找到游戏的 auth 回调组件，startActivity 塞结果
+ *   inProcess —— 必须进程内注入：Xposed 在游戏进程里接管
  *
- * 所以这里把「外部投递」和「进程内注入」拆成两个正交能力位，
- * 由策略表决定，而不是靠 GameLaunch 里的候选排序去猜。
+ * 教训：三角洲一开始被我标成 inProcess=true，理由是 GameLaunch 注释里
+ * 「WebViewActivity 拿不到 url 就 destroySurface → 黑屏」。
+ *
+ * 但那条注释描述的是「找不到回调组件、退而启动内部页」时的表现。
+ * 实机日志显示三角洲有真实回传通道：
+ *
+ *   getCallingActivity = com.tencent.tmgp.dfm/com.tencent.connect.common.AssistActivity
+ *   AssistActivity: onCreate → onResume → onActivityResult → onDestroy
+ *   checkFinished=true，ACTIVITY_RESULT 正常回调
+ *
+ * 这和黑屏那条不是同一条路。老八的做法就是扫码后 setResult 交回，
+ * 让游戏自己走 MSDK 校验，不往游戏里塞 token。
+ * 标成 inProcess 等于把唯一可行的路堵死 —— 三角洲因此一直登录不了。
+ *
+ * 现在所有游戏都走外部投递。inProcess 位保留，但目前没有游戏需要它。
  */
 public final class GamePlan {
 
@@ -41,8 +52,22 @@ public final class GamePlan {
                 "外部投递可用"));
         add(new GamePlan("王者", "com.tencent.tmgp.sgame", true, false,
                 "外部投递可用"));
-        add(new GamePlan("三角洲", "com.tencent.tmgp.dfm", false, true,
-                "MSDK 进程内校验，外部投递必定黑屏"));
+        // 三角洲必须允许外部投递。
+        //
+        // 之前标成 external=false 是错的。当时的依据是 GameLaunch 注释里
+        // 记录的「WebViewActivity 拿不到 url 就 destroySurface → 黑屏」，
+        // 但那是「找不到回调组件、退而启动内部页」时的表现。
+        //
+        // 实机日志显示三角洲有真实回传通道：
+        //   getCallingActivity = com.tencent.tmgp.dfm/com.tencent.connect.common.AssistActivity
+        //   AssistActivity 走完 onCreate → onResume → onActivityResult → onDestroy
+        //   checkFinished=true，ACTIVITY_RESULT 正常回调
+        //
+        // 这条路和黑屏那条不是同一条。老八也是扫码后 setResult 交回，
+        // 让游戏自己走 MSDK 校验，不往游戏里塞 token。
+        // 标成 external=false 等于把唯一可行的路堵死。
+        add(new GamePlan("三角洲", "com.tencent.tmgp.dfm", true, false,
+                "扫码后 setResult 交回 AssistActivity"));
         add(new GamePlan("暗区突围", "com.tencent.mf.uam", true, false,
                 "外部投递可用"));
         add(new GamePlan("无畏契约", "com.tencent.tmgp.codev", true, false,

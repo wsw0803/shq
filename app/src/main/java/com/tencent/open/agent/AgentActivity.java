@@ -1,7 +1,5 @@
 package com.tencent.open.agent;
 
-import com.tencent.tim.core.GamePlan;
-import com.tencent.tim.core.ShqXposedBridge;
 
 import android.content.ClipboardManager;
 import android.content.ComponentName;
@@ -460,40 +458,15 @@ public class AgentActivity extends BaseActivity {
         }
 
         /*
-         * 进程内注入型游戏（目前只有三角洲）在这里就结束。
+         * 三角洲曾经在这里被提前 return 掉，理由是「需进程内注入」。
+         * 那个判定是错的：实机日志显示它有真实回传通道
+         * （getCallingActivity = .../com.tencent.connect.common.AssistActivity，
+         * 且 onActivityResult 正常回调），
+         * 老八也是扫码后 setResult 交回、让游戏自己走 MSDK 校验。
          *
-         * 这类游戏没有外部投递入口：下面的 normalizeAuthUrl、keyResponse、
-         * writeToPreferences、setResult 一整套对它们全是死代码 ——
-         * 三角洲的 MSDK 在游戏进程内做校验，外部塞过去的 auth 不会被消费，
-         * 唯一的效果是拉起 pixui.WebViewActivity 拿不到 url 后
-         * destroySurface，留下空任务栈 = 黑屏。
-         *
-         * 所以拦截必须放在最前面，连解析和落盘都不做。
-         * 判断用 GamePlan 的能力位，不是字符串比较，加新游戏时只改策略表。
+         * 拦截已移除。Xposed 那套（隐藏 QQ / 证书绕过）是加分项，
+         * 不是登录的必要条件，缺了它也不能把 setResult 这条路堵死。
          */
-        {
-            final String g0 = getSelectedGameName();
-            if (GamePlan.needsInProcess(g0)) {
-                String pkg = GameLaunch.packageOf(g0);
-                int n = ShqXposedBridge.hookedMethodCount(pkg);
-                String why;
-                if (n > 0) {
-                    why = "「" + g0 + "」需进程内注入，证书链已接管 " + n + " 个重载；\n"
-                            + "请在 LSPosed 中勾选本模块作用域后，直接在游戏内登录";
-                } else if (n == ShqXposedBridge.UNKNOWN) {
-                    why = "「" + g0 + "」需进程内注入，无法确认是否已接管。\n"
-                            + "请确认已在 LSPosed 启用本模块并勾选作用域，然后直接在游戏内登录";
-                } else {
-                    why = "「" + g0 + "」需进程内注入，但当前未检测到 Xposed 接管。\n"
-                            + "请在 LSPosed 中启用本模块，作用域勾选 " + g0 + "，重启游戏";
-                }
-                Toast.makeText(this, why, Toast.LENGTH_LONG).show();
-                LoginDiag.add("DISPATCH", "「" + g0 + "」需进程内注入，已跳过外部投递"
-                        + "（hooked=" + n + "）");
-                finishLater(3500);
-                return;
-            }
-        }
         String accessToken = grab(url, "access_token=([^&\\s#]+)");
         String expiresIn = grab(url, "expires_in=([^&\\s#]+)");
         String openId = grab(url, "openid=([^&\\s#]+)");
