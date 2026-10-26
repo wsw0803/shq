@@ -401,9 +401,16 @@ public class XposedEntry implements IXposedHookLoadPackage {
             Object keys = extras.getClass().getMethod("keySet").invoke(extras);
             if (keys instanceof java.util.Set) {
                 StringBuilder sb = new StringBuilder();
+                // Bundle.get(String) 而不是 get(Object)，之前反射签名写错，
+                // 抛 NoSuchMethodException 导致 extras 一直看不到。
+                java.lang.reflect.Method get = extras.getClass()
+                        .getMethod("get", String.class);
                 for (Object k : (java.util.Set<?>) keys) {
-                    Object v = extras.getClass().getMethod("get", Object.class)
-                            .invoke(extras, k);
+                    Object v = null;
+                    try {
+                        v = get.invoke(extras, String.valueOf(k));
+                    } catch (Throwable ignored) {
+                    }
                     sb.append(k).append('(')
                             .append(v == null ? "null" : String.valueOf(v).length())
                             .append(") ");
