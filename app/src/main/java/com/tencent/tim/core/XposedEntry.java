@@ -397,20 +397,33 @@ public class XposedEntry implements IXposedHookLoadPackage {
             }
         }
 
-        // 再看它往外返回什么。这一步决定「是我们给错了」还是「它自己吞了」。
-        for (Method m : cls.getDeclaredMethods()) {
-            if (!"setResult".equals(m.getName())) {
-                continue;
-            }
-            Class<?>[] ps = m.getParameterTypes();
-            if (ps.length != 2 || ps[0] != int.class) {
-                continue;
-            }
-            try {
+        /*
+         * setResult 是 android.app.Activity 的方法，AssistActivity 没有覆盖它，
+         * 所以上面的 getDeclaredMethods() 找不到 —— 上一版 hook 数量一直是 1
+         * 而不是 2，就是这个原因。
+         *
+         * 改为 hook 父类 Activity.setResult，运行时按 this 的实际类型过滤，
+         * 只记录 AssistActivity 的调用。
+         */
+        try {
+            Class<?> activity = XposedHelpers.findClass("android.app.Activity", cl);
+            for (Method m : activity.getDeclaredMethods()) {
+                if (!"setResult".equals(m.getName())) {
+                    continue;
+                }
+                Class<?>[] ps = m.getParameterTypes();
+                if (ps.length != 2 || ps[0] != int.class) {
+                    continue;
+                }
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
                         try {
+                            Object self = param.thisObject;
+                            String cn = self == null ? "" : self.getClass().getName();
+                            if (!cn.contains("AssistActivity")) {
+                                return;
+                            }
                             log("AssistActivity.setResult resultCode=" + param.args[0]);
                             dumpIntent("AssistActivity返回", param.args[1]);
                         } catch (Throwable t) {
@@ -419,9 +432,9 @@ public class XposedEntry implements IXposedHookLoadPackage {
                     }
                 });
                 hooked++;
-            } catch (Throwable t) {
-                log("hook setResult 失败: " + t);
             }
+        } catch (Throwable t) {
+            log("hook Activity.setResult 失败: " + t);
         }
         return hooked;
     }
