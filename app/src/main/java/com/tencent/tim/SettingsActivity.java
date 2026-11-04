@@ -17,8 +17,8 @@ public class SettingsActivity extends BaseActivity {
     /** 背景图落到应用私有目录，避免依赖外部 URI 的持久化授权。 */
     private static final String BG_FILE = "bg_custom.img";
 
-    private TextView tvDpi, tvGlass, tvBright;
-    private SeekBar seekDpi, seekGlass, seekBright;
+    private TextView tvDpi, tvGlass, tvBright, tvCorner;
+    private SeekBar seekDpi, seekGlass, seekBright, seekCorner;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,14 +30,17 @@ public class SettingsActivity extends BaseActivity {
         tvDpi = findViewById(R.id.tv_dpi);
         tvGlass = findViewById(R.id.tv_glass);
         tvBright = findViewById(R.id.tv_bright);
+        tvCorner = findViewById(R.id.tv_corner);
         seekDpi = findViewById(R.id.seek_dpi);
         seekGlass = findViewById(R.id.seek_glass);
         seekBright = findViewById(R.id.seek_bright);
+        seekCorner = findViewById(R.id.seek_corner);
 
         SharedPreferences p = Ui.prefs(this);
         seekDpi.setProgress(p.getInt(Ui.KEY_DPI, 100) - 50);
         seekGlass.setProgress(p.getInt(Ui.KEY_GLASS, 40));
         seekBright.setProgress(p.getInt(Ui.KEY_BRIGHT, 70));
+        seekCorner.setProgress(p.getInt(Ui.KEY_CORNER, Ui.CORNER_DEFAULT) - 8);
         labels();
 
         Button pickBg = findViewById(R.id.btn_pick_bg);
@@ -72,6 +75,13 @@ public class SettingsActivity extends BaseActivity {
                 Ui.apply(SettingsActivity.this);
             }
         });
+        seekCorner.setOnSeekBarChangeListener(new L() {
+            @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
+                Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_CORNER, v + 8).apply();
+                labels();
+                Ui.apply(SettingsActivity.this);
+            }
+        });
         seekBright.setOnSeekBarChangeListener(new L() {
             @Override public void onProgressChanged(SeekBar sb, int v, boolean u) {
                 Ui.prefs(SettingsActivity.this).edit().putInt(Ui.KEY_BRIGHT, v).apply();
@@ -96,11 +106,13 @@ public class SettingsActivity extends BaseActivity {
                     .putInt(Ui.KEY_DPI, 100)
                     .putInt(Ui.KEY_GLASS, 40)
                     .putInt(Ui.KEY_BRIGHT, 70)
+                    .putInt(Ui.KEY_CORNER, Ui.CORNER_DEFAULT)
                     .putInt(Ui.KEY_BG, 0)
                     .apply();
             seekDpi.setProgress(50);
             seekGlass.setProgress(40);
             seekBright.setProgress(70);
+            seekCorner.setProgress(Ui.CORNER_DEFAULT - 8);
             labels();
             Ui.apply(this);
         });
@@ -166,6 +178,7 @@ public class SettingsActivity extends BaseActivity {
         tvDpi.setText("DPI: " + p.getInt(Ui.KEY_DPI, 100) + "%");
         tvGlass.setText("玻璃透明度: " + p.getInt(Ui.KEY_GLASS, 40) + "%");
         tvBright.setText("亮度: " + p.getInt(Ui.KEY_BRIGHT, 70) + "%");
+        tvCorner.setText("圆角: " + p.getInt(Ui.KEY_CORNER, Ui.CORNER_DEFAULT) + "dp");
     }
 
     private abstract class L implements SeekBar.OnSeekBarChangeListener {

@@ -1,18 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 暗色全局玻璃底：竖向渐变 + 三团彩色光斑（naozhong 同款），玻璃卡片的透明感靠它们才透得出来 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <gradient android:type="linear" android:angle="270" android:startColor="#12203A" android:centerColor="#0B1220" android:endColor="#05070C" />
+            <gradient android:type="linear" android:angle="270"
+                android:startColor="#1B2138" android:centerColor="#141828" android:endColor="#0E1018" />
         </shape>
     </item>
-    <item android:gravity="top|right" android:width="320dp" android:height="320dp" android:top="-80dp" android:right="-90dp">
+    <item android:gravity="top|left" android:width="320dp" android:height="320dp" android:top="-110dp" android:left="-110dp">
         <shape android:shape="oval">
-            <gradient android:type="radial" android:gradientRadius="160dp" android:startColor="#3322D3EE" android:endColor="#0022D3EE" />
+            <gradient android:type="radial" android:gradientRadius="160dp"
+                android:startColor="#552B6CF6" android:endColor="#002B6CF6" />
         </shape>
     </item>
-    <item android:gravity="bottom|left" android:width="300dp" android:height="300dp" android:bottom="-70dp" android:left="-90dp">
+    <item android:gravity="top|right" android:width="280dp" android:height="280dp" android:top="100dp" android:right="-80dp">
         <shape android:shape="oval">
-            <gradient android:type="radial" android:gradientRadius="150dp" android:startColor="#33A78BFA" android:endColor="#00A78BFA" />
+            <gradient android:type="radial" android:gradientRadius="140dp"
+                android:startColor="#446A5BF7" android:endColor="#006A5BF7" />
+        </shape>
+    </item>
+    <item android:gravity="bottom|left" android:width="300dp" android:height="300dp" android:bottom="-30dp" android:left="-90dp">
+        <shape android:shape="oval">
+            <gradient android:type="radial" android:gradientRadius="150dp"
+                android:startColor="#3356C8E8" android:endColor="#0056C8E8" />
         </shape>
     </item>
 </layer-list>

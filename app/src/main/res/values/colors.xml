@@ -1,20 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg_primary">#0B0F17</color>
-    <color name="bg_grad_top">#0B1220</color>
-    <color name="bg_grad_bottom">#060910</color>
-    <color name="bg_card">#151B26</color>
-    <color name="bg_input">#1E2533</color>
-    <color name="bg_elevated">#1A2130</color>
-    <color name="border">#263041</color>
-    <color name="text_primary">#F5F7FA</color>
-    <color name="text_secondary">#8A9BB8</color>
-    <color name="text_muted">#5C6B84</color>
-    <color name="accent_cyan">#22D3EE</color>
+    <!-- 对齐 naozhong 的配色：暗色渐变底 + 白色半透明玻璃 + #2B6CF6 主色 -->
+    <color name="bg_primary">#0E1018</color>
+    <color name="bg_grad_top">#1B2138</color>
+    <color name="bg_grad_bottom">#0E1018</color>
+    <color name="bg_card">#33FFFFFF</color>
+    <color name="bg_input">#1FFFFFFF</color>
+    <color name="bg_elevated">#262B3A</color>
+    <color name="border">#35FFFFFF</color>
+    <color name="text_primary">#F7F8FA</color>
+    <color name="text_secondary">#B4BCC9</color>
+    <color name="text_muted">#8A93A3</color>
+    <color name="accent_cyan">#2B6CF6</color>
     <color name="accent_green">#34D399</color>
     <color name="accent_red">#F87171</color>
-    <color name="accent_purple">#A78BFA</color>
+    <color name="accent_purple">#6A5BF7</color>
     <color name="accent_amber">#FBBF24</color>
     <color name="glass_white">#33FFFFFF</color>
-    <color name="glass_stroke">#40FFFFFF</color>
+    <color name="glass_stroke">#35FFFFFF</color>
 </resources>

@@ -26,6 +26,10 @@ public class Ui {
     public static final String KEY_THEME = "ui_theme";
     public static final String KEY_BASE_DPI = "ui_base_dpi";
 
+    /** 玻璃圆角，单位 dp（naozhong 默认 22）。 */
+    public static final String KEY_CORNER = "ui_corner";
+    public static final int CORNER_DEFAULT = 22;
+
     private static final int GLASS_BASE = 0x33FFFFFF;
     /** 应用私有目录里的背景图文件名，与 SettingsActivity 保持一致。 */
     private static final String BG_FILE = "bg_custom.img";
@@ -59,9 +63,13 @@ public class Ui {
         SharedPreferences p = prefs(a);
         View glassLayer = a.findViewById(R.id.bg_glass);
         if (glassLayer != null) {
-            glassLayer.setBackgroundColor(Color.argb(36, 255, 255, 255));
+            // naozhong 的玻璃是「半透明白叠在渐变+光斑上」，没有全局白纱罩；
+            // 这里置成全透明，否则光斑会被冲淡、玻璃透不出底色
+            glassLayer.setBackgroundColor(Color.TRANSPARENT);
         }
-        applyGlass(a.findViewById(android.R.id.content), p.getInt(KEY_GLASS, 40));
+        boolean light = isLightMode(a);
+        int corner = p.getInt(KEY_CORNER, CORNER_DEFAULT);
+        applyGlass(a.findViewById(android.R.id.content), p.getInt(KEY_GLASS, 40), light, corner);
         View bright = a.findViewById(R.id.bg_hue);
         if (bright != null) {
             int b = p.getInt(KEY_BRIGHT, 70);
@@ -126,34 +134,61 @@ public class Ui {
     }
 
     /**
-     * 递归调整带 tag="glass" 的控件透明度。
+     * 递归调整带 tag="glass" 的控件：透明度按 naozhong 的公式推算，圆角可调。
      *
      * mutate() 只是返回可安全修改的副本，不写回 View 就不会生效；
      * 而多个控件共享同一个 drawable 时，直接改原对象又会互相污染。
      * 所以必须 mutate() 之后 setBackground()。
+     *
+     * 配色规则（对齐 naozhong）：
+     * - 白色底 → 填充 alpha = 暗色 0.02+op*0.28 / 浅色 0.04+op*0.66，
+     *   描边 alpha = 暗色 0.04+op*0.26 / 浅色 0.12+op*0.50
+     * - 渐变色底或彩色底（主按钮、日志蒙层）→ 配色不动，只跟随圆角，
+     *   否则蓝色主按钮会被刷成白色玻璃
      */
     public static void applyGlass(View v, int glass) {
+        applyGlass(v, glass, false, CORNER_DEFAULT);
+    }
+
+    public static void applyGlass(View v, int glass, boolean light, int cornerDp) {
         if (v == null) return;
         if ("glass".equals(v.getTag()) && v.getBackground() instanceof GradientDrawable) {
             try {
                 GradientDrawable src = (GradientDrawable) v.getBackground();
                 GradientDrawable gd = (GradientDrawable) src.mutate();
-                int alpha = 25 + glass * 2;
-                if (alpha < 25) alpha = 25;
-                if (alpha > 235) alpha = 235;
-                int base = GLASS_BASE;
-                if (Build.VERSION.SDK_INT >= 24) {
-                    android.content.res.ColorStateList csl = gd.getColor();
-                    if (csl != null) base = csl.getDefaultColor();
+                float density = v.getResources().getDisplayMetrics().density;
+
+                float op = Math.max(0, Math.min(100, glass)) / 100f;
+                gd.setCornerRadius(Math.max(0, cornerDp) * density);
+
+                android.content.res.ColorStateList csl = gd.getColor();
+                if (csl != null) {
+                    int base = csl.getDefaultColor();
+                    int r = Color.red(base), g = Color.green(base), b = Color.blue(base);
+                    boolean whiteish = r > 200 && g > 200 && b > 200;
+                    if (whiteish) {
+                        int fill = light
+                                ? (int) ((0.04f + op * 0.66f) * 255f)
+                                : (int) ((0.02f + op * 0.28f) * 255f);
+                        int border = light
+                                ? (int) ((0.12f + op * 0.50f) * 255f)
+                                : (int) ((0.04f + op * 0.26f) * 255f);
+                        fill = Math.max(0, Math.min(255, fill));
+                        border = Math.max(0, Math.min(255, border));
+                        gd.setColor(Color.argb(fill, 255, 255, 255));
+                        gd.setStroke(Math.max(1, (int) density), Color.argb(border, 255, 255, 255));
+                    } else {
+                        // 深色蒙层（日志区）保留自己的颜色，只让圆角跟随
+                        gd.setColor(Color.argb(Color.alpha(base), r, g, b));
+                    }
                 }
-                gd.setColor(Color.argb(alpha, Color.red(base), Color.green(base), Color.blue(base)));
                 v.setBackground(gd);
             } catch (Throwable ignored) {
             }
         }
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) applyGlass(g.getChildAt(i), glass);
+            for (int i = 0; i < g.getChildCount(); i++) applyGlass(g.getChildAt(i), glass, light, cornerDp);
         }
     }
 
@@ -170,8 +205,8 @@ public class Ui {
             int c = t.getCurrentTextColor();
             int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
             if (light) {
-                if (r + g + b > 480) t.setTextColor(0xFF14202E);
-                else if (r + g + b > 300) t.setTextColor(0xFF51637A);
+                if (r + g + b > 480) t.setTextColor(0xFF0A0F1A);
+                else if (r + g + b > 300) t.setTextColor(0xFF46536B);
             }
         }
         if (v instanceof ViewGroup) {
