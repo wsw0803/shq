@@ -72,6 +72,9 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
 
     private WebView lastView;
 
+    /** 登录弹窗的 chrome 客户端，拿到 token 后把弹窗收起来。 */
+    private LoginChromeClient chrome;
+
     protected BaseLoginWebViewClient(AgentActivity activity) {
         this.activity = activity;
     }
@@ -96,6 +99,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             lastTokenUrl = url;
             lastTokenAt = now;
             tokenGot = true;
+            if (chrome != null) { try { chrome.closePopup(); } catch (Throwable ignored) { } }
         }
         try {
             handler.removeCallbacks(watchdog);
@@ -175,7 +179,8 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             } catch (Throwable ignored) {
             }
             try {
-                view.setWebChromeClient(new LoginChromeClient(activity, this));
+                chrome = new LoginChromeClient(activity, this);
+                view.setWebChromeClient(chrome);
                 LoginWebBridge.install(activity, view, this);
                 bridgeReady = true;
             } catch (Throwable ignored) {
@@ -295,6 +300,45 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                 }
             });
         } catch (Throwable ignored) {
+        }
+        return true;
+    }
+
+    /**
+     * 自定义 scheme 分类处理（抓号 / 挂机共用）。
+     *
+     * 以前子类对所有非 http(s) 一律 return true，把 about: / data: / blob:
+     * 这类内联页面也一起吞掉，登录页里的二维码、协议页就这么白屏；
+     * intent:// 之类的跳转也被静默丢弃，看起来就是「点登录没反应」。
+     *
+     * 现在按协议分类：
+     * - http(s) 交给 WebView 自己加载
+     * - about:/data:/blob:/javascript:/file: 内联内容放行
+     * - auth: 已在上一步尝试取 token，取不到给出明确提示
+     * - 其余自定义 scheme 交给系统，交不出去也要说出来，不静默
+     */
+    protected boolean handleUrl(WebView view, String url) {
+        if (url == null) return false;
+        prepare(view);
+        if (deliver(view, url)) return true;
+        String low = url.toLowerCase(java.util.Locale.ROOT);
+        if (low.startsWith("http://") || low.startsWith("https://")) return false;
+        if (low.startsWith("about:") || low.startsWith("data:") || low.startsWith("blob:")
+                || low.startsWith("javascript:") || low.startsWith("file:")) {
+            return false;
+        }
+        if (low.startsWith("auth:")) {
+            toast("登录回调缺少 access_token: " + url);
+            return true;
+        }
+        try {
+            android.content.Intent intent = android.content.Intent.parseUri(
+                    url, android.content.Intent.URI_INTENT_SCHEME);
+            intent.addCategory(android.content.Intent.CATEGORY_BROWSABLE);
+            intent.setComponent(null);
+            activity.startActivity(intent);
+        } catch (Throwable t) {
+            toast("无法处理的跳转: " + url);
         }
         return true;
     }

@@ -14,6 +14,8 @@ import com.tencent.open.agent.AgentActivity;
  * 原来 refreshPage 每次都 postDelayed 一个 Runnable 且不取消，
  * 多次登录会叠加多个定时刷新，导致页面反复重载、看起来像卡住。
  * 这里改为先移除旧任务再投递新任务。
+ *
+ * 跳转分类统一交给 handleUrl，与抓号模式行为一致。
  */
 public class HangUpWebViewClient extends BaseLoginWebViewClient {
 
@@ -24,28 +26,15 @@ public class HangUpWebViewClient extends BaseLoginWebViewClient {
         super(activity);
     }
 
-    private boolean handle(WebView view, String url) {
-        if (url == null) return false;
-        prepare(view);
-        if (deliver(view, url)) return true;
-        String low = url.toLowerCase();
-        if (low.startsWith("http://") || low.startsWith("https://")) return false;
-        if (low.startsWith("auth:")) {
-            toast("登录回调缺少 access_token: " + url);
-            return true;
-        }
-        return true;
-    }
-
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-        return handle(view, request.getUrl() == null ? null : request.getUrl().toString());
+        return handleUrl(view, request.getUrl() == null ? null : request.getUrl().toString());
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public boolean shouldOverrideUrlLoading(WebView view, String url) {
-        return handle(view, url);
+        return handleUrl(view, url);
     }
 
     @Override

@@ -13,6 +13,9 @@ import com.tencent.open.agent.AgentActivity;
  * 在 Y700 四代 + 一加移植包上（新版 WebView 会丢弃 auth:// 自定义 scheme 跳转）
  * 会出现登录完成后卡住不动。现改为继承 BaseLoginWebViewClient，
  * 由基类的四层兜底统一捕获 token。
+ *
+ * 跳转分类统一交给 handleUrl：内联页面放行、自定义 scheme 交给系统，
+ * 不再像以前那样把 about:/data:/blob:/intent:// 全部静默吞掉。
  */
 public class NormalWebViewClient extends BaseLoginWebViewClient {
 
@@ -20,31 +23,15 @@ public class NormalWebViewClient extends BaseLoginWebViewClient {
         super(activity);
     }
 
-    private boolean handle(WebView view, String url) {
-        if (url == null) return false;
-        prepare(view);
-        if (deliver(view, url)) return true;
-        String low = url.toLowerCase();
-        if (low.startsWith("http://") || low.startsWith("https://")) return false;
-        // auth:// 回调但没有 access_token，说明参数丢失：给用户明确反馈，
-        // 不再像以前那样静默 return true 让界面一直卡在登录页。
-        if (low.startsWith("auth:")) {
-            toast("登录回调缺少 access_token: " + url);
-            return true;
-        }
-        // 其他自定义 scheme（about:、data:、intent: 等）按原逻辑拦截
-        return true;
-    }
-
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-        return handle(view, request.getUrl() == null ? null : request.getUrl().toString());
+        return handleUrl(view, request.getUrl() == null ? null : request.getUrl().toString());
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public boolean shouldOverrideUrlLoading(WebView view, String url) {
-        return handle(view, url);
+        return handleUrl(view, url);
     }
 
     @Override
