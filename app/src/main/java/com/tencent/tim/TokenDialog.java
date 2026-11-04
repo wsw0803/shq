@@ -25,7 +25,36 @@ public class TokenDialog {
         void onPick(TokenStore.Entry e);
     }
 
-    public static GradientDrawable glass(Context c, int radiusDp, boolean accent) { int g = Ui.prefs(c).getInt(Ui.KEY_GLASS, 40); int a = (int) (g * 1.6f); if (a > 170) a = 170; if (a < 60) a = 60; GradientDrawable d = new GradientDrawable(); d.setShape(GradientDrawable.RECTANGLE); d.setCornerRadius(radiusDp * c.getResources().getDisplayMetrics().density); d.setColor(Color.argb(a, 14, 22, 36)); d.setStroke((int) c.getResources().getDisplayMetrics().density, accent ? 0x9922D3EE : 0x40FFFFFF); return d; }
+    /** 弹窗玻璃底：与全局同一套公式（naozhong 配色 + 可调圆角/透明度）。 */
+    public static GradientDrawable glass(Context c, int radiusDp, boolean accent) {
+        int g = Ui.prefs(c).getInt(Ui.KEY_GLASS, 40);
+        int corner = Ui.prefs(c).getInt(Ui.KEY_CORNER, Ui.CORNER_DEFAULT);
+        float op = Math.max(0, Math.min(100, g)) / 100f;
+        float density = c.getResources().getDisplayMetrics().density;
+        boolean light = Ui.isLightMode(c);
+        int fill;
+        int border;
+        if (light) {
+            fill = (int) ((0.04f + op * 0.66f) * 255f);
+            border = (int) ((0.12f + op * 0.50f) * 255f);
+            if (fill < 200) fill = 200;
+            if (border < 90) border = 90;
+        } else {
+            fill = (int) ((0.02f + op * 0.28f) * 255f);
+            border = (int) ((0.04f + op * 0.26f) * 255f);
+            if (fill < 44) fill = 44;
+            if (border < 60) border = 60;
+        }
+        // 圆角一律跟随全局设置（参数保留只为兼容旧调用），保证弹窗与主界面一致
+        int rd = corner;
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.RECTANGLE);
+        d.setCornerRadius(rd * density);
+        d.setColor(Color.argb(Math.min(255, fill), 255, 255, 255));
+        d.setStroke(Math.max(1, (int) density),
+                accent ? 0x992B6CF6 : Color.argb(Math.min(255, border), 255, 255, 255));
+        return d;
+    }
     private static int dp(Context c, int v) {
         return (int) (v * c.getResources().getDisplayMetrics().density);
     }

@@ -134,7 +134,13 @@ public class Ui {
     }
 
     /**
-     * 递归调整带 tag="glass" 的控件：透明度按 naozhong 的公式推算，圆角可调。
+     * 全局玻璃样式：透明度按 naozhong 的公式推算，圆角可调。
+     *
+     * 不再依赖逐个给控件打 tag —— 只要背景是「白色半透明」或「深色半透明」
+     * 的形状，就自动按玻璃处理；新增控件、自建弹窗、悬浮窗都自动吃到同一套。
+     * 显式 tag 仍然支持，用来覆盖自动判断：
+     *   tag="glass"        强制按玻璃处理
+     *   tag="glass_corner" 只跟随圆角与描边，不改填充（深色蒙层、彩色块用）
      *
      * mutate() 只是返回可安全修改的副本，不写回 View 就不会生效；
      * 而多个控件共享同一个 drawable 时，直接改原对象又会互相污染。
@@ -143,8 +149,8 @@ public class Ui {
      * 配色规则（对齐 naozhong）：
      * - 白色底 → 填充 alpha = 暗色 0.02+op*0.28 / 浅色 0.04+op*0.66，
      *   描边 alpha = 暗色 0.04+op*0.26 / 浅色 0.12+op*0.50
-     * - 渐变色底或彩色底（主按钮、日志蒙层）→ 配色不动，只跟随圆角，
-     *   否则蓝色主按钮会被刷成白色玻璃
+     * - 深色半透明底（日志蒙层）→ 保留自己的颜色，只跟随圆角
+     * - 彩色底（主按钮）→ 保留原色，只跟随圆角，避免被刷成白色玻璃
      */
     public static void applyGlass(View v, int glass) {
         applyGlass(v, glass, false, CORNER_DEFAULT);
@@ -152,11 +158,13 @@ public class Ui {
 
     public static void applyGlass(View v, int glass, boolean light, int cornerDp) {
         if (v == null) return;
-        if ("glass".equals(v.getTag()) && v.getBackground() instanceof GradientDrawable) {
+        Drawable bgDrawable = v.getBackground();
+        if (bgDrawable instanceof GradientDrawable && isGlassTarget(v, (GradientDrawable) bgDrawable)) {
             try {
-                GradientDrawable src = (GradientDrawable) v.getBackground();
+                GradientDrawable src = (GradientDrawable) bgDrawable;
                 GradientDrawable gd = (GradientDrawable) src.mutate();
                 float density = v.getResources().getDisplayMetrics().density;
+                boolean cornerOnly = "glass_corner".equals(v.getTag());
 
                 float op = Math.max(0, Math.min(100, glass)) / 100f;
                 gd.setCornerRadius(Math.max(0, cornerDp) * density);
@@ -165,8 +173,7 @@ public class Ui {
                 if (csl != null) {
                     int base = csl.getDefaultColor();
                     int r = Color.red(base), g = Color.green(base), b = Color.blue(base);
-                    boolean whiteish = r > 200 && g > 200 && b > 200;
-                    if (whiteish) {
+                    if (isWhiteish(base) && !cornerOnly) {
                         int fill = light
                                 ? (int) ((0.04f + op * 0.66f) * 255f)
                                 : (int) ((0.02f + op * 0.28f) * 255f);
@@ -178,7 +185,7 @@ public class Ui {
                         gd.setColor(Color.argb(fill, 255, 255, 255));
                         gd.setStroke(Math.max(1, (int) density), Color.argb(border, 255, 255, 255));
                     } else {
-                        // 深色蒙层（日志区）保留自己的颜色，只让圆角跟随
+                        // 深色蒙层 / 彩色块：颜色不动，只让圆角跟随
                         gd.setColor(Color.argb(Color.alpha(base), r, g, b));
                     }
                 }
@@ -192,11 +199,68 @@ public class Ui {
         }
     }
 
+    private static boolean isWhiteish(int c) {
+        return Color.red(c) > 200 && Color.green(c) > 200 && Color.blue(c) > 200;
+    }
+
+    /** 自动判断是否该按玻璃处理：显式 tag 优先，其次看背景色是否是半透明白/半透明深色。 */
+    private static boolean isGlassTarget(View v, GradientDrawable src) {
+        if ("glass".equals(v.getTag()) || "glass_corner".equals(v.getTag())) return true;
+        try {
+            android.content.res.ColorStateList csl = src.getColor();
+            if (csl == null) return false;
+            int c = csl.getDefaultColor();
+            int a = Color.alpha(c);
+            // 全透明、全不透明都不算玻璃：前者看不见，后者通常是有意铺底的实心块
+            if (a == 0 || a == 255) return false;
+            if (isWhiteish(c)) return true;
+            return Color.red(c) < 48 && Color.green(c) < 48 && Color.blue(c) < 48;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 给自建布局 / 悬浮窗套用全局玻璃。
+     * 悬浮窗、PopupWindow、Dialog 的内容视图都走这里，后续新增的 UI 不用再单独处理。
+     */
+    public static void applyWindow(View root) {
+        if (root == null) return;
+        applyWindow(root.getContext(), root);
+    }
+
+    public static void applyWindow(Context c, View root) {
+        if (c == null || root == null) return;
+        SharedPreferences p = prefs(c);
+        applyGlass(root, p.getInt(KEY_GLASS, 40),
+                isLightMode(c), p.getInt(KEY_CORNER, CORNER_DEFAULT));
+    }
+
+    /** 自建 Dialog 统一入口：显示前后都调一次即可。 */
+    public static void applyDialog(android.app.Dialog d) {
+        if (d == null) return;
+        try {
+            android.view.Window w = d.getWindow();
+            if (w == null) return;
+            applyWindow(w.getDecorView());
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static boolean isLightMode(Activity a) {
         int th = prefs(a).getInt(KEY_THEME, 0);
         if (th == 1) return true;
         if (th == 2) return false;
         return (a.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    /** Context 版：悬浮窗 / 弹窗里没有 Activity 时用。 */
+    public static boolean isLightMode(Context c) {
+        if (c == null) return false;
+        int th = prefs(c).getInt(KEY_THEME, 0);
+        if (th == 1) return true;
+        if (th == 2) return false;
+        return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES;
     }
 
     public static void tint(View v, boolean light) {

@@ -631,6 +631,7 @@ public class MainActivity extends BaseActivity {
         }
         dlg.setContentView(root);
         dlg.show();
+        Ui.applyDialog(dlg);
     }
 
     private boolean isCloudAppidEnabled() {
@@ -1092,5 +1093,6 @@ public class MainActivity extends BaseActivity {
         dlg.setCancelable(true);
         dlg.setCanceledOnTouchOutside(true);
         dlg.show();
+        Ui.applyDialog(dlg);
     }
 }
