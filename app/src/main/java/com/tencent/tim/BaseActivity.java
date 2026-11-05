@@ -51,6 +51,7 @@ public class BaseActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         Ui.apply(this);
+        Ui.syncDpi(this);
     }
 
     @Override

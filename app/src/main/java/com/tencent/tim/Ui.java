@@ -295,16 +295,50 @@ public class Ui {
     }
 
     /**
-     * 修改 DPI 后重启界面。
+     * DPI 改动后就地重建当前页面。
      *
-     * 直接改 resources.displayMetrics 是无效的（Resources 内部已缓存），
-     * 真正的缩放靠 attachBaseContext 里的 createConfigurationContext 实现。
+     * 原来的实现是 startActivity(MainActivity) + finish()，
+     * 结果改一下 DPI 就被踢回主页，设置页上的改动前功尽弃。
+     * 密度是在 attachBaseContext 里用 createConfigurationContext 套上去的，
+     * 所以重建当前页即可生效，不需要切页面。
      */
     public static void applyDpi(Activity a) {
         if (a == null) return;
-        android.content.Intent i = new android.content.Intent(a, MainActivity.class);
-        i.setFlags(0x10000000 | 0x04000000);
-        a.startActivity(i);
-        a.finish();
+        try {
+            if (!a.isFinishing()) a.recreate();
+        } catch (Throwable t) {
+            // 极端情况下重建失败，退回原来的做法，至少让新密度能生效
+            try {
+                android.content.Intent i = new android.content.Intent(a, MainActivity.class);
+                i.setFlags(0x10000000 | 0x04000000);
+                a.startActivity(i);
+                a.finish();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /**
+     * 密度与设置不一致时就地重建。
+     *
+     * 页面是在 onResume 前用旧密度创建的，改完 DPI 后返回栈里的
+     * MainActivity 还是旧尺寸。这里每次回到前台都校一次，
+     * 不一致才重建，正常情况零开销、也不会反复重建。
+     */
+    public static void syncDpi(Activity a) {
+        if (a == null || a.isFinishing()) return;
+        try {
+            SharedPreferences p = prefs(a);
+            int pct = p.getInt(KEY_DPI, 100);
+            if (pct < 50) pct = 50;
+            if (pct > 200) pct = 200;
+            int baseDpi = p.getInt(KEY_BASE_DPI, 0);
+            if (baseDpi <= 0) return;
+            int want = (int) (baseDpi * (pct / 100f));
+            int cur = a.getResources().getDisplayMetrics().densityDpi;
+            // 留 4 dpi 容差，避免取整误差导致反复重建
+            if (Math.abs(cur - want) > 4) a.recreate();
+        } catch (Throwable ignored) {
+        }
     }
 }
