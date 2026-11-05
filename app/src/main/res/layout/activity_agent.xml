@@ -70,7 +70,7 @@
                 android:layout_height="90dp"
                 android:gravity="top"
                 android:hint="auth://tauth.qq.com/?#access_token=..."
-                android:background="@drawable/bg_input"
+                android:background="@drawable/bg_input_state"
                 android:padding="16dp"
                 android:textSize="11sp"
                 android:fontFamily="monospace"

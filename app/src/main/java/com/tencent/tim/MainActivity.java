@@ -147,6 +147,8 @@ public class MainActivity extends BaseActivity {
             String msg = LogScrubber.scrub(log);
             String newLog = "[" + time + "] " + msg + "\n";
             if (tvLog != null) tvLog.append(newLog);
+            // 流式渐显：新到的一行从轻微模糊过渡到清晰，避免整块文字硬跳
+            com.tencent.tim.Ui.fadeInBlur(tvLog);
             if (scrollLog != null) scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
         });
     }

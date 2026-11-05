@@ -20,7 +20,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="/storage/emulated/0/维/保存数据/data.txt"
-        android:background="@drawable/bg_input"
+        android:background="@drawable/bg_input_state"
         android:padding="12dp"
         android:textSize="11sp"
         android:fontFamily="monospace"

@@ -8,7 +8,7 @@
     <View android:id="@+id/bg_glass" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#00000000" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:fitsSystemWindows="true" android:paddingLeft="18dp" android:paddingRight="18dp">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="20dp" android:paddingBottom="16dp">
-            <View android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/dot_green" />
+            <View android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/dot_green" android:layout_marginTop="3dp" />
             <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="10dp" android:text="WEI" android:textSize="24sp" android:textStyle="bold" android:textColor="@color/text_primary" android:letterSpacing="0.08" />
             <Button android:id="@+id/btn_settings" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="设置" android:textSize="12sp" android:textColor="@color/text_primary" android:background="@drawable/glass_btn_secondary" android:tag="glass" android:textAllCaps="false" android:paddingLeft="16dp" android:paddingRight="16dp" android:minWidth="0dp" android:minHeight="0dp" android:paddingTop="8dp" android:paddingBottom="8dp" />
         </LinearLayout>
@@ -17,7 +17,7 @@
                 <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="运行日志" style="@style/SectionLabel" />
             </LinearLayout>
             <ScrollView android:id="@+id/scroll_log" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:scrollbars="vertical">
-                <TextView android:id="@+id/tv_log" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="> WEI 终端已启动" android:textColor="@color/accent_green" android:textSize="10sp" android:fontFamily="monospace" android:lineSpacingExtra="4dp" />
+                <TextView android:id="@+id/tv_log" android:fontFeatureSettings="tnum" android:breakStrategy="balanced" android:hyphenationFrequency="none" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="> WEI 终端已启动" android:textColor="@color/accent_green" android:textSize="10sp" android:fontFamily="monospace" android:lineSpacingExtra="4dp" />
             </ScrollView>
         </LinearLayout>
         <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:scrollbars="none" android:clipToPadding="false">

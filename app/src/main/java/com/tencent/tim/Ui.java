@@ -81,6 +81,10 @@ public class Ui {
             applyCustomBg(a, custom, p.getString(KEY_BG_URI, ""));
         }
         applyTheme(a);
+        View content0 = a.findViewById(android.R.id.content);
+        applyTypography(content0);
+        // 暗色下亮字有光晕，粗体显得更糊：自动细一档
+        if (!light) lightenTextWeight(content0);
         View content = a.findViewById(android.R.id.content);
         if (content instanceof ViewGroup) {
             View root = ((ViewGroup) content).getChildAt(0);
@@ -338,6 +342,107 @@ public class Ui {
             int cur = a.getResources().getDisplayMetrics().densityDpi;
             // 留 4 dpi 容差，避免取整误差导致反复重建
             if (Math.abs(cur - want) > 4) a.recreate();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 排版保护：数字统一用等宽字形（tnum），刷新时宽度不变、不会左右抖动；
+     * 再用 balanced 断行策略避免出现单字孤行。
+     */
+    public static void applyTypography(View v) {
+        if (v == null) return;
+        if (v instanceof android.widget.TextView) {
+            android.widget.TextView t = (android.widget.TextView) v;
+            try {
+                t.setFontFeatureSettings("tnum");
+            } catch (Throwable ignored) {
+            }
+            if (Build.VERSION.SDK_INT >= 23) {
+                try {
+                    t.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_BALANCED);
+                    t.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) applyTypography(g.getChildAt(i));
+        }
+    }
+
+    /**
+     * 暗色模式文字细一档。
+     *
+     * 亮字在暗底上会有光晕扩散（halation），同样的字重在暗色下看起来更粗更糊。
+     * 所以只把粗体降一档到常规，常规不再降，避免糊成一团。
+     */
+    public static void lightenTextWeight(View v) {
+        if (v == null) return;
+        if (v instanceof android.widget.TextView) {
+            android.widget.TextView t = (android.widget.TextView) v;
+            try {
+                android.graphics.Typeface tf = t.getTypeface();
+                if (tf != null && tf.isBold()) {
+                    t.setTypeface(android.graphics.Typeface.create(tf, android.graphics.Typeface.NORMAL),
+                            android.graphics.Typeface.NORMAL);
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) lightenTextWeight(g.getChildAt(i));
+        }
+    }
+
+    /**
+     * 行内图标下移 1/8 字高。
+     *
+     * 图标与文字按几何中心对齐时，视觉上会偏高（文字重心在基线以上），
+     * 下移 1/8 个字号刚好落在视觉中线。
+     */
+    public static void alignInlineIcon(View icon, float textSizeSp) {
+        if (icon == null) return;
+        try {
+            ViewGroup.LayoutParams lp = icon.getLayoutParams();
+            if (lp instanceof ViewGroup.MarginLayoutParams) {
+                float scaled = icon.getResources().getDisplayMetrics().scaledDensity;
+                ((ViewGroup.MarginLayoutParams) lp).topMargin = (int) (textSizeSp * scaled / 8f);
+                icon.setLayoutParams(lp);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 流式渐显：新内容从轻微高斯模糊 + 半透明过渡到清晰。
+     * 只改视觉，不阻塞追加；API 31 以下自动退化为纯淡入。
+     */
+    public static void fadeInBlur(final View v) {
+        if (v == null) return;
+        try {
+            v.setAlpha(0.55f);
+            android.animation.ValueAnimator anim = android.animation.ValueAnimator.ofFloat(0f, 1f);
+            anim.setDuration(170);
+            anim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(android.animation.ValueAnimator a) {
+                    try {
+                        float f = (Float) a.getAnimatedValue();
+                        v.setAlpha(0.55f + 0.45f * f);
+                        if (Build.VERSION.SDK_INT >= 31) {
+                            float blur = (1f - f) * 5f;
+                            v.setRenderEffect(blur <= 0.05f ? null
+                                    : android.graphics.RenderEffect.createBlurEffect(
+                                    blur, blur, android.graphics.Shader.TileMode.CLAMP));
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+            anim.start();
         } catch (Throwable ignored) {
         }
     }
