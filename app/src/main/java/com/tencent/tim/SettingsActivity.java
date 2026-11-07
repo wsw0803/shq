@@ -26,6 +26,10 @@ public class SettingsActivity extends BaseActivity {
         setContentView(R.layout.activity_settings);
 
         Button back = findViewById(R.id.btn_back);
+        Button checkUpdate = findViewById(R.id.btn_check_update);
+        if (checkUpdate != null) {
+            checkUpdate.setOnClickListener(v -> com.tencent.tim.MainActivity.checkForUpdates(this));
+        }
         Button reset = findViewById(R.id.btn_reset);
         tvDpi = findViewById(R.id.tv_dpi);
         tvGlass = findViewById(R.id.tv_glass);

@@ -147,7 +147,8 @@ public class MainActivity extends BaseActivity {
         getWindow().getDecorView().postDelayed(new Runnable() { public void run() { checkAndRequestAllPermissions(); } }, 300);
 
         refreshGameList();
-        checkForUpdates();
+        // 不再开机自动检查更新：回退到旧版本的用户会被反复弹窗催更新。
+        // 需要时去「设置 → 检查更新」手动触发。
     }
 
     /** 设置沉浸式效果（保留状态栏）。 */
@@ -1219,7 +1220,7 @@ public class MainActivity extends BaseActivity {
      * 从 0.0.1 到 0.0.3 之间的版本完全看不到。
      * 现在收集所有高于当前版本的 Release，并在弹窗里逐条列出。
      */
-    private void checkForUpdates() {
+    static void checkForUpdates(final android.app.Activity act) {
         new Thread(() -> {
             HttpURLConnection conn = null;
             try {
@@ -1229,7 +1230,10 @@ public class MainActivity extends BaseActivity {
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
                 conn.setConnectTimeout(6000);
                 conn.setReadTimeout(6000);
-                if (conn.getResponseCode() != 200) return;
+                if (conn.getResponseCode() != 200) {
+                    act.runOnUiThread(() -> Toast.makeText(act, "检查更新失败，请稍后重试", Toast.LENGTH_SHORT).show());
+                    return;
+                }
 
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
@@ -1237,8 +1241,8 @@ public class MainActivity extends BaseActivity {
                 while ((line = reader.readLine()) != null) sb.append(line);
                 reader.close();
 
-                String currentVersion = getPackageManager()
-                        .getPackageInfo(getPackageName(), 0).versionName;
+                String currentVersion = act.getPackageManager()
+                        .getPackageInfo(act.getPackageName(), 0).versionName;
 
                 org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
                 java.util.List<ReleaseInfo> newer = new java.util.ArrayList<>();
@@ -1285,15 +1289,19 @@ public class MainActivity extends BaseActivity {
                     newer.add(info);
                 }
 
-                if (newer.isEmpty()) return;
+                if (newer.isEmpty()) {
+                    act.runOnUiThread(() -> Toast.makeText(act, "已是最新版本", Toast.LENGTH_SHORT).show());
+                    return;
+                }
 
                 // 按版本号从新到旧排序，弹窗里最新在最上面
                 java.util.Collections.sort(newer, (x, y) -> -compareVersion(x.version, y.version));
 
                 final java.util.List<ReleaseInfo> list = newer;
-                runOnUiThread(() -> showUpdateDialog(list));
+                act.runOnUiThread(() -> showUpdateDialog(act, list));
             } catch (Exception e) {
-                e.printStackTrace();
+                com.tencent.tim.Diag.fail("Update", "check", "检查更新失败", e);
+                act.runOnUiThread(() -> Toast.makeText(act, "检查更新失败，请检查网络", Toast.LENGTH_SHORT).show());
             } finally {
                 if (conn != null) conn.disconnect();
             }
@@ -1327,30 +1335,30 @@ public class MainActivity extends BaseActivity {
      *
      * 用户点某一条即下载该版本；默认高亮最新版。
      */
-    private void showUpdateDialog(java.util.List<ReleaseInfo> releases) {
-        final android.app.Dialog dlg = new android.app.Dialog(this);
+    private static void showUpdateDialog(final android.app.Activity act, java.util.List<ReleaseInfo> releases) {
+        final android.app.Dialog dlg = new android.app.Dialog(act);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         if (dlg.getWindow() != null) {
             dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.86f),
+            dlg.getWindow().setLayout((int)(act.getResources().getDisplayMetrics().widthPixels * 0.86f),
                     android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
 
-        float density = getResources().getDisplayMetrics().density;
-        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        float density = act.getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout root = new android.widget.LinearLayout(act);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
+        root.setBackground(com.tencent.tim.TokenDialog.glass(act, 22, true));
         int p = (int)(16 * density);
         root.setPadding(p, p, p, p);
 
-        android.widget.TextView title = new android.widget.TextView(this);
+        android.widget.TextView title = new android.widget.TextView(act);
         title.setText("发现 " + releases.size() + " 个新版本");
         title.setTextColor(0xFFF5F7FA);
         title.setTextSize(17);
         title.setGravity(android.view.Gravity.CENTER);
         root.addView(title);
 
-        android.widget.TextView tip = new android.widget.TextView(this);
+        android.widget.TextView tip = new android.widget.TextView(act);
         tip.setText("可以立即更新，也可以稍后再更新，不影响当前使用");
         tip.setTextColor(0xFF9CA3AF);
         tip.setTextSize(12);
@@ -1364,8 +1372,8 @@ public class MainActivity extends BaseActivity {
         root.addView(tip);
 
         // 版本列表：每条显示 GitHub Release 的标题 + 版本号
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        android.widget.LinearLayout list = new android.widget.LinearLayout(this);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(act);
+        android.widget.LinearLayout list = new android.widget.LinearLayout(act);
         list.setOrientation(android.widget.LinearLayout.VERTICAL);
 
         final ReleaseInfo[] chosen = new ReleaseInfo[]{ releases.get(0) };
@@ -1374,7 +1382,7 @@ public class MainActivity extends BaseActivity {
             final int index = i;
             final ReleaseInfo info = releases.get(i);
 
-            android.widget.TextView row = new android.widget.TextView(this);
+            android.widget.TextView row = new android.widget.TextView(act);
             String label = info.title;
             if (!label.contains(info.version)) {
                 label = label + "  (" + info.version + ")";
@@ -1386,7 +1394,7 @@ public class MainActivity extends BaseActivity {
             row.setGravity(android.view.Gravity.CENTER_VERTICAL);
             row.setPadding((int)(10 * density), (int)(10 * density),
                     (int)(10 * density), (int)(10 * density));
-            row.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+            row.setBackground(com.tencent.tim.TokenDialog.glass(act, 12, false));
 
             android.widget.LinearLayout.LayoutParams rowLp = new android.widget.LinearLayout.LayoutParams(
                     android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1413,29 +1421,29 @@ public class MainActivity extends BaseActivity {
         scroll.setLayoutParams(scrollLp);
         root.addView(scroll, scrollLp);
 
-        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
+        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(act);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
-        android.widget.Button btnLater = new android.widget.Button(this);
+        android.widget.Button btnLater = new android.widget.Button(act);
         btnLater.setText("以后再说");
         btnLater.setTextColor(0xFF9CA3AF);
-        btnLater.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+        btnLater.setBackground(com.tencent.tim.TokenDialog.glass(act, 12, false));
         btnLater.setOnClickListener(v -> dlg.dismiss());
         android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(
                 0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp1.rightMargin = (int)(6 * density);
         btnRow.addView(btnLater, lp1);
 
-        android.widget.Button btnOk = new android.widget.Button(this);
+        android.widget.Button btnOk = new android.widget.Button(act);
         btnOk.setText("更新所选版本");
         btnOk.setTextColor(0xFF000000);
-        btnOk.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, true));
+        btnOk.setBackground(com.tencent.tim.TokenDialog.glass(act, 12, true));
         btnOk.setOnClickListener(v -> {
             final ReleaseInfo target = chosen[0];
             dlg.dismiss();
-            Updater.start(MainActivity.this, target.apkUrl, target.size,
-                    () -> runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "更新失败，请稍后重试", Toast.LENGTH_SHORT).show();
+            Updater.start(act, target.apkUrl, target.size,
+                    () -> act.runOnUiThread(() -> {
+                        Toast.makeText(act, "更新失败，请稍后重试", Toast.LENGTH_SHORT).show();
                     }));
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(
