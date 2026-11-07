@@ -196,13 +196,7 @@ public class AgentActivity extends BaseActivity {
             
             webView.setWebViewClient(new NormalWebViewClient(this));
 
-            String url = getLoginUrl();
-            if (url != null && !url.isEmpty()) {
-                webView.loadUrl(url);
-            } else {
-                Toast.makeText(this, "登录URL为空", Toast.LENGTH_SHORT).show();
-                finish();
-            }
+            loadLoginPage();
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "启动抓号模式失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -227,13 +221,7 @@ public class AgentActivity extends BaseActivity {
             
             webView.setWebViewClient(new HangUpWebViewClient(this));
 
-            String url = getLoginUrl();
-            if (url != null && !url.isEmpty()) {
-                webView.loadUrl(url);
-            } else {
-                Toast.makeText(this, "登录URL为空", Toast.LENGTH_SHORT).show();
-                finish();
-            }
+            loadLoginPage();
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "启动挂机模式失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -241,13 +229,79 @@ public class AgentActivity extends BaseActivity {
         }
     }
 
+    /** 加载登录页；拿不到合法 AppID 时明确提示，而不是加载一条必然报错的地址。 */
+    private void loadLoginPage() {
+        String url = getLoginUrl();
+        if (url == null || url.isEmpty()) {
+            Toast.makeText(this, "未获取到游戏 AppID，请返回重新选择游戏", Toast.LENGTH_LONG).show();
+            onLoginAppidMissing("");
+            return;
+        }
+        webView.loadUrl(url);
+    }
+
+    /** 重新加载登录页（首轮自动修正无效后，由用户手动点「重试」触发）。 */
+    public void retryLogin() {
+        if (webView == null) return;
+        String url = getLoginUrl();
+        if (url == null || url.isEmpty()) {
+            Toast.makeText(this, "仍未获取到游戏 AppID，请返回重新选择游戏", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+        webView.loadUrl(url);
+    }
+
+    /**
+     * 登录页出现「无法获取appid」时给出可操作的提示，避免用户对着转圈干等。
+     * 由 BaseLoginWebViewClient 的页面健康检查调用。
+     */
+    public void onLoginAppidMissing(final String detail) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String game = getSelectedGameName();
+                    String msg = "QQ 登录页没有拿到有效的游戏 AppID（client_id），所以一直停在加载中。"
+                            + "\n\n当前游戏：" + game
+                            + (detail == null || detail.isEmpty() ? "" : "\n\n" + detail)
+                            + "\n\n点「重试」重新加载，或返回主界面重新选择游戏。";
+                    new android.app.AlertDialog.Builder(AgentActivity.this)
+                            .setTitle("无法获取 AppID")
+                            .setMessage(msg)
+                            .setPositiveButton("重试", (d, w) -> retryLogin())
+                            .setNegativeButton("返回选择游戏", (d, w) -> finish())
+                            .setCancelable(false)
+                            .show();
+                } catch (Throwable t) {
+                    Toast.makeText(AgentActivity.this, "无法获取 AppID，请返回重新选择游戏", Toast.LENGTH_LONG).show();
+                    try {
+                        finish();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * 取本次要加载的登录地址。
+     *
+     * 旧实现在没有保存 URL 时返回一条 pt_3rd_aid 与 client_id 都为空的地址，
+     * 这种地址加载出来 QQ 只会显示「无法获取appid」并一直转圈，而 App 侧毫无感知。
+     * 现在统一走 TokenStore.resolveLoginUrl：能修就修，修不出来返回空串，
+     * 由调用方明确告诉用户「没拿到 AppID，请重新选择游戏」。
+     */
     private String getLoginUrl() {
         SharedPreferences prefs = getSharedPreferences("myPrefs", MODE_PRIVATE);
         String savedUrl = prefs.getString("selected_game_url", "");
-        if (!savedUrl.isEmpty()) {
-            return savedUrl;
+        String gameName = prefs.getString("selected_game_name", "");
+        String url = com.tencent.tim.TokenStore.resolveLoginUrl(savedUrl, gameName);
+        if (!url.isEmpty() && !url.equals(savedUrl)) {
+            prefs.edit().putString("selected_game_url", url).apply();
+            Toast.makeText(this, "已自动修正游戏 AppID", Toast.LENGTH_SHORT).show();
         }
-        return "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
+        return url;
     }
 
     private void showPickToken() {

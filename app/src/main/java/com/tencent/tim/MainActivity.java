@@ -52,6 +52,37 @@ public class MainActivity extends BaseActivity {
     private static final String KEY_CLOUD_APPID_ENABLED = "cloud_appid_enabled";
     private static final String KEY_STORAGE_URI = "storage_uri";
 
+    /**
+     * 内置 AppID 列表（与云端 getFile.php 校验过的一致数据）。
+     * 作用：云端拉不到、本地缓存又是空的时候，仍然有合法 AppID 可用，
+     * 不会退化到「加载一条 client_id 为空的登录地址」→「无法获取appid」→ 一直转圈。
+     */
+    private static final String[][] BUILTIN_GAMES = new String[][]{
+            {"和平", "1106467070"},
+            {"王者", "1104466820"},
+            {"火影", "1104307008"},
+            {"使命", "1106838536"},
+            {"PUBG", "1106545419"},
+            {"穿越火线手游", "1104512706"},
+            {"三角洲", "1110543085"},
+            {"暗区突围", "1110196838"},
+            {"永劫无间", "102150659"},
+            {"无畏契约", "1111677210"},
+            {"极品飞车", "1108169089"},
+            {"香肠派对", "1107970117"},
+            {"QQ飞车手游", "1104922185"},
+            {"英雄联盟手游", "1106040804"},
+            {"腾讯欢乐斗地主", "363"},
+            {"金铲铲之战", "1109811436"},
+            {"地下城与勇士起源", "1104294055"},
+            {"天天酷跑", "100692648"},
+            {"洛克王国世界", "1110613799"},
+            {"部落冲突", "1105771533"},
+            {"高能英雄", "1110329808"},
+            {"妄想山海", "1109838467"},
+            {"斗地主", "363"}
+    };
+
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
     private static final int REQUEST_STORAGE_PERMISSION = 200;
     private static final int REQUEST_MANAGE_STORAGE = 300;
@@ -724,37 +755,84 @@ public class MainActivity extends BaseActivity {
             if (i <= 0) continue;
             String name = line.substring(0, i);
             String appid = line.substring(i + 1);
+            if (!com.tencent.tim.TokenStore.isNumericAppid(appid)) continue;
             if (!seen.add(appid)) continue;
             gameList.add(new GameItem("", name, buildLocalUrl(appid)));
         }
-        addLog("[local] games: " + gameList.size());
-        if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
-            saveSelectedGame(gameList.get(0).name, gameList.get(0).url);
+        if (gameList.isEmpty()) {
+            addLog("[local] 缓存为空 使用内置 AppID 列表");
+            StringBuilder sb = new StringBuilder();
+            for (String[] g : BUILTIN_GAMES) {
+                if (!seen.add(g[1])) continue;
+                gameList.add(new GameItem("", g[0], buildLocalUrl(g[1])));
+                if (sb.length() > 0) sb.append(";");
+                sb.append(g[0]).append("|").append(g[1]);
+            }
+            p.edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
+            try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
         }
+        addLog("[local] games: " + gameList.size());
+        ensureValidSelection();
+    }
+
+    /** 保证「当前选中游戏」的 URL 里带的是合法数字 AppID，否则换成列表第一个。 */
+    private void ensureValidSelection() {
+        if (gameList.isEmpty()) return;
+        SharedPreferences p = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        String saved = p.getString(SELECTED_GAME_URL_KEY, "");
+        if (!com.tencent.tim.TokenStore.sanitizeLoginUrl(saved).isEmpty()) {
+            if (selectedGameName == null || selectedGameName.isEmpty()) {
+                String name = com.tencent.tim.TokenStore.gameOfUrl(saved);
+                if (name != null && !name.isEmpty()) {
+                    saveSelectedGame(name, com.tencent.tim.TokenStore.sanitizeLoginUrl(saved));
+                    return;
+                }
+            }
+            return;
+        }
+        GameItem first = gameList.get(0);
+        saveSelectedGame(first.name, first.url);
+        addLog("[游戏] 已自动选择: " + first.name);
     }
 
     private void loadGameListFromServer() {
         addLog("[网络] 正在加载游戏列表...");
         new Thread(() -> {
             String response = "";
-            try {
-                HttpURLConnection connection = (HttpURLConnection) new URL(GAME_LIST_URL).openConnection();
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(5000);
-                connection.setReadTimeout(5000);
+            for (int attempt = 1; attempt <= 2 && response.isEmpty(); attempt++) {
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL(GAME_LIST_URL).openConnection();
+                    connection.setRequestMethod("GET");
+                    connection.setConnectTimeout(6000);
+                    connection.setReadTimeout(8000);
+                    connection.setInstanceFollowRedirects(true);
+                    connection.setRequestProperty("User-Agent",
+                            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
+                    connection.setRequestProperty("Accept", "*/*");
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    sb.append(line);
+                    int code = connection.getResponseCode();
+                    if (code == 200) {
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
+                        reader.close();
+                        response = sb.toString();
+                        addLog("[网络] 游戏列表加载成功");
+                    } else {
+                        addLog("[错误] 游戏列表 HTTP " + code + " (第" + attempt + "次)");
+                    }
+                    connection.disconnect();
+                } catch (Exception e) {
+                    addLog("[错误] 加载游戏列表失败(第" + attempt + "次): " + e.getMessage());
+                    if (connection != null) {
+                        try { connection.disconnect(); } catch (Throwable ignored) {}
+                    }
+                    try { Thread.sleep(800L); } catch (InterruptedException ignored) {}
                 }
-                reader.close();
-                response = sb.toString();
-                connection.disconnect();
-                addLog("[网络] 游戏列表加载成功");
-            } catch (Exception e) {
-                addLog("[错误] 加载游戏列表失败: " + e.getMessage());
             }
 
             final String finalResponse = response;
@@ -783,6 +861,22 @@ public class MainActivity extends BaseActivity {
             cloudParsed.add(item);
         }
 
+        // 兜底解析：服务端格式一变，上面的整齐正则就会一条都匹配不到。
+        // 这里退化成「名称：X」与「client_id=N」按出现顺序配对，尽量别让列表变空。
+        if (cloudParsed.isEmpty()) {
+            java.util.List<String> names = new java.util.ArrayList<String>();
+            Matcher nm = Pattern.compile("名称[：:]([^；;\\n]{1,40})").matcher(data);
+            while (nm.find()) names.add(nm.group(1).trim());
+            java.util.List<String> ids = new java.util.ArrayList<String>();
+            Matcher im = Pattern.compile("client_id=([0-9]{1,12})(?![0-9])").matcher(data);
+            while (im.find()) ids.add(im.group(1));
+            int n = Math.min(names.size(), ids.size());
+            for (int i = 0; i < n; i++) {
+                cloudParsed.add(new GameItem("", names.get(i), buildLocalUrl(ids.get(i))));
+            }
+            if (n > 0) addLog("[游戏] 兼容解析: " + n);
+        }
+
         syncToLocal(cloudParsed);
         gameList.clear();
         java.util.HashSet<String> seenIds = new java.util.HashSet<String>();
@@ -794,14 +888,13 @@ public class MainActivity extends BaseActivity {
         addLog("[游戏] 加载到 " + gameList.size() + " 个游戏");
         addLog("[游戏] 云端解析: " + cloudParsed.size());
 
-        if (!gameList.isEmpty() && selectedGameName.isEmpty()) {
-            GameItem first = gameList.get(0);
-            saveSelectedGame(first.name, first.url);
-        }
-
         if (gameList.isEmpty()) {
-            Toast.makeText(this, "未找到游戏数据", Toast.LENGTH_SHORT).show();
+            addLog("[游戏] 云端没有可用 AppID 回退本地/内置");
+            Toast.makeText(this, "云端列表不可用，已使用内置 AppID", Toast.LENGTH_SHORT).show();
+            loadGameList();
+            return;
         }
+        ensureValidSelection();
     }
 
     public void hidePackage(String packageName) throws IOException {

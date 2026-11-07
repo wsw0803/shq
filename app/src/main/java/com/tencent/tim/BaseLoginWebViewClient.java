@@ -52,6 +52,21 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     private boolean tokenGot = false;
     private boolean errorToastShown = false;
     private boolean watchdogFired = false;
+    private boolean appidErrorNotified = false;
+
+    /**
+     * 页面健康检查脚本。返回纯 ASCII 标记，避免 evaluateJavascript 的 JSON 转义踩坑。
+     * APPID_ERROR：QQ 登录页已经画出「无法获取appid」之类的错误，此时页面会永远转圈，
+     * 必须立刻停止等待并提示用户，而不是让 90 秒看门狗再去盲目 reload 一次。
+     */
+    private static final String HEALTH_JS =
+            "(function(){try{"
+            + "if(location.href.indexOf('access_token=')>=0)return 'TOKEN:'+location.href;"
+            + "var t=(document.body?document.body.innerText:'');"
+            + "if(t.indexOf('无法获取appid')>=0||t.indexOf('无法获取APPID')>=0"
+            + "||t.indexOf('无法获取AppID')>=0||t.indexOf('appid参数错误')>=0"
+            + "||t.indexOf('请从游戏内登录')>=0)return 'APPID_ERROR';"
+            + "return 'OK';}catch(e){return 'JS_ERROR';}})()";
 
     private final Runnable watchdog = new Runnable() {
         @Override
@@ -194,6 +209,72 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         }
     }
 
+    /** 页面加载完后按几个时间点做健康检查：QQ 的错误提示是异步画出来的。 */
+    private void scheduleHealthChecks(final WebView view) {
+        if (view == null) return;
+        final long[] delays = new long[]{1500L, 4000L, 8000L, 15000L};
+        for (int i = 0; i < delays.length; i++) {
+            final long d = delays[i];
+            try {
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        checkHealth(view);
+                    }
+                }, d);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private void checkHealth(final WebView view) {
+        if (view == null || tokenGot || appidErrorNotified) return;
+        try {
+            view.evaluateJavascript(HEALTH_JS, new android.webkit.ValueCallback<String>() {
+                @Override
+                public void onReceiveValue(String value) {
+                    onHealthResult(view, value);
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void onHealthResult(WebView view, String raw) {
+        if (raw == null || tokenGot) return;
+        String v = raw.trim();
+        if (v.length() >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
+            v = v.substring(1, v.length() - 1);
+        }
+        if (v.startsWith("TOKEN:")) {
+            deliver(view, v.substring(6));
+            return;
+        }
+        if (v.contains("APPID_ERROR") && !appidErrorNotified) {
+            appidErrorNotified = true;
+            try {
+                handler.removeCallbacks(watchdog);
+            } catch (Throwable ignored) {
+            }
+            try {
+                if (view != null) view.stopLoading();
+            } catch (Throwable ignored) {
+            }
+            try {
+                activity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            activity.onLoginAppidMissing("");
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                });
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private void startWatchdog(WebView view) {
         if (view == null || tokenGot) return;
         if (watchdogFired) return;
@@ -248,6 +329,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         if (!deliver(view, url) && view != null) {
             deliver(view, view.getUrl());
         }
+        scheduleHealthChecks(view);
     }
 
     @Override

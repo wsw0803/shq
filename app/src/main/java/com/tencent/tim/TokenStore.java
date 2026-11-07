@@ -64,6 +64,69 @@ public class TokenStore {
         return g == null ? "" : g;
     }
 
+    // ===== 登录 URL / AppID 校验（修复「无法获取appid、一直加载」）=====
+
+    /** 标准 QQ 手游登录地址模板，两个 %s 都是游戏 AppID（pt_3rd_aid / client_id）。 */
+    public static final String PTLOGIN_TEMPLATE = "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?pt_enable_pwd=1&appid=716027609&pt_3rd_aid=%s&daid=381&pt_skey_valid=0&style=35&force_qr=1&autorefresh=1&s_url=http://connect.qq.com&refer_cgi=m_authorize&ucheck=1&fall_to_wv=1&status_os=0&redirect_uri=auth://tauth.qq.com/&client_id=%s&pf=openmobile_web&response_type=token&scope=all&sdkp=a&sdkv=3.5.14&sign=0&status_machine=0&switch=1&time=0&loginfrom=add&h5sig=0&loginty=6";
+
+    /** AppID 必须是 1~12 位纯数字。空值/占位符都会让 QQ 登录页报「无法获取appid」。 */
+    public static boolean isNumericAppid(String a) {
+        if (a == null) return false;
+        String s = a.trim();
+        if (s.isEmpty() || s.length() > 12) return false;
+        for (int i = 0; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    /** 用合法 AppID 拼一条标准登录地址；AppID 非法时返回空串，绝不返回半成品 URL。 */
+    public static String loginUrlFor(String appid) {
+        if (!isNumericAppid(appid)) return "";
+        String a = appid.trim();
+        try {
+            return String.format(PTLOGIN_TEMPLATE, a, a);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * 把一条已有登录地址修正成带合法 client_id 的形式；修不出来返回空串。
+     * 处理三种脏数据：client_id 为空、client_id 非数字、只有 pt_3rd_aid 没有 client_id。
+     */
+    public static String sanitizeLoginUrl(String url) {
+        if (url == null) return "";
+        String u = url.trim();
+        if (u.isEmpty() || !u.startsWith("http")) return "";
+
+        Matcher cid = Pattern.compile("client_id=([0-9]{1,12})(?![0-9])").matcher(u);
+        if (cid.find() && isNumericAppid(cid.group(1))) return u;
+
+        Matcher third = Pattern.compile("pt_3rd_aid=([0-9]{1,12})(?![0-9])").matcher(u);
+        if (!third.find() || !isNumericAppid(third.group(1))) return "";
+        String fix = third.group(1);
+        if (u.contains("client_id=")) {
+            return u.replaceAll("client_id=[^&]*", "client_id=" + fix);
+        }
+        return u + (u.indexOf('?') >= 0 ? "&" : "?") + "client_id=" + fix;
+    }
+
+    /**
+     * 解析当前可用的登录地址：优先已保存 URL，其次按游戏名查 AppID，最后取缓存里第一个游戏。
+     * 全都拿不到就返回空串，由调用方明确提示用户，而不是加载一条必然报错的地址。
+     */
+    public static String resolveLoginUrl(String savedUrl, String gameName) {
+        String u = sanitizeLoginUrl(savedUrl);
+        if (!u.isEmpty()) return u;
+        String a = appidOfGame(gameName == null ? "" : gameName);
+        if (isNumericAppid(a)) return loginUrlFor(a);
+        for (String[] g : cloudGames()) {
+            if (g != null && g.length > 1 && isNumericAppid(g[1])) return loginUrlFor(g[1]);
+        }
+        return "";
+    }
+
     public static class Entry {
         public String time = "";
         public String game = "";
