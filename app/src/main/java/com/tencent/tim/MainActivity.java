@@ -598,8 +598,10 @@ public class MainActivity extends BaseActivity {
     public void showGameSelectionDialog() {
         if (gameList.isEmpty()) {
             addLog("[游戏] 列表为空，正在加载...");
-            Toast.makeText(this, "正在加载游戏列表，请稍后...", Toast.LENGTH_SHORT).show();
             loadGameList();
+        }
+        if (gameList.isEmpty()) {
+            Toast.makeText(this, "暂无可用游戏，请检查网络后重试", Toast.LENGTH_SHORT).show();
             return;
         }
         final android.app.Dialog dlg = new android.app.Dialog(this);
