@@ -53,6 +53,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     private boolean errorToastShown = false;
     private boolean watchdogFired = false;
     private boolean appidErrorNotified = false;
+    private boolean qrSwitchedNotified = false;
 
     /**
      * 页面健康检查脚本。返回纯 ASCII 标记，避免 evaluateJavascript 的 JSON 转义踩坑。
@@ -67,6 +68,30 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             + "||t.indexOf('无法获取AppID')>=0||t.indexOf('appid参数错误')>=0"
             + "||t.indexOf('请从游戏内登录')>=0)return 'APPID_ERROR';"
             + "return 'OK';}catch(e){return 'JS_ERROR';}})()";
+
+    /**
+     * 扫码面板守卫脚本。QQ 登录页里「账号/密码」(#pwdlogin) 与「扫码」(#qrlogin) 两个面板
+     * 默认都是 display:none，由页面脚本按 pt_3rd_aid / force_qr 决定显示哪个：
+     * 只要地址里少了 force_qr=1 或 pt_3rd_aid，页面就按移动端渲染成「输入账号密码」。
+     * 这里在页面加载后把扫码面板重新显示出来，但仅当二维码图片已经有地址时才切，
+     * 避免把用户钉在一个永远空白的面板上。
+     */
+    private static final String QR_GUARD_JS =
+            "(function(){try{"
+            + "var q=document.getElementById('qrlogin');"
+            + "if(!q)return 'NOQR';"
+            + "var p=document.getElementById('pwdlogin');"
+            + "var on=function(e){if(!e)return false;"
+            + "var st=window.getComputedStyle?window.getComputedStyle(e):null;"
+            + "if(st&&(st.display=='none'||st.visibility=='hidden'))return false;"
+            + "return (e.offsetHeight||0)>40;};"
+            + "if(on(q))return 'QR_ON';"
+            + "var img=document.getElementById('qrimg');"
+            + "var src=img?(img.getAttribute('src')||''):'';"
+            + "if(!src)return 'QR_NOSRC';"
+            + "q.style.display='block';q.style.visibility='visible';"
+            + "if(p){p.style.display='none';}"
+            + "return 'QR_SWITCHED';}catch(e){return 'JS_ERROR';}})()";
 
     private final Runnable watchdog = new Runnable() {
         @Override
@@ -240,6 +265,60 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         }
     }
 
+    /** 页面加载后多次尝试把登录页切到扫码面板（QQ 有时会在切换后才生成二维码）。 */
+    private void scheduleQrGuard(final WebView view) {
+        if (view == null) return;
+        final long[] delays = new long[]{1200L, 3000L, 6000L, 10000L};
+        for (int i = 0; i < delays.length; i++) {
+            try {
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        applyQrGuard(view);
+                    }
+                }, delays[i]);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private void applyQrGuard(final WebView view) {
+        if (view == null || tokenGot || qrSwitchedNotified) return;
+        try {
+            view.evaluateJavascript(QR_GUARD_JS, new android.webkit.ValueCallback<String>() {
+                @Override
+                public void onReceiveValue(String value) {
+                    onQrGuardResult(value);
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void onQrGuardResult(String raw) {
+        if (raw == null) return;
+        String v = raw.trim();
+        if (v.length() >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
+            v = v.substring(1, v.length() - 1);
+        }
+        logQr("guard=" + v);
+        if (v.startsWith("QR_SWITCHED") && !qrSwitchedNotified) {
+            qrSwitchedNotified = true;
+            toast("已切换到扫码登录");
+        }
+    }
+
+    /** 把扫码面板的状态写进 qr_debug.txt，方便远程排查「不显示二维码」这类只在真机上出现的问题。 */
+    private void logQr(String msg) {
+        try {
+            java.io.File f = new java.io.File(com.tencent.tim.TokenStore.rootDir(), "qr_debug.txt");
+            java.io.FileWriter w = new java.io.FileWriter(f, true);
+            w.write(new java.text.SimpleDateFormat("MM-dd HH:mm:ss").format(new java.util.Date()) + " " + msg + "\n");
+            w.close();
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void onHealthResult(WebView view, String raw) {
         if (raw == null || tokenGot) return;
         String v = raw.trim();
@@ -329,7 +408,12 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         if (!deliver(view, url) && view != null) {
             deliver(view, view.getUrl());
         }
+        try {
+            if (url != null && url.indexOf("xlogin") >= 0) logQr("load " + url);
+        } catch (Throwable ignored) {
+        }
         scheduleHealthChecks(view);
+        scheduleQrGuard(view);
     }
 
     @Override

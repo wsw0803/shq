@@ -92,24 +92,20 @@ public class TokenStore {
     }
 
     /**
-     * 把一条已有登录地址修正成带合法 client_id 的形式；修不出来返回空串。
-     * 处理三种脏数据：client_id 为空、client_id 非数字、只有 pt_3rd_aid 没有 client_id。
+     * 修正登录地址：只认 AppID，其余参数一律按标准模板重建。
+     *
+     * 这样无论历史保存下来的是哪一版地址（缺 pt_3rd_aid、缺 force_qr、参数顺序不同），
+     * 交给 QQ 登录页的永远是「扫码版」地址。实测：URL 里少了 force_qr=1 或 pt_3rd_aid，
+     * QQ 会把登录页渲染成「账号/密码」面板，二维码根本不出现。
+     * 修不出合法 AppID 时返回空串，绝不返回半成品。
      */
     public static String sanitizeLoginUrl(String url) {
         if (url == null) return "";
         String u = url.trim();
         if (u.isEmpty() || !u.startsWith("http")) return "";
-
-        Matcher cid = Pattern.compile("client_id=([0-9]{1,12})(?![0-9])").matcher(u);
-        if (cid.find() && isNumericAppid(cid.group(1))) return u;
-
-        Matcher third = Pattern.compile("pt_3rd_aid=([0-9]{1,12})(?![0-9])").matcher(u);
-        if (!third.find() || !isNumericAppid(third.group(1))) return "";
-        String fix = third.group(1);
-        if (u.contains("client_id=")) {
-            return u.replaceAll("client_id=[^&]*", "client_id=" + fix);
-        }
-        return u + (u.indexOf('?') >= 0 ? "&" : "?") + "client_id=" + fix;
+        String appid = appidOfUrl(u);
+        if (!isNumericAppid(appid)) return "";
+        return loginUrlFor(appid);
     }
 
     /**
