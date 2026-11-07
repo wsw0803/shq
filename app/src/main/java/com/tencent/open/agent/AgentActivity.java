@@ -46,6 +46,7 @@ public class AgentActivity extends BaseActivity {
     private WebView webView;
     private com.tencent.tim.BaseLoginWebViewClient loginClient;
     private android.view.View barNext;
+    private android.widget.TextView tvNextHint;
     private android.view.View captureTools;
     private ScrollView loginScroll;
     private EditText plainText;
@@ -90,6 +91,7 @@ public class AgentActivity extends BaseActivity {
             pickToken.setOnClickListener(v -> showPickToken());
         }
         barNext = findViewById(R.id.bar_next);
+        tvNextHint = findViewById(R.id.tv_next_hint);
         captureTools = findViewById(R.id.capture_tools);
         android.view.View nextBtn = findViewById(R.id.btn_next);
         if (nextBtn != null) nextBtn.setOnClickListener(v -> startNextAccount());
@@ -215,6 +217,8 @@ public class AgentActivity extends BaseActivity {
             webView.setWebViewClient(loginClient);
             showCaptureTools(true);
 
+            // 进抓号页先清一次：否则上一个号还登着，QQ 会直接放行、连码都不弹
+            clearLoginState();
             loadLoginPage();
         } catch (Exception e) {
             e.printStackTrace();
@@ -242,6 +246,7 @@ public class AgentActivity extends BaseActivity {
             webView.setWebViewClient(loginClient);
             showCaptureTools(true);
 
+            // 挂机模式不清登录态：清了等于把正在挂的号踢下线
             loadLoginPage();
         } catch (Exception e) {
             e.printStackTrace();
@@ -419,6 +424,12 @@ public class AgentActivity extends BaseActivity {
                     // 抓号模式不自动退出：留在这里点一下就能换下一个号，
                     // 省掉每次重开页面（重开要重新拉 HTML + 重新生成二维码）。
                     showNextBar();
+                    // 抓号模式：抓到就立刻把登录态清掉，这样即使直接退出 App，
+                    // 下次进来也不会带着这个号的会话自动放行。挂机模式不清，
+                    // 清了会把正在挂的号踢下线。
+                    if ("capture".equals(currentMode)) {
+                        new android.os.Handler().postDelayed(this::clearLoginState, 600);
+                    }
                 }
 
             } catch (JSONException e) {
@@ -445,6 +456,7 @@ public class AgentActivity extends BaseActivity {
     private void showNextBar() {
         try {
             if (barNext != null) barNext.setVisibility(View.VISIBLE);
+            if (tvNextHint != null) tvNextHint.setText("已抓到 token · 登录态已清除");
         } catch (Throwable ignored) {
         }
     }

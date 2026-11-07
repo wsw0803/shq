@@ -80,6 +80,7 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/tv_next_hint"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -107,9 +108,8 @@
             android:text="继续抓下一个"
             android:textSize="11sp"
             android:textStyle="bold"
-            android:textColor="#04121A"
+            android:textColor="#FFFFFF"
             android:background="@drawable/glass_btn_primary"
-            android:tag="glass"
             android:paddingLeft="14dp"
             android:paddingRight="14dp"
             android:paddingTop="7dp"
@@ -258,9 +258,8 @@
                     android:text="执行登录"
                     android:textSize="12sp"
                     android:textStyle="bold"
-                    android:textColor="#04121A"
+                    android:textColor="#FFFFFF"
                     android:background="@drawable/glass_btn_primary"
-                    android:tag="glass"
                     android:textAllCaps="false"
                     android:stateListAnimator="@null"
                     android:minWidth="0dp"
