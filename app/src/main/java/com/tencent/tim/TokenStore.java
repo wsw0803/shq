@@ -109,14 +109,23 @@ public class TokenStore {
     }
 
     /**
-     * 解析当前可用的登录地址：优先已保存 URL，其次按游戏名查 AppID，最后取缓存里第一个游戏。
-     * 全都拿不到就返回空串，由调用方明确提示用户，而不是加载一条必然报错的地址。
+     * 解析当前可用的登录地址。
+     *
+     * 顺序是「游戏名 → 保存的 URL → 缓存第一个」，之所以把游戏名放到最前面：
+     * 以前优先用保存的 URL，用户换成 B 游戏后如果这份 URL 还是 A 的（老版本残留、
+     * 或者云端下发的条目挂了别人的 client_id），登录页加载的其实是 A，
+     * 抓回来的 token 却按 B 的名字存进 B 的文件——就是「切换游戏后抓号混乱」。
+     * 现在只要知道游戏名对应的 AppID，就以它为准，保存的 URL 仅在 AppID 一致时才复用
+     * （复用是为了保留历史参数），对不上就按模板重建。
      */
     public static String resolveLoginUrl(String savedUrl, String gameName) {
-        String u = sanitizeLoginUrl(savedUrl);
-        if (!u.isEmpty()) return u;
         String a = appidOfGame(gameName == null ? "" : gameName);
-        if (isNumericAppid(a)) return loginUrlFor(a);
+        String u = sanitizeLoginUrl(savedUrl);
+        if (isNumericAppid(a)) {
+            if (!u.isEmpty() && a.equals(appidOfUrl(u))) return u;
+            return loginUrlFor(a);
+        }
+        if (!u.isEmpty()) return u;
         for (String[] g : cloudGames()) {
             if (g != null && g.length > 1 && isNumericAppid(g[1])) return loginUrlFor(g[1]);
         }

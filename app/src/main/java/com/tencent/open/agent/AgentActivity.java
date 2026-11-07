@@ -393,7 +393,18 @@ public class AgentActivity extends BaseActivity {
                 saveRawDataToPreferences(saved);
 
                 if (!"login".equals(currentMode)) {
-                    saveAccountToFile(saved, appidFrom(url), currentMode != null ? currentMode : "抓号模式");
+                    // 登录页的 AppID 和回调里带回来的不一致，说明中途换了游戏或复用了旧页面。
+                    // 记一笔并按实际加载的登录页为准，避免 token 记到别的游戏名下。
+                    String callbackAppid = appidFrom(url);
+                    String pageAppid = com.tencent.tim.TokenStore.appidOfUrl(getLoginUrl());
+                    if (!callbackAppid.isEmpty() && !pageAppid.isEmpty()
+                            && !callbackAppid.equals(pageAppid)) {
+                        com.tencent.tim.Diag.fail("Login", "appidMismatch",
+                                "登录页 appid=" + pageAppid + " 回调 appid=" + callbackAppid
+                                        + " game=" + getSelectedGameName());
+                    }
+                    String finalAppid = callbackAppid.isEmpty() ? pageAppid : callbackAppid;
+                    saveAccountToFile(saved, finalAppid, currentMode != null ? currentMode : "抓号模式");
                 } else {
                     Toast.makeText(this, "登录成功！", Toast.LENGTH_LONG).show();
                 }
@@ -465,11 +476,30 @@ public class AgentActivity extends BaseActivity {
             }
             // 每次重载都复位一次：漏掉的话 tokenGot 还是 true，看门狗不会再计时
             if (loginClient != null) loginClient.resetForNext();
-            com.tencent.tim.Diag.step("Login", "reloadForNewQr", "重新拉取登录页（生成新二维码）");
+            clearLoginState();
+            com.tencent.tim.Diag.step("Login", "reloadForNewQr", "已清登录态，重新拉取登录页（生成新二维码）");
             webView.loadUrl(url);
-            Toast.makeText(this, "正在生成新二维码", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已清登录态，请扫码", Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             com.tencent.tim.Diag.fail("Login", "reloadForNewQr", "换号重载失败", t);
+        }
+    }
+
+    /**
+     * 清掉 WebView 里的 QQ 登录态。
+     *
+     * 不清的话，抓完 A 号再点「换号」，QQ 会直接用上一个号的 cookie 自动放行，
+     * 拿回来的还是 A 号——看着像"换号没生效"，其实是没让它重新扫码。
+     * 只清 cookie，不动页面缓存，所以静态资源照样走缓存、二维码照样很快。
+     */
+    private void clearLoginState() {
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            cm.removeAllCookies(null);
+            cm.flush();
+            com.tencent.tim.Diag.step("Login", "clearLoginState", "已清除 Cookie");
+        } catch (Throwable t) {
+            com.tencent.tim.Diag.fail("Login", "clearLoginState", "清除 Cookie 失败", t);
         }
     }
 

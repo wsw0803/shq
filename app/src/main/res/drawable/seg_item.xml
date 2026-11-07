@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 三段式模式选择器的单个段：选中时只有一层淡蓝玻璃，不描黑框 -->
+<!-- 模式切换的选中块：半径与轨道同心（轨道 22dp - 内边距 4dp = 18dp），
+     不再另加描边，否则会和外层玻璃边叠出两道线，看着像有缝。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_checked="true">
         <shape android:shape="rectangle">
             <solid android:color="#3D2B6CF6" />
-            <stroke android:width="1dp" android:color="#662B6CF6" />
             <corners android:radius="18dp" />
         </shape>
     </item>
