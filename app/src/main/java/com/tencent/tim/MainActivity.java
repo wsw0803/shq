@@ -1242,11 +1242,13 @@ public class MainActivity extends BaseActivity {
      */
     static void checkForUpdates(final android.app.Activity act) {
         new Thread(() -> {
-            String installed = "0";
+            // 先落到临时变量再转 final：下面几个 lambda 要捕获它
+            String installedTmp = "0";
             try {
-                installed = act.getPackageManager().getPackageInfo(act.getPackageName(), 0).versionName;
+                installedTmp = act.getPackageManager().getPackageInfo(act.getPackageName(), 0).versionName;
             } catch (Throwable ignored) {
             }
+            final String installed = installedTmp;
 
             java.util.List<ReleaseInfo> newer = null;
             String lastError = "";
