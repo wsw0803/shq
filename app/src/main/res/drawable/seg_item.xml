@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 三段式模式选择器的单个段：选中时只有一层淡蓝玻璃，不描黑框 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#3D2B6CF6" />
+            <stroke android:width="1dp" android:color="#662B6CF6" />
+            <corners android:radius="18dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+            <corners android:radius="18dp" />
+        </shape>
+    </item>
+</selector>
