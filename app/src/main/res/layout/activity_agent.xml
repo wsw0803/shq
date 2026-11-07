@@ -45,106 +45,170 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:paddingLeft="18dp"
+            android:paddingRight="18dp"
+            android:paddingTop="22dp"
+            android:paddingBottom="18dp">
 
+            <!-- 顶栏：标识 + 关闭 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="20dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="WEI"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary"
+                    android:letterSpacing="0.16" />
+
+                <TextView
+                    android:id="@+id/btn_close"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="关闭"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:paddingLeft="14dp"
+                    android:paddingRight="14dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:background="@drawable/glass_card"
+                    android:tag="glass" />
+            </LinearLayout>
+
+            <!-- 模式说明卡 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/glass_card"
+                android:tag="glass"
+                android:padding="16dp"
+                android:layout_marginBottom="18dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="上号模式"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_muted"
+                    android:fontFamily="monospace"
+                    android:letterSpacing="0.15"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="粘贴回调链接，或直接执行登录"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="token 只会写进本机存档，不会上传"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- 输入区标题 -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="WEI"
-                android:textSize="24sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_primary"
-                android:layout_marginTop="40dp"
-                android:layout_marginBottom="6dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Token 注入模式"
-                style="@style/BodyText"
-                android:layout_marginBottom="28dp" />
+                android:text="AUTH 链接"
+                android:textSize="11sp"
+                android:textColor="@color/text_muted"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.15"
+                android:layout_marginBottom="8dp" />
 
             <EditText
                 android:id="@+id/plain_text"
                 android:layout_width="match_parent"
-                android:layout_height="90dp"
-                android:gravity="top"
+                android:layout_height="118dp"
+                android:gravity="top|start"
                 android:hint="auth://tauth.qq.com/?#access_token=..."
                 android:background="@drawable/bg_input_state"
-                android:padding="16dp"
+                android:padding="14dp"
                 android:textSize="11sp"
                 android:fontFamily="monospace"
                 android:textColor="@color/text_primary"
                 android:textColorHint="@color/text_muted"
-                android:maxLines="6"
-                android:layout_marginBottom="20dp" />
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:maxLines="8"
+                android:layout_marginBottom="12dp" />
 
+            <!-- 主要动作 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:layout_marginBottom="12dp">
 
                 <Button
                     android:id="@+id/btn_paste"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="52dp"
                     android:layout_weight="1"
-                    android:text="粘贴登录"
+                    android:text="粘贴"
                     android:textSize="13sp"
                     android:textColor="@color/text_primary"
-                    android:background="@drawable/bg_button_secondary"
+                    android:background="@drawable/glass_card"
+                    android:tag="glass"
                     android:textAllCaps="false"
-                    android:layout_marginEnd="6dp"
-                    android:padding="14dp" />
+                    android:stateListAnimator="@null"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:layout_marginEnd="6dp" />
 
                 <Button
                     android:id="@+id/btn_manual_login"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="52dp"
                     android:layout_weight="1"
                     android:text="执行登录"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:textColor="#04121A"
-                    android:background="@drawable/bg_button_primary"
+                    android:background="@drawable/glass_btn_primary"
+                    android:tag="glass"
                     android:textAllCaps="false"
-                    android:layout_marginStart="6dp"
-                    android:padding="14dp" />
-
+                    android:stateListAnimator="@null"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:layout_marginStart="6dp" />
             </LinearLayout>
 
+            <Button
+                android:id="@+id/btn_pick_token"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="选择 Token 登录"
+                android:textSize="13sp"
+                android:textColor="@color/text_primary"
+                android:background="@drawable/glass_card"
+                android:tag="glass"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp" />
 
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/glass_card" android:tag="glass"
-                android:padding="12dp"
-                android:layout_marginTop="16dp">
-                <TextView
-                    android:id="@+id/tv_auto_game"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="" android:visibility="gone"
-                    android:textSize="11sp"
-                    android:textColor="@color/accent_cyan"
-                    android:fontFamily="monospace" />
-            </LinearLayout>
-
-        <Button
-            android:id="@+id/btn_pick_token"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="选择 Token 登录"
-            android:textSize="13sp"
-            android:textColor="@color/text_primary"
-            android:background="@drawable/bg_button_secondary"
-            android:textAllCaps="false"
-            android:layout_marginTop="14dp"
-            android:padding="14dp" />
-
+                android:text="支持 auth://tauth.qq.com/?#access_token=…&amp;openid=…"
+                android:textSize="9sp"
+                android:textColor="@color/text_muted"
+                android:fontFamily="monospace"
+                android:layout_marginTop="14dp" />
         </LinearLayout>
-
     </ScrollView>
-
 </RelativeLayout>

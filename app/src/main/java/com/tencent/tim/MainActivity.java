@@ -171,12 +171,15 @@ public class MainActivity extends BaseActivity {
         }
     }
 
-    /** 追加日志，敏感信息统一由 LogScrubber 脱敏。 */
+    /**
+     * 追加日志，敏感信息统一由 LogScrubber 脱敏。
+     * 不再逐行打时间戳——满屏 [10:24:31] 反而把真正的内容挤掉，
+     * 需要时间的地方（启动、结束）由调用方自己带。
+     */
     private void addLog(final String log) {
         runOnUiThread(() -> {
-            String time = new SimpleDateFormat("HH:mm:ss").format(new Date());
             String msg = LogScrubber.scrub(log);
-            String newLog = "[" + time + "] " + msg + "\n";
+            String newLog = "› " + msg + "\n";
             if (tvLog != null) tvLog.append(newLog);
             // 流式渐显：新到的一行从轻微模糊过渡到清晰，避免整块文字硬跳
             com.tencent.tim.Ui.fadeInBlur(tvLog);

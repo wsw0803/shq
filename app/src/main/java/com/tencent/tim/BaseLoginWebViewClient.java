@@ -54,6 +54,11 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     private boolean watchdogFired = false;
     private boolean appidErrorNotified = false;
     private boolean qrSwitchedNotified = false;
+    private static final String QR_ON = "QR_ON";
+    private static final String QR_SWITCHED = "QR_SWITCHED";
+    private WebView qrView;
+    private int qrTicks;
+    private String qrState = "";
 
     /**
      * 页面健康检查脚本。返回纯 ASCII 标记，避免 evaluateJavascript 的 JSON 转义踩坑。
@@ -78,19 +83,24 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
      */
     private static final String QR_GUARD_JS =
             "(function(){try{"
+            + "window.__weiQr=window.__weiQr||{t:Date.now()};"
             + "var q=document.getElementById('qrlogin');"
             + "if(!q)return 'NOQR';"
             + "var p=document.getElementById('pwdlogin');"
+            + "var img=document.getElementById('qrimg');"
+            + "var src=img?(img.getAttribute('src')||''):'';"
             + "var on=function(e){if(!e)return false;"
             + "var st=window.getComputedStyle?window.getComputedStyle(e):null;"
             + "if(st&&(st.display=='none'||st.visibility=='hidden'))return false;"
             + "return (e.offsetHeight||0)>40;};"
-            + "if(on(q))return 'QR_ON';"
-            + "var img=document.getElementById('qrimg');"
-            + "var src=img?(img.getAttribute('src')||''):'';"
-            + "if(!src)return 'QR_NOSRC';"
+            + "if(on(q)&&src)return 'QR_ON';"
+            // 二维码图还没下载完也先把扫码面板摆出来：QQ 的扫码框自带加载态，
+            // 比让人先看到账号密码表单再被切走要好得多。
+            + "if(!src&&(Date.now()-window.__weiQr.t)>7000){"
+            + "if(p){p.style.display='block';}q.style.display='none';return 'QR_FALLBACK';}"
             + "q.style.display='block';q.style.visibility='visible';"
             + "if(p){p.style.display='none';}"
+            + "if(!src)return 'QR_WAIT';"
             + "return 'QR_SWITCHED';}catch(e){return 'JS_ERROR';}})()";
 
     private final Runnable watchdog = new Runnable() {
@@ -292,25 +302,51 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         }
     }
 
-    /** 页面加载后多次尝试把登录页切到扫码面板（QQ 有时会在切换后才生成二维码）。 */
+    /**
+     * 把登录页尽快切到扫码面板。
+     *
+     * 原来的做法是 1.2s / 3s / 6s / 10s 四次定点试探：第一次太晚，用户会先看到
+     * 账号密码表单；间隔又太稀，QQ 的脚本把面板改回去后要等好几秒才纠正。
+     * 现在改成 150ms 起步、每 260ms 一次的密集试探，连续 15 秒，期间只要
+     * 扫码面板稳住了就降频，不再反复刷日志。
+     */
     private void scheduleQrGuard(final WebView view) {
         if (view == null) return;
-        final long[] delays = new long[]{1200L, 3000L, 6000L, 10000L};
-        for (int i = 0; i < delays.length; i++) {
-            try {
-                handler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        applyQrGuard(view);
-                    }
-                }, delays[i]);
-            } catch (Throwable ignored) {
-            }
+        qrView = view;
+        qrTicks = 0;
+        qrState = "";
+        try {
+            handler.removeCallbacks(qrTick);
+            handler.postDelayed(qrTick, 150L);
+        } catch (Throwable ignored) {
         }
     }
 
+    private final Runnable qrTick = new Runnable() {
+        @Override
+        public void run() {
+            WebView v = qrView;
+            if (v == null || tokenGot) return;
+            if (qrTicks > 120) return;   // 两分钟后彻底收手，不做无谓的 JS 调用
+            qrTicks++;
+            applyQrGuard(v);
+            long next;
+            if (qrTicks > 58) {
+                next = 1500L;           // 15 秒后转入慢速兜底
+            } else if (QR_ON.equals(qrState) || QR_SWITCHED.equals(qrState)) {
+                next = 900L;            // 已经切好了，降频看守
+            } else {
+                next = 260L;
+            }
+            try {
+                handler.postDelayed(this, next);
+            } catch (Throwable ignored) {
+            }
+        }
+    };
+
     private void applyQrGuard(final WebView view) {
-        if (view == null || tokenGot || qrSwitchedNotified) return;
+        if (view == null || tokenGot) return;
         try {
             view.evaluateJavascript(QR_GUARD_JS, new android.webkit.ValueCallback<String>() {
                 @Override
@@ -328,13 +364,21 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         if (v.length() >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
             v = v.substring(1, v.length() - 1);
         }
-        logQr("guard=" + v);
-        if (v.startsWith("QR_NOSRC") || v.startsWith("NOQR") || v.startsWith("JS_ERROR")) {
-            com.tencent.tim.Diag.fail("Login", "onQrGuardResult", "扫码面板不可用: " + v + " url=" + lastUrlForDiag());
+        // 密集试探会回调很多次，只在状态真的变了时落盘，避免日志被刷爆
+        if (!v.equals(qrState)) {
+            logQr("guard " + qrState + " -> " + v);
+            qrState = v;
         }
-        if (v.startsWith("QR_SWITCHED") && !qrSwitchedNotified) {
+        if ("QR_SWITCHED".equals(v) && !qrSwitchedNotified) {
             qrSwitchedNotified = true;
             toast("已切换到扫码登录");
+        }
+        if ("QR_FALLBACK".equals(v)) {
+            com.tencent.tim.Diag.fail("Login", "onQrGuardResult",
+                    "二维码 7 秒内未就绪，已回退账号密码登录 url=" + lastUrlForDiag());
+        }
+        if ("NOQR".equals(v) || "JS_ERROR".equals(v)) {
+            com.tencent.tim.Diag.fail("Login", "onQrGuardResult", "扫码面板不可用: " + v + " url=" + lastUrlForDiag());
         }
     }
 
@@ -422,6 +466,13 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
         super.doUpdateVisitedHistory(view, url, isReload);
         deliver(view, url);
+    }
+
+    @Override
+    public void onPageCommitVisible(WebView view, String url) {
+        super.onPageCommitVisible(view, url);
+        // 首帧可以画了就开始试，比等 onPageFinished 早得多
+        scheduleQrGuard(view);
     }
 
     @Override

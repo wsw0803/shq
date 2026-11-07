@@ -115,8 +115,7 @@
         <!-- 中部：游戏大卡 + 动作磁贴 + 状态条 -->
         <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_height="wrap_content"
             android:scrollbars="none"
             android:clipToPadding="false">
             <LinearLayout
@@ -308,7 +307,9 @@
         <LinearLayout
             android:id="@+id/card_log"
             android:layout_width="match_parent"
-            android:layout_height="108dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:minHeight="120dp"
             android:orientation="vertical"
             android:background="@drawable/bg_log"
             android:tag="glass"

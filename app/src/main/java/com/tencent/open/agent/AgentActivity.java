@@ -86,6 +86,10 @@ public class AgentActivity extends BaseActivity {
         if (pickToken != null) {
             pickToken.setOnClickListener(v -> showPickToken());
         }
+        android.view.View closeBtn = findViewById(R.id.btn_close);
+        if (closeBtn != null) {
+            closeBtn.setOnClickListener(v -> finish());
+        }
         plainText.addTextChangedListener(new android.text.TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             public void onTextChanged(CharSequence s, int a, int b, int c) {}
