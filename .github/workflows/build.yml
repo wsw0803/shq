@@ -70,8 +70,34 @@ jobs:
           mkdir -p release
           cp out/shq-${{ steps.version.outputs.vName }}.apk release/latest.apk
           echo '{"version":"${{ steps.version.outputs.vName }}"}' > release/version.json
+          # 生成给 App 用的版本清单：App 从 CDN/raw 拉这份，不直接打 api.github.com
+          curl -s -m 30 -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases?per_page=30" > /tmp/releases.json || true
+          python3 - <<'PY'
+          import json
+          try:
+              data = json.load(open('/tmp/releases.json', encoding='utf-8'))
+          except Exception:
+              data = []
+          out = []
+          for r in data:
+              if r.get('draft') or r.get('prerelease'):
+                  continue
+              apk = next((a for a in r.get('assets', []) if a.get('name', '').endswith('.apk')), None)
+              if not apk:
+                  continue
+              out.append({
+                  'v': (r.get('tag_name') or '').lstrip('v'),
+                  't': r.get('name') or '',
+                  'u': apk.get('browser_download_url', ''),
+                  's': apk.get('size', 0),
+              })
+          json.dump({'updates': out}, open('release/updates.json', 'w', encoding='utf-8'), ensure_ascii=False)
+          print('updates:', len(out))
+          PY
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add release/latest.apk release/version.json
+          git add release/latest.apk release/version.json release/updates.json
           git commit -m "chore: update latest apk and version [skip ci]" || true
           git push || true

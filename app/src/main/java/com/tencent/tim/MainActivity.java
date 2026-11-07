@@ -1213,99 +1213,178 @@ public class MainActivity extends BaseActivity {
         }
     }
 
+    /** 版本信息镜像，按顺序试。国内直连 api.github.com 基本都是超时。 */
+    private static final String[] UPDATE_MIRRORS = {
+            "https://cdn.jsdelivr.net/gh/wsw0803/shq@main/release/updates.json",
+            "https://gh-proxy.com/https://raw.githubusercontent.com/wsw0803/shq/main/release/updates.json",
+            "https://raw.githubusercontent.com/wsw0803/shq/main/release/updates.json",
+            "https://api.github.com/repos/wsw0803/shq/releases?per_page=100"
+    };
+
     /**
-     * 检查更新。
+     * 下载 APK 时套一层加速前缀。
      *
-     * 原实现只保留「最高的一个版本」（bestVer），所以用户只能看到最新一条，
-     * 从 0.0.1 到 0.0.3 之间的版本完全看不到。
-     * 现在收集所有高于当前版本的 Release，并在弹窗里逐条列出。
+     * release 里的安装包走 github.com 直连在国内经常几十 KB/s 甚至断流，
+     * 这几家反代对 release 资源是支持的，套上去至少能下完。
+     */
+    private static String speedUp(String url) {
+        if (url == null || url.isEmpty()) return url;
+        if (url.startsWith("https://github.com/")) return "https://gh-proxy.com/" + url;
+        return url;
+    }
+
+    /**
+     * 检查更新：多个镜像依次尝试，任意一个成功就弹窗。
+     *
+     * 原实现只认 api.github.com，国内网络打不开时点按钮完全没反应。
+     * 现在先试 jsDelivr 上的静态清单，再试 gh-proxy 反代的 raw 文件，
+     * 最后才回落到 GitHub API——三条都不通才提示失败。
      */
     static void checkForUpdates(final android.app.Activity act) {
         new Thread(() -> {
-            HttpURLConnection conn = null;
+            String installed = "0";
             try {
-                URL url = new URL("https://api.github.com/repos/wsw0803/shq/releases?per_page=100");
-                conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("Accept", "application/vnd.github+json");
-                conn.setConnectTimeout(6000);
-                conn.setReadTimeout(6000);
-                if (conn.getResponseCode() != 200) {
-                    act.runOnUiThread(() -> Toast.makeText(act, "检查更新失败，请稍后重试", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close();
-
-                String currentVersion = act.getPackageManager()
-                        .getPackageInfo(act.getPackageName(), 0).versionName;
-
-                org.json.JSONArray arr = new org.json.JSONArray(sb.toString());
-                java.util.List<ReleaseInfo> newer = new java.util.ArrayList<>();
-
-                for (int i = 0; i < arr.length(); i++) {
-                    org.json.JSONObject rel = arr.getJSONObject(i);
-                    if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
-
-                    String tag = rel.optString("tag_name", "");
-                    String ver = tag.startsWith("v") ? tag.substring(1) : tag;
-                    if (ver.isEmpty()) continue;
-                    if (compareVersion(ver, currentVersion) <= 0) continue;
-
-                    org.json.JSONArray assets = rel.optJSONArray("assets");
-                    if (assets == null || assets.length() == 0) continue;
-
-                    String apkUrl = "";
-                    long apkSize = 0;
-                    for (int a = 0; a < assets.length(); a++) {
-                        org.json.JSONObject as = assets.optJSONObject(a);
-                        if (as == null) continue;
-                        String nm = as.optString("name", "").toLowerCase();
-                        String u2 = as.optString("browser_download_url", "");
-                        if (u2.isEmpty()) continue;
-                        if (nm.endsWith(".apk")) {
-                            apkUrl = u2;
-                            apkSize = as.optLong("size", 0);
-                            break;
-                        }
-                        if (apkUrl.isEmpty()) {
-                            apkUrl = u2;
-                            apkSize = as.optLong("size", 0);
-                        }
-                    }
-                    if (apkUrl.isEmpty()) continue;
-
-                    ReleaseInfo info = new ReleaseInfo();
-                    info.version = ver;
-                    info.title = rel.optString("name", "");
-                    if (info.title.isEmpty()) info.title = "shq v" + ver;
-                    info.body = rel.optString("body", "");
-                    info.apkUrl = apkUrl;
-                    info.size = apkSize;
-                    newer.add(info);
-                }
-
-                if (newer.isEmpty()) {
-                    act.runOnUiThread(() -> Toast.makeText(act, "已是最新版本", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                // 按版本号从新到旧排序，弹窗里最新在最上面
-                java.util.Collections.sort(newer, (x, y) -> -compareVersion(x.version, y.version));
-
-                final java.util.List<ReleaseInfo> list = newer;
-                act.runOnUiThread(() -> showUpdateDialog(act, list));
-            } catch (Exception e) {
-                com.tencent.tim.Diag.fail("Update", "check", "检查更新失败", e);
-                act.runOnUiThread(() -> Toast.makeText(act, "检查更新失败，请检查网络", Toast.LENGTH_SHORT).show());
-            } finally {
-                if (conn != null) conn.disconnect();
+                installed = act.getPackageManager().getPackageInfo(act.getPackageName(), 0).versionName;
+            } catch (Throwable ignored) {
             }
+
+            java.util.List<ReleaseInfo> newer = null;
+            String lastError = "";
+            String usedEndpoint = "";
+            for (String endpoint : UPDATE_MIRRORS) {
+                try {
+                    String body = httpGet(endpoint);
+                    if (body == null || body.trim().isEmpty()) {
+                        lastError = "空响应";
+                        continue;
+                    }
+                    newer = parseReleases(body, installed);
+                    usedEndpoint = endpoint;
+                    break;
+                } catch (Throwable t) {
+                    lastError = String.valueOf(t);
+                    Diag.warn("Update", "check", "镜像失败 " + endpoint + " : " + t);
+                }
+            }
+
+            if (newer == null) {
+                final String why = lastError;
+                Diag.fail("Update", "check", "全部镜像失败: " + why);
+                act.runOnUiThread(() -> Toast.makeText(act, "检查更新失败：网络不通或镜像不可用", Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            if (newer.isEmpty()) {
+                Diag.step("Update", "check", "已是最新 " + installed + " via " + usedEndpoint);
+                act.runOnUiThread(() -> Toast.makeText(act, "已是最新版本 " + installed, Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            Diag.step("Update", "check", "发现 " + newer.size() + " 个新版本 via " + usedEndpoint);
+            // 按版本号从新到旧排序，弹窗里最新在最上面
+            java.util.Collections.sort(newer, (x, y) -> -compareVersion(x.version, y.version));
+            final java.util.List<ReleaseInfo> list = newer;
+            act.runOnUiThread(() -> showUpdateDialog(act, list));
         }).start();
+    }
+
+    private static String httpGet(String endpoint) throws Exception {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(endpoint);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Accept", "application/vnd.github+json, application/json");
+            conn.setRequestProperty("User-Agent", "WEI-Shq-Updater");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(10000);
+            int code = conn.getResponseCode();
+            if (code != 200) throw new java.io.IOException("HTTP " + code);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) sb.append(line).append('\n');
+            reader.close();
+            return sb.toString();
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 解析版本清单，兼容两种格式：
+     * 1) 自己生成的 {"updates":[{"v","t","u","s"}...]}（走 CDN/raw）
+     * 2) GitHub API 的 releases 数组（走 api.github.com）
+     * 只返回比当前版本高的条目。
+     */
+    private static java.util.List<ReleaseInfo> parseReleases(String body, String installed)
+            throws Exception {
+        java.util.List<ReleaseInfo> out = new java.util.ArrayList<>();
+        String text = body.trim();
+
+        if (text.startsWith("[")) {
+            org.json.JSONArray arr = new org.json.JSONArray(text);
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject rel = arr.getJSONObject(i);
+                if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue;
+                String tag = rel.optString("tag_name", "");
+                String ver = tag.startsWith("v") ? tag.substring(1) : tag;
+                if (ver.isEmpty() || compareVersion(ver, installed) <= 0) continue;
+
+                org.json.JSONArray assets = rel.optJSONArray("assets");
+                if (assets == null || assets.length() == 0) continue;
+
+                String apkUrl = "";
+                long apkSize = 0;
+                for (int a = 0; a < assets.length(); a++) {
+                    org.json.JSONObject as = assets.optJSONObject(a);
+                    if (as == null) continue;
+                    String nm = as.optString("name", "").toLowerCase();
+                    String u2 = as.optString("browser_download_url", "");
+                    if (u2.isEmpty()) continue;
+                    if (nm.endsWith(".apk")) {
+                        apkUrl = u2;
+                        apkSize = as.optLong("size", 0);
+                        break;
+                    }
+                    if (apkUrl.isEmpty()) {
+                        apkUrl = u2;
+                        apkSize = as.optLong("size", 0);
+                    }
+                }
+                if (apkUrl.isEmpty()) continue;
+
+                ReleaseInfo info = new ReleaseInfo();
+                info.version = ver;
+                info.title = rel.optString("name", "");
+                if (info.title.isEmpty()) info.title = "shq v" + ver;
+                info.body = rel.optString("body", "");
+                info.apkUrl = speedUp(apkUrl);
+                info.size = apkSize;
+                out.add(info);
+            }
+            return out;
+        }
+
+        org.json.JSONObject root = new org.json.JSONObject(text);
+        org.json.JSONArray arr = root.optJSONArray("updates");
+        if (arr == null) return out;
+        for (int i = 0; i < arr.length(); i++) {
+            org.json.JSONObject rel = arr.getJSONObject(i);
+            String ver = rel.optString("v", "");
+            if (ver.startsWith("v")) ver = ver.substring(1);
+            if (ver.isEmpty() || compareVersion(ver, installed) <= 0) continue;
+            String apkUrl = rel.optString("u", "");
+            if (apkUrl.isEmpty()) continue;
+            ReleaseInfo info = new ReleaseInfo();
+            info.version = ver;
+            info.title = rel.optString("t", "");
+            if (info.title.isEmpty()) info.title = "shq v" + ver;
+            info.apkUrl = speedUp(apkUrl);
+            info.size = rel.optLong("s", 0);
+            out.add(info);
+        }
+        return out;
     }
 
     private static int parseIntSafe(String v) {
