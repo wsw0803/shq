@@ -166,42 +166,6 @@
                     android:tag="glass" />
             </LinearLayout>
 
-            <!-- 模式说明 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/glass_card"
-                android:tag="glass"
-                android:padding="13dp"
-                android:layout_marginBottom="13dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="上号模式"
-                    android:textSize="10sp"
-                    android:textColor="@color/text_muted"
-                    android:fontFamily="monospace"
-                    android:letterSpacing="0.15"
-                    android:layout_marginBottom="5dp" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="粘贴回调链接，或直接执行登录"
-                    android:textSize="13sp"
-                    android:textColor="@color/text_primary" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="token 只写本机存档，不上传"
-                    android:textSize="10sp"
-                    android:textColor="@color/text_muted"
-                    android:layout_marginTop="4dp" />
-            </LinearLayout>
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -281,14 +245,6 @@
                 android:minWidth="0dp"
                 android:minHeight="0dp" />
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="支持 auth://tauth.qq.com/?#access_token=…&amp;openid=…"
-                android:textSize="9sp"
-                android:textColor="@color/text_muted"
-                android:fontFamily="monospace"
-                android:layout_marginTop="10dp" />
         </LinearLayout>
     </ScrollView>
 </RelativeLayout>

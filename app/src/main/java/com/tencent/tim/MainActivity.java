@@ -216,9 +216,9 @@ public class MainActivity extends BaseActivity {
                 android.webkit.WebStorage.getInstance().deleteAllData();
             } catch (Throwable ignored) {
             }
-            com.tencent.tim.Diag.step("Main", "clearWebLoginState", "已清除 Cookie 与 DOM Storage");
-            addLog("已清除 WebView 登录态");
-            Toast.makeText(this, "已清除登录态，下次登录需要重新扫码", Toast.LENGTH_SHORT).show();
+            com.tencent.tim.Diag.step("Main", "clearWebLoginState", "已清除登录缓存（Cookie + DOM Storage）");
+            addLog("已清除登录缓存");
+            Toast.makeText(this, "已清除登录缓存，下次需要重新扫码", Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             com.tencent.tim.Diag.fail("Main", "clearWebLoginState", "清除登录态失败", t);
             Toast.makeText(this, "清除失败: " + t.getMessage(), Toast.LENGTH_SHORT).show();
