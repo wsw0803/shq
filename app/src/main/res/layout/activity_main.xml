@@ -39,20 +39,6 @@
                 android:textStyle="bold"
                 android:textColor="@color/text_primary"
                 android:letterSpacing="0.16" />
-            <TextView
-                android:id="@+id/btn_log_toggle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="日志"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:background="@drawable/glass_card"
-                android:tag="glass"
-                android:paddingLeft="14dp"
-                android:paddingRight="14dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:layout_marginEnd="8dp" />
             <Button
                 android:id="@+id/btn_settings"
                 android:layout_width="wrap_content"
@@ -239,6 +225,22 @@
                         android:minHeight="0dp" />
                 </LinearLayout>
 
+                <Button
+                    android:id="@+id/btn_clear_login"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:text="清除登录态"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:background="@drawable/glass_card"
+                    android:tag="glass"
+                    android:textAllCaps="false"
+                    android:stateListAnimator="@null"
+                    android:gravity="center"
+                    android:layout_marginTop="10dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -246,7 +248,8 @@
                     android:background="@drawable/glass_card"
                     android:tag="glass"
                     android:padding="12dp"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="10dp">
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"

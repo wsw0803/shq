@@ -199,6 +199,32 @@ public class MainActivity extends BaseActivity {
     }
 
     /**
+     * 清掉 WebView 里残留的 QQ 登录态。
+     *
+     * App 里所有登录都走 WebView，账号是「谁在这台机器的 WebView 里还没登出」决定的。
+     * 抓完一个号再去抓别的号，如果不清 Cookie，QQ 会直接复用上一个号的会话、
+     * 连二维码都不弹，抓回来的还是同一个人。所以这里给一个手动入口，
+     * 顺带把 DOM Storage 一起清掉（QQ 的登录态也会存在那里）。
+     */
+    private void clearWebLoginState() {
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            cm.removeAllCookies(null);
+            cm.flush();
+            try {
+                android.webkit.WebStorage.getInstance().deleteAllData();
+            } catch (Throwable ignored) {
+            }
+            com.tencent.tim.Diag.step("Main", "clearWebLoginState", "已清除 Cookie 与 DOM Storage");
+            addLog("已清除 WebView 登录态");
+            Toast.makeText(this, "已清除登录态，下次登录需要重新扫码", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            com.tencent.tim.Diag.fail("Main", "clearWebLoginState", "清除登录态失败", t);
+            Toast.makeText(this, "清除失败: " + t.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
      * 展开 / 收起运行日志。
      *
      * 收起时卡片只包住标题栏（wrap_content），展开时改成 0dp + weight=1 把
@@ -248,8 +274,8 @@ public class MainActivity extends BaseActivity {
         cardLog = findViewById(R.id.card_log);
         tvLogLast = findViewById(R.id.tv_log_last);
         tvLogChevron = findViewById(R.id.tv_log_chevron);
-        android.view.View logToggle = findViewById(R.id.btn_log_toggle);
-        if (logToggle != null) logToggle.setOnClickListener(v -> setLogExpanded(!logExpanded));
+        android.view.View clearLogin = findViewById(R.id.btn_clear_login);
+        if (clearLogin != null) clearLogin.setOnClickListener(v -> clearWebLoginState());
         android.view.View logHeader = findViewById(R.id.row_log_header);
         if (logHeader != null) logHeader.setOnClickListener(v -> setLogExpanded(!logExpanded));
         setLogExpanded(com.tencent.tim.Ui.prefs(this).getBoolean("log_expanded", false));
