@@ -33,6 +33,89 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- 抓号/挂机模式常驻：换号（重新拉登录页，生成新二维码） -->
+    <LinearLayout
+        android:id="@+id/capture_tools"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentRight="true"
+        android:layout_marginTop="10dp"
+        android:layout_marginRight="10dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/btn_swap"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="换号"
+            android:textSize="11sp"
+            android:textColor="@color/text_primary"
+            android:background="@drawable/glass_card"
+            android:tag="glass"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp" />
+    </LinearLayout>
+
+    <!-- 抓到号之后浮出的操作条 -->
+    <LinearLayout
+        android:id="@+id/bar_next"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_marginLeft="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_log"
+        android:tag="glass"
+        android:paddingLeft="14dp"
+        android:paddingRight="10dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="已抓到 token"
+            android:textSize="11sp"
+            android:textColor="@color/accent_green"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/btn_next_exit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="退出"
+            android:textSize="11sp"
+            android:textColor="@color/text_muted"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp" />
+
+        <TextView
+            android:id="@+id/btn_next"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="继续抓下一个"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#04121A"
+            android:background="@drawable/glass_btn_primary"
+            android:tag="glass"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp" />
+    </LinearLayout>
+
     <ScrollView
         android:id="@+id/login_scroll"
         android:layout_width="match_parent"
@@ -45,121 +128,119 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingLeft="18dp"
-            android:paddingRight="18dp"
-            android:paddingTop="22dp"
-            android:paddingBottom="18dp">
+            android:paddingLeft="16dp"
+            android:paddingRight="16dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="14dp">
 
-            <!-- 顶栏：标识 + 关闭 -->
+            <!-- 顶栏 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="20dp">
+                android:layout_marginBottom="14dp">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="WEI"
-                    android:textSize="22sp"
+                    android:textSize="19sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary"
-                    android:letterSpacing="0.16" />
+                    android:letterSpacing="0.14" />
 
                 <TextView
                     android:id="@+id/btn_close"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="关闭"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     android:textColor="@color/text_secondary"
-                    android:paddingLeft="14dp"
-                    android:paddingRight="14dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
+                    android:paddingLeft="12dp"
+                    android:paddingRight="12dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
                     android:background="@drawable/glass_card"
                     android:tag="glass" />
             </LinearLayout>
 
-            <!-- 模式说明卡 -->
+            <!-- 模式说明 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:background="@drawable/glass_card"
                 android:tag="glass"
-                android:padding="16dp"
-                android:layout_marginBottom="18dp">
+                android:padding="13dp"
+                android:layout_marginBottom="13dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="上号模式"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textColor="@color/text_muted"
                     android:fontFamily="monospace"
                     android:letterSpacing="0.15"
-                    android:layout_marginBottom="8dp" />
+                    android:layout_marginBottom="5dp" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="粘贴回调链接，或直接执行登录"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textColor="@color/text_primary" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="token 只会写进本机存档，不会上传"
-                    android:textSize="11sp"
+                    android:text="token 只写本机存档，不上传"
+                    android:textSize="10sp"
                     android:textColor="@color/text_muted"
-                    android:layout_marginTop="6dp" />
+                    android:layout_marginTop="4dp" />
             </LinearLayout>
 
-            <!-- 输入区标题 -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="AUTH 链接"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="@color/text_muted"
                 android:fontFamily="monospace"
                 android:letterSpacing="0.15"
-                android:layout_marginBottom="8dp" />
+                android:layout_marginBottom="6dp" />
 
             <EditText
                 android:id="@+id/plain_text"
                 android:layout_width="match_parent"
-                android:layout_height="118dp"
+                android:layout_height="92dp"
                 android:gravity="top|start"
                 android:hint="auth://tauth.qq.com/?#access_token=..."
                 android:background="@drawable/bg_input_state"
-                android:padding="14dp"
-                android:textSize="11sp"
+                android:padding="12dp"
+                android:textSize="10sp"
                 android:fontFamily="monospace"
                 android:textColor="@color/text_primary"
                 android:textColorHint="@color/text_muted"
                 android:inputType="textMultiLine|textNoSuggestions"
-                android:maxLines="8"
-                android:layout_marginBottom="12dp" />
+                android:maxLines="6"
+                android:layout_marginBottom="10dp" />
 
-            <!-- 主要动作 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="12dp">
+                android:layout_marginBottom="10dp">
 
                 <Button
                     android:id="@+id/btn_paste"
                     android:layout_width="0dp"
-                    android:layout_height="52dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
                     android:text="粘贴"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/text_primary"
                     android:background="@drawable/glass_card"
                     android:tag="glass"
@@ -167,15 +248,15 @@
                     android:stateListAnimator="@null"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:layout_marginEnd="6dp" />
+                    android:layout_marginEnd="5dp" />
 
                 <Button
                     android:id="@+id/btn_manual_login"
                     android:layout_width="0dp"
-                    android:layout_height="52dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
                     android:text="执行登录"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textStyle="bold"
                     android:textColor="#04121A"
                     android:background="@drawable/glass_btn_primary"
@@ -184,15 +265,15 @@
                     android:stateListAnimator="@null"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:layout_marginStart="6dp" />
+                    android:layout_marginStart="5dp" />
             </LinearLayout>
 
             <Button
                 android:id="@+id/btn_pick_token"
                 android:layout_width="match_parent"
-                android:layout_height="52dp"
+                android:layout_height="44dp"
                 android:text="选择 Token 登录"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textColor="@color/text_primary"
                 android:background="@drawable/glass_card"
                 android:tag="glass"
@@ -208,7 +289,7 @@
                 android:textSize="9sp"
                 android:textColor="@color/text_muted"
                 android:fontFamily="monospace"
-                android:layout_marginTop="14dp" />
+                android:layout_marginTop="10dp" />
         </LinearLayout>
     </ScrollView>
 </RelativeLayout>

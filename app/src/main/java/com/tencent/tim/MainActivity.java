@@ -104,6 +104,11 @@ public class MainActivity extends BaseActivity {
     private TextView storagePermissionStatusText;
     private TextView tvLog;
     private ScrollView scrollLog;
+    /** 运行日志面板：默认收起，只留一条标题栏显示最近一行。 */
+    private android.widget.LinearLayout cardLog;
+    private android.widget.TextView tvLogLast;
+    private android.widget.TextView tvLogChevron;
+    private boolean logExpanded = false;
 
     private Window mWindow;
 
@@ -183,8 +188,46 @@ public class MainActivity extends BaseActivity {
             if (tvLog != null) tvLog.append(newLog);
             // 流式渐显：新到的一行从轻微模糊过渡到清晰，避免整块文字硬跳
             com.tencent.tim.Ui.fadeInBlur(tvLog);
-            if (scrollLog != null) scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
+            if (tvLogLast != null) {
+                String one = msg.replace('\n', ' ').trim();
+                tvLogLast.setText(one.length() > 42 ? "…" + one.substring(one.length() - 42) : one);
+            }
+            if (scrollLog != null && logExpanded) {
+                scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
+            }
         });
+    }
+
+    /**
+     * 展开 / 收起运行日志。
+     *
+     * 收起时卡片只包住标题栏（wrap_content），展开时改成 0dp + weight=1 把
+     * 剩余高度全吃掉。两种状态改的是同一份 LayoutParams，不需要两套布局。
+     */
+    private void setLogExpanded(boolean expanded) {
+        logExpanded = expanded;
+        try {
+            if (cardLog != null) {
+                android.widget.LinearLayout.LayoutParams lp =
+                        (android.widget.LinearLayout.LayoutParams) cardLog.getLayoutParams();
+                if (expanded) {
+                    lp.height = 0;
+                    lp.weight = 1f;
+                } else {
+                    lp.height = android.widget.LinearLayout.LayoutParams.WRAP_CONTENT;
+                    lp.weight = 0f;
+                }
+                cardLog.setLayoutParams(lp);
+            }
+            if (scrollLog != null) {
+                scrollLog.setVisibility(expanded ? View.VISIBLE : View.GONE);
+                if (expanded) scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
+            }
+            if (tvLogLast != null) tvLogLast.setVisibility(expanded ? View.GONE : View.VISIBLE);
+            if (tvLogChevron != null) tvLogChevron.setText(expanded ? "收起" : "展开");
+            com.tencent.tim.Ui.prefs(this).edit().putBoolean("log_expanded", expanded).apply();
+        } catch (Throwable ignored) {
+        }
     }
 
     private void initViews() {
@@ -202,6 +245,14 @@ public class MainActivity extends BaseActivity {
         storagePermissionStatusText = findViewById(R.id.txt_storage_permission_status);
         tvLog = findViewById(R.id.tv_log);
         scrollLog = findViewById(R.id.scroll_log);
+        cardLog = findViewById(R.id.card_log);
+        tvLogLast = findViewById(R.id.tv_log_last);
+        tvLogChevron = findViewById(R.id.tv_log_chevron);
+        android.view.View logToggle = findViewById(R.id.btn_log_toggle);
+        if (logToggle != null) logToggle.setOnClickListener(v -> setLogExpanded(!logExpanded));
+        android.view.View logHeader = findViewById(R.id.row_log_header);
+        if (logHeader != null) logHeader.setOnClickListener(v -> setLogExpanded(!logExpanded));
+        setLogExpanded(com.tencent.tim.Ui.prefs(this).getBoolean("log_expanded", false));
 
         updateSelectGameButtonText();
         if (cloudAppidButton != null) {

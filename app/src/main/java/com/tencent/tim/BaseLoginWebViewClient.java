@@ -153,6 +153,30 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     }
 
     /**
+     * 抓到一个号之后，原地抓下一个号前把状态清干净。
+     *
+     * 不清的话 tokenGot 会一直是 true：看门狗不再计时、扫码守卫、健康检查全部
+     * 提前 return，页面看起来能重载但抓不到第二个号。这里只重置「一次性」状态，
+     * 不动 configured/bridgeReady 这类和 WebView 绑定的初始化标记。
+     */
+    public void resetForNext() {
+        try {
+            handler.removeCallbacks(watchdog);
+        } catch (Throwable ignored) {
+        }
+        tokenGot = false;
+        watchdogFired = false;
+        appidErrorNotified = false;
+        qrSwitchedNotified = false;
+        errorToastShown = false;
+        lastTokenUrl = "";
+        lastTokenAt = 0L;
+        qrTicks = 0;
+        qrState = "";
+        com.tencent.tim.Diag.step("Login", "resetForNext", "已复位，准备抓下一个号");
+    }
+
+    /**
      * 统一的 token 投递口。返回 true 表示这个 URL 已被当作登录结果处理过。
      */
     protected final boolean deliver(WebView view, String url) {

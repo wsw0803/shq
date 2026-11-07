@@ -44,6 +44,9 @@ public class AgentActivity extends BaseActivity {
             "access_token=([^&]+)(?:&expires_in=([^&]+))?&openid=([^&]+)&pay_token=([^&]+)");
 
     private WebView webView;
+    private com.tencent.tim.BaseLoginWebViewClient loginClient;
+    private android.view.View barNext;
+    private android.view.View captureTools;
     private ScrollView loginScroll;
     private EditText plainText;
     private Button pasteLoginButton;
@@ -86,6 +89,15 @@ public class AgentActivity extends BaseActivity {
         if (pickToken != null) {
             pickToken.setOnClickListener(v -> showPickToken());
         }
+        barNext = findViewById(R.id.bar_next);
+        captureTools = findViewById(R.id.capture_tools);
+        android.view.View nextBtn = findViewById(R.id.btn_next);
+        if (nextBtn != null) nextBtn.setOnClickListener(v -> startNextAccount());
+        android.view.View exitBtn = findViewById(R.id.btn_next_exit);
+        if (exitBtn != null) exitBtn.setOnClickListener(v -> finish());
+        android.view.View swapBtn = findViewById(R.id.btn_swap);
+        if (swapBtn != null) swapBtn.setOnClickListener(v -> reloadForNewQr());
+
         android.view.View closeBtn = findViewById(R.id.btn_close);
         if (closeBtn != null) {
             closeBtn.setOnClickListener(v -> finish());
@@ -168,6 +180,7 @@ public class AgentActivity extends BaseActivity {
             
             webView.setVisibility(View.GONE);
             loginScroll.setVisibility(View.VISIBLE);
+            showCaptureTools(false);
             loadRawDataFromPreferences();
 
             if (pasteLoginButton != null) {
@@ -198,7 +211,9 @@ public class AgentActivity extends BaseActivity {
             webView.getSettings().setDisplayZoomControls(false);
             webView.getSettings().setDomStorageEnabled(true);
             
-            webView.setWebViewClient(new NormalWebViewClient(this));
+            loginClient = new NormalWebViewClient(this);
+            webView.setWebViewClient(loginClient);
+            showCaptureTools(true);
 
             loadLoginPage();
         } catch (Exception e) {
@@ -223,7 +238,9 @@ public class AgentActivity extends BaseActivity {
             webView.getSettings().setDisplayZoomControls(false);
             webView.getSettings().setDomStorageEnabled(true);
             
-            webView.setWebViewClient(new HangUpWebViewClient(this));
+            loginClient = new HangUpWebViewClient(this);
+            webView.setWebViewClient(loginClient);
+            showCaptureTools(true);
 
             loadLoginPage();
         } catch (Exception e) {
@@ -385,7 +402,13 @@ public class AgentActivity extends BaseActivity {
                 resultIntent.putExtra("key_response", json.toString());
                 setResult(RESULT_OK, resultIntent);
 
-                new android.os.Handler().postDelayed(() -> finish(), 2000);
+                if ("login".equals(currentMode)) {
+                    new android.os.Handler().postDelayed(() -> finish(), 1200);
+                } else {
+                    // 抓号模式不自动退出：留在这里点一下就能换下一个号，
+                    // 省掉每次重开页面（重开要重新拉 HTML + 重新生成二维码）。
+                    showNextBar();
+                }
 
             } catch (JSONException e) {
                 e.printStackTrace();
@@ -393,6 +416,60 @@ public class AgentActivity extends BaseActivity {
             }
         } else {
             Toast.makeText(this, "内容格式错误", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 抓号模式下常驻的小工具条（换号）。 */
+    private void showCaptureTools(boolean show) {
+        try {
+            if (captureTools != null) {
+                captureTools.setVisibility(show ? View.VISIBLE : View.GONE);
+            }
+            if (!show && barNext != null) barNext.setVisibility(View.GONE);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 抓到号之后的浮条：「继续抓下一个」/「退出」。 */
+    private void showNextBar() {
+        try {
+            if (barNext != null) barNext.setVisibility(View.VISIBLE);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 换一个号：先把客户端的一次性状态复位，再重新拉一次登录页（会生成新的二维码）。 */
+    private void startNextAccount() {
+        try {
+            if (loginClient != null) loginClient.resetForNext();
+            if (barNext != null) barNext.setVisibility(View.GONE);
+            reloadForNewQr();
+        } catch (Throwable t) {
+            com.tencent.tim.Diag.fail("Login", "startNextAccount", "换号失败", t);
+        }
+    }
+
+    /**
+     * 重新拉登录页。
+     *
+     * 注意这里不能只刷新二维码图片：QQ 的二维码和页面里的轮询 sig 是配对的，
+     * 单独换 &lt;img&gt; 的 src 会得到一张「扫了没反应」的码。所以整页重载，
+     * 但静态资源仍然走 WebView 缓存，只有 xlogin 和二维码走网络，比冷启动快得多。
+     */
+    private void reloadForNewQr() {
+        try {
+            String url = getLoginUrl();
+            if (url == null || url.isEmpty()) {
+                Toast.makeText(this, "拿不到游戏 AppID，无法换号", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            // 每次重载都复位一次：漏掉的话 tokenGot 还是 true，看门狗不会再计时
+            if (loginClient != null) loginClient.resetForNext();
+            com.tencent.tim.Diag.step("Login", "reloadForNewQr", "重新拉取登录页（生成新二维码）");
+            webView.loadUrl(url);
+            Toast.makeText(this, "正在生成新二维码", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            com.tencent.tim.Diag.fail("Login", "reloadForNewQr", "换号重载失败", t);
         }
     }
 

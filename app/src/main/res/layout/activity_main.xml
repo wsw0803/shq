@@ -39,6 +39,20 @@
                 android:textStyle="bold"
                 android:textColor="@color/text_primary"
                 android:letterSpacing="0.16" />
+            <TextView
+                android:id="@+id/btn_log_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="日志"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:background="@drawable/glass_card"
+                android:tag="glass"
+                android:paddingLeft="14dp"
+                android:paddingRight="14dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:layout_marginEnd="8dp" />
             <Button
                 android:id="@+id/btn_settings"
                 android:layout_width="wrap_content"
@@ -307,33 +321,46 @@
         <LinearLayout
             android:id="@+id/card_log"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:minHeight="120dp"
+            android:layout_height="wrap_content"
             android:orientation="vertical"
             android:background="@drawable/bg_log"
             android:tag="glass"
             android:padding="12dp"
             android:layout_marginBottom="6dp">
             <LinearLayout
+                android:id="@+id/row_log_header"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="6dp">
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp">
                 <TextView
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:text="TERMINAL"
                     android:textSize="9sp"
                     android:textColor="@color/text_muted"
                     android:fontFamily="monospace"
                     android:letterSpacing="0.25" />
                 <TextView
+                    android:id="@+id/tv_log_last"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="8dp"
+                    android:text=""
+                    android:textSize="9sp"
+                    android:textColor="@color/accent_green"
+                    android:fontFamily="monospace"
+                    android:singleLine="true"
+                    android:ellipsize="start" />
+                <TextView
+                    android:id="@+id/tv_log_chevron"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="运行日志"
+                    android:text="展开"
                     android:textSize="9sp"
                     android:textColor="@color/text_muted"
                     android:fontFamily="monospace" />
@@ -343,6 +370,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
+                android:visibility="gone"
+                android:layout_marginTop="6dp"
                 android:scrollbars="vertical">
                 <TextView
                     android:id="@+id/tv_log"
