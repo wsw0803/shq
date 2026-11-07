@@ -43,6 +43,16 @@ public class SettingsActivity extends BaseActivity {
         seekCorner.setProgress(p.getInt(Ui.KEY_CORNER, Ui.CORNER_DEFAULT) - 8);
         labels();
 
+        Button diagShow = findViewById(R.id.btn_diag_log);
+        Button diagClear = findViewById(R.id.btn_diag_clear);
+        if (diagShow != null) diagShow.setOnClickListener(v -> showDiagDialog());
+        if (diagClear != null) {
+            diagClear.setOnClickListener(v -> {
+                Diag.clear();
+                android.widget.Toast.makeText(this, "诊断日志已清空", android.widget.Toast.LENGTH_SHORT).show();
+            });
+        }
+
         Button pickBg = findViewById(R.id.btn_pick_bg);
         Button clearBg = findViewById(R.id.btn_clear_bg);
         pickBg.setOnClickListener(v -> {
@@ -171,6 +181,98 @@ public class SettingsActivity extends BaseActivity {
             if (f.exists()) f.delete();
         } catch (Exception ignored) {
         }
+    }
+
+    /**
+     * 诊断日志弹窗：直接把最近 400 行贴出来，可一键复制发给别人。
+     * 覆盖范围见 Diag 的注释——登录四层捕获、看门狗、WebView 错误、云端列表、root 写入、崩溃。
+     */
+    private void showDiagDialog() {
+        final String text = Diag.tail(400);
+        float density = getResources().getDisplayMetrics().density;
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setBackground(TokenDialog.glass(this, 22, true));
+        int pad = (int) (16 * density);
+        root.setPadding(pad, pad, pad, pad);
+
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("诊断日志");
+        title.setTextSize(16);
+        title.setTextColor(0xFFF7F8FA);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        android.widget.TextView sub = new android.widget.TextView(this);
+        sub.setText("文件: " + (Diag.currentFile() == null ? "-" : Diag.currentFile().getAbsolutePath()));
+        sub.setTextSize(9);
+        sub.setTextColor(0xFF8A93A3);
+        sub.setTypeface(android.graphics.Typeface.MONOSPACE);
+        sub.setPadding(0, (int) (4 * density), 0, (int) (8 * density));
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        android.widget.TextView body = new android.widget.TextView(this);
+        body.setText(text);
+        body.setTextSize(9);
+        body.setTextColor(0xFFD5DAE3);
+        body.setTypeface(android.graphics.Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        sv.addView(body);
+        root.addView(title);
+        root.addView(sub);
+        root.addView(sv, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (getResources().getDisplayMetrics().heightPixels * 0.5f)));
+
+        final android.app.Dialog dlg = new android.app.Dialog(this);
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dlg.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.92f),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+
+        android.widget.LinearLayout actions = new android.widget.LinearLayout(this);
+        actions.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.LinearLayout.LayoutParams aLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        aLp.topMargin = (int) (10 * density);
+
+        android.widget.Button copy = new android.widget.Button(this);
+        copy.setText("复制全部");
+        copy.setTextSize(12);
+        copy.setAllCaps(false);
+        copy.setTextColor(0xFFF7F8FA);
+        copy.setBackground(TokenDialog.glass(this, 12, true));
+        copy.setOnClickListener(v -> {
+            try {
+                android.content.ClipboardManager cm =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("wei-diag", Diag.tail(4000)));
+                android.widget.Toast.makeText(this, "已复制完整日志", android.widget.Toast.LENGTH_SHORT).show();
+            } catch (Throwable t) {
+                android.widget.Toast.makeText(this, "复制失败: " + t, android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+        android.widget.Button close = new android.widget.Button(this);
+        close.setText("关闭");
+        close.setTextSize(12);
+        close.setAllCaps(false);
+        close.setTextColor(0xFFF7F8FA);
+        close.setBackground(TokenDialog.glass(this, 12, false));
+        close.setOnClickListener(v -> dlg.dismiss());
+
+        android.widget.LinearLayout.LayoutParams lp1 = new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp1.rightMargin = (int) (6 * density);
+        actions.addView(copy, lp1);
+        actions.addView(close, new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(actions, aLp);
+
+        dlg.setContentView(root);
+        dlg.show();
+        Ui.applyDialog(dlg);
     }
 
     private void labels() {

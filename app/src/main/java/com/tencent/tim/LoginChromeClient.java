@@ -107,6 +107,30 @@ public class LoginChromeClient extends WebChromeClient {
     public void closePopup() {
     }
 
+    /**
+     * 页面 JS 报错 / console.error 全记下来：QQ 登录页是强依赖脚本的单页应用，
+     * 脚本一挂就是白屏或一直转圈，而 App 侧原本完全无感。
+     */
+    @Override
+    public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
+        try {
+            if (cm != null) {
+                int level = cm.messageLevel() == null ? 0 : cm.messageLevel().ordinal();
+                // 0=ERROR 1=WARNING；别的级别只当普通步骤，避免日志被 info 刷满
+                if (level <= 1) {
+                    String where = cm.sourceId() + ":" + cm.lineNumber();
+                    if (level == 0) {
+                        Diag.fail("Login", "onConsoleMessage", cm.message() + " @ " + where);
+                    } else {
+                        Diag.warn("Login", "onConsoleMessage", cm.message() + " @ " + where);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
     @Override
     public void onCloseWindow(WebView window) {
         super.onCloseWindow(window);

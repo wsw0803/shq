@@ -98,6 +98,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         public void run() {
             if (tokenGot || watchdogFired) return;
             watchdogFired = true;
+            com.tencent.tim.Diag.fail("Login", "watchdog.90s", "90 秒未捕获 token，将重载一次；url=" + lastUrlForDiag());
             toast("登录页 90 秒内没有返回结果，已自动重载一次");
             try {
                 WebView v = lastView;
@@ -111,6 +112,19 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     };
 
     private WebView lastView;
+
+    /** 诊断日志用：拿当前页 URL，任何异常都退化成 "-"。 */
+    private String lastUrlForDiag() {
+        try {
+            WebView v = lastView;
+            if (v != null) {
+                String u = v.getUrl();
+                if (u != null && !u.isEmpty()) return u;
+            }
+        } catch (Throwable ignored) {
+        }
+        return "-";
+    }
 
     /** 登录弹窗的 chrome 客户端，拿到 token 后把弹窗收起来。 */
     private LoginChromeClient chrome;
@@ -139,6 +153,17 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             lastTokenUrl = url;
             lastTokenAt = now;
             tokenGot = true;
+            try {
+                int at = url == null ? -1 : url.indexOf("access_token=");
+                String tail = "";
+                if (url != null) {
+                    int end = url.indexOf('&', at);
+                    String tk = at < 0 ? url : url.substring(at + 13, end < 0 ? url.length() : end);
+                    tail = "len=" + tk.length();
+                }
+                com.tencent.tim.Diag.step("Login", "deliver", "捕获到 token " + tail);
+            } catch (Throwable ignored) {
+            }
             if (chrome != null) { try { chrome.closePopup(); } catch (Throwable ignored) { } }
         }
         try {
@@ -155,6 +180,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                         try {
                             activity.performLogin(token);
                         } catch (Throwable t) {
+                            com.tencent.tim.Diag.fail("Login", "performLogin", "登录处理异常", t);
                             toast("登录处理异常: " + t);
                         }
                     }
@@ -166,6 +192,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
                         try {
                             activity.performLogin(token);
                         } catch (Throwable t) {
+                            com.tencent.tim.Diag.fail("Login", "performLogin", "登录处理异常", t);
                             toast("登录处理异常: " + t);
                         }
                     }
@@ -302,6 +329,9 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             v = v.substring(1, v.length() - 1);
         }
         logQr("guard=" + v);
+        if (v.startsWith("QR_NOSRC") || v.startsWith("NOQR") || v.startsWith("JS_ERROR")) {
+            com.tencent.tim.Diag.fail("Login", "onQrGuardResult", "扫码面板不可用: " + v + " url=" + lastUrlForDiag());
+        }
         if (v.startsWith("QR_SWITCHED") && !qrSwitchedNotified) {
             qrSwitchedNotified = true;
             toast("已切换到扫码登录");
@@ -331,6 +361,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
         }
         if (v.contains("APPID_ERROR") && !appidErrorNotified) {
             appidErrorNotified = true;
+            com.tencent.tim.Diag.fail("Login", "onHealthResult", "页面出现「无法获取appid」类文案；url=" + lastUrlForDiag());
             try {
                 handler.removeCallbacks(watchdog);
             } catch (Throwable ignored) {
@@ -420,6 +451,8 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     @SuppressWarnings("deprecation")
     public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
         super.onReceivedError(view, errorCode, description, failingUrl);
+        com.tencent.tim.Diag.fail("Login", "onReceivedError(deprecated)",
+                "code=" + errorCode + " desc=" + description + " url=" + failingUrl);
         if (!errorToastShown) {
             errorToastShown = true;
             toast("页面加载失败(" + errorCode + "): " + description);
@@ -429,6 +462,18 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
     @Override
     public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
         super.onReceivedError(view, request, error);
+        try {
+            String u = request == null ? "?" : String.valueOf(request.getUrl());
+            String d0 = error == null ? "?" : String.valueOf(error.getDescription());
+            int c0 = error == null ? -1 : error.getErrorCode();
+            boolean main = request != null && request.isForMainFrame();
+            if (main) {
+                com.tencent.tim.Diag.fail("Login", "onReceivedError", "main=true code=" + c0 + " desc=" + d0 + " url=" + u);
+            } else {
+                com.tencent.tim.Diag.warn("Login", "onReceivedError", "子资源失败 code=" + c0 + " desc=" + d0 + " url=" + u);
+            }
+        } catch (Throwable ignored) {
+        }
         if (request != null && request.isForMainFrame() && !errorToastShown) {
             errorToastShown = true;
             String d = "";
@@ -442,6 +487,12 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
 
     @Override
     public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+        boolean crashed = true;
+        try {
+            crashed = detail == null || detail.didCrash();
+        } catch (Throwable ignored) {
+        }
+        com.tencent.tim.Diag.fail("Login", "onRenderProcessGone", "didCrash=" + crashed + " url=" + lastUrlForDiag());
         toast("WebView 渲染进程崩溃，正在自动恢复界面");
         try {
             handler.removeCallbacks(watchdog);
@@ -494,6 +545,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             return false;
         }
         if (low.startsWith("auth:")) {
+            com.tencent.tim.Diag.fail("Login", "handleUrl.auth", "回调缺少 access_token: " + url);
             toast("登录回调缺少 access_token: " + url);
             return true;
         }
@@ -504,6 +556,7 @@ public abstract class BaseLoginWebViewClient extends WebViewClient {
             intent.setComponent(null);
             activity.startActivity(intent);
         } catch (Throwable t) {
+            com.tencent.tim.Diag.fail("Login", "handleUrl.intent", "无法处理的跳转: " + url, t);
             toast("无法处理的跳转: " + url);
         }
         return true;

@@ -46,8 +46,16 @@ public class RootUtil {
             os.flush();
             os.close();
             int code = p.waitFor();
-            return code == 0 && f.exists() && f.length() > before;
+            boolean ok = code == 0 && f.exists() && f.length() > before;
+            if (!ok) {
+                Diag.fail("Root", "RootUtil.append", "写入失败 code=" + code
+                        + " exists=" + f.exists() + " before=" + before
+                        + " after=" + (f.exists() ? f.length() : -1)
+                        + " path=" + f.getAbsolutePath());
+            }
+            return ok;
         } catch (Exception e) {
+            Diag.fail("Root", "RootUtil.append", "su 执行异常 path=" + f.getAbsolutePath(), e);
             return false;
         } finally {
             if (p != null) p.destroy();

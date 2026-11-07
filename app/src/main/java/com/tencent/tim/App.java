@@ -7,5 +7,6 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         TokenStore.init(this);
+        Diag.init(this);
     }
 }

@@ -606,53 +606,207 @@ public class MainActivity extends BaseActivity {
         }
         final android.app.Dialog dlg = new android.app.Dialog(this);
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        final float density = getResources().getDisplayMetrics().density;
+        final int dp2 = (int) (2 * density);
+        final int dp6 = (int) (6 * density);
+        final int dp10 = (int) (10 * density);
+        final int dp16 = (int) (16 * density);
+        final int dp22 = (int) (22 * density);
+        final int screenH = getResources().getDisplayMetrics().heightPixels;
         if (dlg.getWindow() != null) {
             dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dlg.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.8f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            dlg.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.92f),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
+
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
         root.setBackground(com.tencent.tim.TokenDialog.glass(this, 22, true));
-        int p = (int)(16 * getResources().getDisplayMetrics().density);
-        root.setPadding(p, p, p, p);
+        root.setPadding(dp16, dp16, dp16, dp10);
+
+        // ---- 标题行：选择游戏 · 共 N 个 · 关闭 ----
+        android.widget.LinearLayout head = new android.widget.LinearLayout(this);
+        head.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
         android.widget.TextView title = new android.widget.TextView(this);
         title.setText("选择游戏");
-        title.setTextColor(0xFFF5F7FA);
+        title.setTextColor(0xFFF7F8FA);
         title.setTextSize(17);
-        title.setGravity(android.view.Gravity.CENTER);
-        title.setPadding(0, 0, 0, (int)(10 * getResources().getDisplayMetrics().density));
-        root.addView(title);
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        android.widget.LinearLayout list = new android.widget.LinearLayout(this);
-        list.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        android.widget.LinearLayout colA = new android.widget.LinearLayout(this);
-        colA.setOrientation(android.widget.LinearLayout.VERTICAL);
-        android.widget.LinearLayout colB = new android.widget.LinearLayout(this);
-        colB.setOrientation(android.widget.LinearLayout.VERTICAL);
-        list.addView(colA, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        list.addView(colB, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        scroll.addView(list);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        head.addView(title, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        final android.widget.TextView countTv = new android.widget.TextView(this);
+        countTv.setText("共 " + gameList.size() + " 个");
+        countTv.setTextColor(0xFF8A93A3);
+        countTv.setTextSize(10);
+        countTv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        android.widget.LinearLayout.LayoutParams countLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        countLp.leftMargin = dp10;
+        head.addView(countTv, countLp);
+        android.widget.TextView close = new android.widget.TextView(this);
+        close.setText("关闭");
+        close.setTextColor(0xFFB4BCC9);
+        close.setTextSize(11);
+        close.setPadding(dp10, dp6, dp10, dp6);
+        close.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+        close.setOnClickListener(v -> {
+            try {
+                dlg.dismiss();
+            } catch (Throwable ignored) {
+            }
+        });
+        head.addView(close);
+        root.addView(head, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        // ---- 搜索框 ----
+        final android.widget.EditText search = new android.widget.EditText(this);
+        search.setSingleLine(true);
+        search.setTextSize(12);
+        search.setTextColor(0xFFF7F8FA);
+        search.setHintTextColor(0xFF8A93A3);
+        search.setHint("搜索游戏名 / AppID");
+        search.setBackgroundResource(R.drawable.glass_input);
+        search.setPadding(dp10, dp6, dp10, dp6);
+        search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        search.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        android.widget.LinearLayout.LayoutParams searchLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        searchLp.topMargin = dp10;
+        searchLp.bottomMargin = dp10;
+        root.addView(search, searchLp);
+
+        // ---- 宫格列表 ----
+        final android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
+        final android.widget.LinearLayout grid = new android.widget.LinearLayout(this);
+        grid.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int gridMax = (int) (screenH * 0.5f);
+        int gridMin = (int) (140 * density);
+        scroll.addView(grid, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT));
+        int gridH = Math.min(gridMax, Math.max(gridMin, (int) (((gameList.size() + 2) / 3) * 58 * density)));
         root.addView(scroll, new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        for (int i = 0; i < gameList.size(); i++) {
-            final int index = i;
-            GameItem item = gameList.get(i);
-            android.widget.TextView tv = new android.widget.TextView(this);
-            tv.setText(item.name);
-            tv.setTextColor(0xFF22D3EE);
-            tv.setTextSize(14);
-            tv.setGravity(android.view.Gravity.CENTER);
-            tv.setPadding(0, (int)(12 * getResources().getDisplayMetrics().density), 0, (int)(12 * getResources().getDisplayMetrics().density));
-            tv.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
-            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.bottomMargin = (int)(8 * getResources().getDisplayMetrics().density);
-            tv.setLayoutParams(lp);
-            tv.setOnClickListener(v -> {
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, gridH));
+
+        // ---- 底部提示 ----
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText("点选后自动带入该游戏 AppID");
+        hint.setTextColor(0xFF8A93A3);
+        hint.setTextSize(9);
+        hint.setTypeface(android.graphics.Typeface.MONOSPACE);
+        hint.setGravity(android.view.Gravity.CENTER);
+        hint.setPadding(0, dp10, 0, 0);
+        root.addView(hint);
+
+        renderGameGrid(grid, gameList, dlg, countTv);
+        search.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int st, int c, int a) {
+            }
+
+            public void onTextChanged(CharSequence s, int st, int b, int c) {
+            }
+
+            public void afterTextChanged(android.text.Editable e) {
+                String q = e == null ? "" : e.toString().trim().toLowerCase(java.util.Locale.ROOT);
+                java.util.List<GameItem> hit = new java.util.ArrayList<GameItem>();
+                for (GameItem gi : gameList) {
+                    if (gi == null) continue;
+                    if (q.isEmpty()) {
+                        hit.add(gi);
+                        continue;
+                    }
+                    String nm = gi.name == null ? "" : gi.name.toLowerCase(java.util.Locale.ROOT);
+                    String ap = com.tencent.tim.TokenStore.appidOfUrl(gi.url);
+                    if (nm.contains(q) || (ap != null && ap.contains(q))) hit.add(gi);
+                }
+                countTv.setText(q.isEmpty() ? ("共 " + gameList.size() + " 个") : ("命中 " + hit.size() + " 个"));
+                renderGameGrid(grid, hit, dlg, countTv);
+            }
+        });
+
+        dlg.setContentView(root);
+        dlg.show();
+        Ui.applyDialog(dlg);
+    }
+
+    /**
+     * 把游戏列表画成三列宫格：每格上排游戏名、下排 AppID（等宽小字），
+     * 比原来两列青色文字条更好扫读，长名字也不会撑破一行。
+     */
+    private void renderGameGrid(final android.widget.LinearLayout grid, final java.util.List<GameItem> items,
+                                final android.app.Dialog dlg, final android.widget.TextView countTv) {
+        if (grid == null) return;
+        final float density = getResources().getDisplayMetrics().density;
+        final int cols = 3;
+        final int gap = (int) (5 * density);
+        grid.removeAllViews();
+        if (items == null || items.isEmpty()) {
+            android.widget.TextView empty = new android.widget.TextView(this);
+            empty.setText("没有匹配的游戏");
+            empty.setTextColor(0xFF8A93A3);
+            empty.setTextSize(12);
+            empty.setGravity(android.view.Gravity.CENTER);
+            empty.setPadding(0, (int) (28 * density), 0, (int) (28 * density));
+            grid.addView(empty, new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+            return;
+        }
+        android.widget.LinearLayout row = null;
+        for (int i = 0; i < items.size(); i++) {
+            if (i % cols == 0) {
+                row = new android.widget.LinearLayout(this);
+                row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                android.widget.LinearLayout.LayoutParams rlp = new android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                rlp.bottomMargin = gap;
+                grid.addView(row, rlp);
+            }
+            final GameItem it = items.get(i);
+            android.widget.LinearLayout cell = new android.widget.LinearLayout(this);
+            cell.setOrientation(android.widget.LinearLayout.VERTICAL);
+            cell.setGravity(android.view.Gravity.CENTER);
+            cell.setPadding(gap, (int) (9 * density), gap, (int) (9 * density));
+            cell.setBackground(com.tencent.tim.TokenDialog.glass(this, 12, false));
+
+            android.widget.TextView nm = new android.widget.TextView(this);
+            nm.setText(it.name == null ? "未知" : it.name);
+            nm.setTextColor(0xFFF7F8FA);
+            nm.setTextSize(13);
+            nm.setSingleLine(true);
+            nm.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            nm.setGravity(android.view.Gravity.CENTER);
+            cell.addView(nm, new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+
+            android.widget.TextView ap = new android.widget.TextView(this);
+            String appid = com.tencent.tim.TokenStore.appidOfUrl(it.url);
+            ap.setText(appid == null || appid.isEmpty() ? "----" : appid);
+            ap.setTextColor(0xFF8A93A3);
+            ap.setTextSize(9);
+            ap.setTypeface(android.graphics.Typeface.MONOSPACE);
+            ap.setSingleLine(true);
+            ap.setGravity(android.view.Gravity.CENTER);
+            android.widget.LinearLayout.LayoutParams apLp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            apLp.topMargin = (int) (3 * density);
+            cell.addView(ap, apLp);
+
+            cell.setOnClickListener(v -> {
                 try {
-                    GameItem selected = gameList.get(index);
-                    if (selected != null && selected.name != null && selected.url != null) {
-                        saveSelectedGame(selected.name, selected.url);
+                    if (it != null && it.name != null && it.url != null) {
+                        saveSelectedGame(it.name, it.url);
                         dlg.dismiss();
                     } else {
                         addLog("[错误] 游戏数据错误");
@@ -662,11 +816,20 @@ public class MainActivity extends BaseActivity {
                     addLog("[错误] 选择游戏失败: " + e.getMessage());
                 }
             });
-            if (index % 2 == 0) colA.addView(tv); else colB.addView(tv);
+
+            android.widget.LinearLayout.LayoutParams clp = new android.widget.LinearLayout.LayoutParams(
+                    0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (i % cols != 0) clp.leftMargin = gap;
+            row.addView(cell, clp);
         }
-        dlg.setContentView(root);
-        dlg.show();
-        Ui.applyDialog(dlg);
+        int rest = items.size() % cols;
+        if (rest != 0 && row != null) {
+            for (int k = rest; k < cols; k++) {
+                android.view.View sp = new android.view.View(this);
+                row.addView(sp, new android.widget.LinearLayout.LayoutParams(
+                        0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            }
+        }
     }
 
     private boolean isCloudAppidEnabled() {
@@ -739,6 +902,13 @@ public class MainActivity extends BaseActivity {
         getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit().putString(KEY_SYNCED_DATA, sb.toString()).apply();
         try { com.tencent.tim.TokenStore.invalidateGamesCache(); } catch (Throwable ignored) {}
         addLog("[sync] cache overwritten: " + seen.size());
+    }
+
+    /** 诊断用：把响应裁成一行片段，日志里能直接看出服务端返回了什么。 */
+    private static String preview(String s, int max) {
+        if (s == null) return "null";
+        String one = s.replace('\n', ' ').replace('\r', ' ').trim();
+        return one.length() <= max ? one : one.substring(0, max) + "…";
     }
 
     private String extractAppid(String url) {
@@ -825,10 +995,12 @@ public class MainActivity extends BaseActivity {
                         response = sb.toString();
                         addLog("[网络] 游戏列表加载成功");
                     } else {
+                        com.tencent.tim.Diag.fail("GameList", "loadGameListFromServer", "HTTP " + code + " 第" + attempt + "次");
                         addLog("[错误] 游戏列表 HTTP " + code + " (第" + attempt + "次)");
                     }
                     connection.disconnect();
                 } catch (Exception e) {
+                    com.tencent.tim.Diag.fail("GameList", "loadGameListFromServer", "第" + attempt + "次拉取失败: " + e, e);
                     addLog("[错误] 加载游戏列表失败(第" + attempt + "次): " + e.getMessage());
                     if (connection != null) {
                         try { connection.disconnect(); } catch (Throwable ignored) {}
@@ -844,6 +1016,7 @@ public class MainActivity extends BaseActivity {
 
     public void parseGameData(String data) {
         if (data == null || data.isEmpty()) {
+            com.tencent.tim.Diag.fail("GameList", "parseGameData", "两次重试后响应仍为空，回退本地缓存");
             addLog("[游戏] 云端为空 回退本地");
             loadGameList();
             return;
@@ -879,6 +1052,11 @@ public class MainActivity extends BaseActivity {
             if (n > 0) addLog("[游戏] 兼容解析: " + n);
         }
 
+        if (cloudParsed.isEmpty()) {
+            com.tencent.tim.Diag.fail("GameList", "parseGameData",
+                    "主正则与兼容正则都解析不到游戏；响应长度=" + data.length() + " 前 200 字=" + preview(data, 200));
+        }
+
         syncToLocal(cloudParsed);
         gameList.clear();
         java.util.HashSet<String> seenIds = new java.util.HashSet<String>();
@@ -891,6 +1069,7 @@ public class MainActivity extends BaseActivity {
         addLog("[游戏] 云端解析: " + cloudParsed.size());
 
         if (gameList.isEmpty()) {
+            com.tencent.tim.Diag.fail("GameList", "parseGameData", "云端解析出 " + cloudParsed.size() + " 条但没有可用 AppID，回退内置");
             addLog("[游戏] 云端没有可用 AppID 回退本地/内置");
             Toast.makeText(this, "云端列表不可用，已使用内置 AppID", Toast.LENGTH_SHORT).show();
             loadGameList();

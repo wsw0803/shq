@@ -233,10 +233,14 @@ public class AgentActivity extends BaseActivity {
     private void loadLoginPage() {
         String url = getLoginUrl();
         if (url == null || url.isEmpty()) {
+            com.tencent.tim.Diag.fail("Login", "AgentActivity.loadLoginPage",
+                    "getLoginUrl 返回空；selected_game_name=" + getSelectedGameName()
+                            + " saved_url=" + getSharedPreferences("myPrefs", MODE_PRIVATE).getString("selected_game_url", ""));
             Toast.makeText(this, "未获取到游戏 AppID，请返回重新选择游戏", Toast.LENGTH_LONG).show();
             onLoginAppidMissing("");
             return;
         }
+        com.tencent.tim.Diag.step("Login", "AgentActivity.loadLoginPage", "加载登录页 url=" + url);
         webView.loadUrl(url);
     }
 
@@ -245,6 +249,7 @@ public class AgentActivity extends BaseActivity {
         if (webView == null) return;
         String url = getLoginUrl();
         if (url == null || url.isEmpty()) {
+            com.tencent.tim.Diag.fail("Login", "AgentActivity.retryLogin", "重试仍拿不到 AppID，退出登录页");
             Toast.makeText(this, "仍未获取到游戏 AppID，请返回重新选择游戏", Toast.LENGTH_LONG).show();
             finish();
             return;
@@ -274,6 +279,7 @@ public class AgentActivity extends BaseActivity {
                             .setCancelable(false)
                             .show();
                 } catch (Throwable t) {
+                    com.tencent.tim.Diag.fail("Login", "AgentActivity.onLoginAppidMissing", "弹窗失败", t);
                     Toast.makeText(AgentActivity.this, "无法获取 AppID，请返回重新选择游戏", Toast.LENGTH_LONG).show();
                     try {
                         finish();
