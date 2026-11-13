@@ -246,7 +246,10 @@ public class TokenStore {
     /** 将分享接口的 JSON msg / 游戏说明转换成可直接登录的参数串。 */
     private static String normalizeTokenInput(String text) {
         String s = text.trim();
-        boolean wrapped = s.startsWith("{");
+        int date = firstDateIndex(s);
+        int pipe = s.indexOf('|');
+        boolean savedLine = date >= 0 && pipe > date;
+        boolean wrapped = s.startsWith("{") && !savedLine;
         if (wrapped) {
             try {
                 Object msg = new org.json.JSONObject(s).opt("msg");
@@ -256,12 +259,13 @@ public class TokenStore {
                 return "";
             }
         }
-        Matcher token = Pattern.compile("(?<![A-Za-z0-9_])access_token=").matcher(s);
+        if (s.startsWith("auth://") || s.startsWith("http://") || s.startsWith("https://")) return s;
+        Matcher token = Pattern.compile("(?<![A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*=[^&\\s,，]+&)*access_token=").matcher(s);
         if (!token.find()) return wrapped ? "" : s;
         int start = token.start();
         String prefix = s.substring(0, start);
         // 原有链接和带时间/备注的存档行保持原样；只去掉分享接口的说明前缀。
-        if (start > 0 && (wrapped || (prefix.indexOf('|') < 0
+        if (start > 0 && (wrapped || (firstDateIndex(prefix) < 0
                 && prefix.indexOf("://") < 0 && appidOfUrl(prefix) != null))) {
             String appid = appidOfUrl(s);
             s = s.substring(start).trim();

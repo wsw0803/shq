@@ -80,6 +80,14 @@ public class TokenStoreTest {
         assertEquals("测试游戏", e.game);
     }
 
+    @Test public void savedLineWithBraceInNoteRemainsSupported() {
+        TokenStore.Entry e = TokenStore.parseLine("{备注} 2026-11-13 12:34:56|" + APPID + "|" + PARAMS + "|capture", "测试游戏");
+        assertFields(e);
+        assertEquals("{备注}", e.note);
+        assertEquals(PARAMS, e.raw);
+        assertEquals(APPID, e.appid);
+    }
+
     @Test public void normalizedEntrySurvivesSaveAndReload() throws Exception {
         TokenStore.Entry e = TokenStore.parseAnyInput(new JSONObject().put("msg", "其他游戏_client_id: " + APPID + ", " + PARAMS).toString());
         TokenStore.Entry reloaded = TokenStore.parseLine(TokenStore.joinLine("备注", "2026-11-13 12:34:56", e.appid, e.raw, "capture"), "测试游戏");
@@ -127,6 +135,33 @@ public class TokenStoreTest {
             assertEquals(separator.toString(), APPID, e.appid);
             assertEquals(PARAMS + "client_id=" + APPID, e.raw);
         }
+    }
+
+    @Test public void parameterOrderIsPreserved() throws Exception {
+        String params = "client_id=" + APPID + "&openid=" + OPENID
+                + "&expires_in=5184000&access_token=" + ACCESS + "&pay_token=" + PAY + "&";
+        for (String msg : new String[]{params, "其他游戏_client_id#" + APPID + ", " + params}) {
+            for (String input : new String[]{msg, new JSONObject().put("msg", msg).toString()}) {
+                TokenStore.Entry e = TokenStore.parseAnyInput(input);
+                assertFields(e);
+                assertEquals(params, e.raw);
+                assertEquals(APPID, e.appid);
+            }
+        }
+    }
+
+    @Test public void jsonAuthLinkPreservesAllParameters() throws Exception {
+        String url = "auth://tauth.qq.com/?#openid=" + OPENID + "&" + PARAMS;
+        TokenStore.Entry e = TokenStore.parseAnyInput(new JSONObject().put("msg", url).toString());
+        assertFields(e);
+        assertEquals(url, e.raw);
+    }
+
+    @Test public void pipeSeparatorIsRecognizedWithoutJson() {
+        TokenStore.Entry e = TokenStore.parseAnyInput("其他游戏_client_id|" + APPID + ", " + PARAMS);
+        assertFields(e);
+        assertEquals(PARAMS + "client_id=" + APPID, e.raw);
+        assertEquals(APPID, e.appid);
     }
 
     @Test public void httpLinkWithClientIdRemainsUnchanged() {
