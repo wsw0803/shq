@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
+      - 'release/**'
+# 发布顺序执行；连续推送时仅保留最新的待运行任务，不中断已开始的发布。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: write
 jobs:
@@ -12,12 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - name: Prepare SDK
         run: |
           echo sdk.dir=$ANDROID_HOME > local.properties
@@ -54,7 +65,7 @@ jobs:
           WEI_KEY_PASSWORD: ${{ secrets.WEI_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleRelease --no-daemon --stacktrace -PvCode=${{ steps.version.outputs.vCode }} -PvName=${{ steps.version.outputs.vName }}
+          ./gradlew testReleaseUnitTest assembleRelease --build-cache --parallel --stacktrace -PvCode=${{ steps.version.outputs.vCode }} -PvName=${{ steps.version.outputs.vName }}
       - name: Rename APK
         run: |
           mkdir -p out
