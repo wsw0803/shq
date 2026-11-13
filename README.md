@@ -16,9 +16,13 @@ Android 应用源码（Java + Gradle），包含抓号、上号、挂机三种�
 
 ## 构建
 GitHub Actions 工作流: .github/workflows/build.yml
-push 到 main 或手动触发后，在 Actions 页面下载 release-apk 产物。
+push 到 main 或手动触发后，在 Releases 页面下载 APK。仅修改 Markdown 文档或 release/ 发布文件时不自动构建，仍可手动触发。
 
 本地构建: ./gradlew assembleRelease
+
+CI 使用 `testReleaseUnitTest assembleRelease`，单元测试和打包共用 release 编译结果。`gradle/actions/setup-gradle` 保存 Gradle 发行版、依赖与任务输出缓存，首次运行生成缓存，后续运行复用；变更源码、依赖或版本号时由 Gradle 自动判定哪些任务需要重做。克隆只拉取当前提交，不再下载包含旧 APK 的完整历史。
+
+比较构建速度时，同时查看 checkout、Build release、缓存恢复和保存的耗时；首次缓存写入时间不代表后续构建速度。
 
 ## 风险提示
 本项目为账号登录工具源码，会将登录令牌明文写入

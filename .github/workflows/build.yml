@@ -29,6 +29,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
+          # 短任务每次清理会额外启动一次 Gradle；由缓存生命周期负责淘汰。
+          cache-cleanup: never
       - name: Prepare SDK
         run: |
           echo sdk.dir=$ANDROID_HOME > local.properties
