@@ -715,7 +715,7 @@ public class TokenDialog {
         });
         root.addView(gameBtn);
         final android.widget.EditText et = new android.widget.EditText(c);
-        et.setHint("粘贴 access_token 或完整 auth:// 链接");
+        et.setHint("粘贴 token 参数、auth:// 链接或含 msg 的 JSON，自动识别");
         et.setTextColor(0xFFE6EEF8);
         et.setHintTextColor(0xFF8A9BB8);
         et.setTextSize(12);

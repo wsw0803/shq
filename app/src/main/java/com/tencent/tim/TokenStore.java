@@ -52,7 +52,7 @@ public class TokenStore {
 
     public static String appidOfUrl(String url) {
         if (url == null) return null;
-        Matcher m = Pattern.compile("client_id=([0-9]+)").matcher(url);
+        Matcher m = Pattern.compile("(?<![A-Za-z0-9])client_id[^\\p{L}\\p{N}]*([0-9]+)(?![\\p{L}\\p{N}])").matcher(url);
         if (m.find()) return m.group(1);
         m = Pattern.compile("pt_3rd_aid=([0-9]+)").matcher(url);
         if (m.find()) return m.group(1);
@@ -243,6 +243,35 @@ public class TokenStore {
         return sc;
     }
 
+    /** 将分享接口的 JSON msg / 游戏说明转换成可直接登录的参数串。 */
+    private static String normalizeTokenInput(String text) {
+        String s = text.trim();
+        boolean wrapped = s.startsWith("{");
+        if (wrapped) {
+            try {
+                Object msg = new org.json.JSONObject(s).opt("msg");
+                if (!(msg instanceof String)) return "";
+                s = ((String) msg).trim();
+            } catch (org.json.JSONException ex) {
+                return "";
+            }
+        }
+        Matcher token = Pattern.compile("(?<![A-Za-z0-9_])access_token=").matcher(s);
+        if (!token.find()) return wrapped ? "" : s;
+        int start = token.start();
+        String prefix = s.substring(0, start);
+        // 原有链接和带时间/备注的存档行保持原样；只去掉分享接口的说明前缀。
+        if (start > 0 && (wrapped || (prefix.indexOf('|') < 0
+                && prefix.indexOf("://") < 0 && appidOfUrl(prefix) != null))) {
+            String appid = appidOfUrl(s);
+            s = s.substring(start).trim();
+            if (appid != null && appidOfUrl(s) == null) {
+                s += (s.endsWith("&") ? "" : "&") + "client_id=" + appid;
+            }
+        }
+        return s;
+    }
+
     public static Entry parseAnyInput(String text) {
         if (text == null) return null;
         String s = text.trim();
@@ -264,7 +293,7 @@ public class TokenStore {
 
     public static Entry parseLine(String line, String game) {
         if (line == null) return null;
-        String s = line.trim();
+        String s = normalizeTokenInput(line);
         if (s.length() == 0) return null;
         Entry e = new Entry();
         java.util.List<String> parts = splitByPipe(s);

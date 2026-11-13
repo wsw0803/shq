@@ -54,7 +54,7 @@ jobs:
           WEI_KEY_PASSWORD: ${{ secrets.WEI_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace -PvCode=${{ steps.version.outputs.vCode }} -PvName=${{ steps.version.outputs.vName }}
+          ./gradlew testDebugUnitTest assembleRelease --no-daemon --stacktrace -PvCode=${{ steps.version.outputs.vCode }} -PvName=${{ steps.version.outputs.vName }}
       - name: Rename APK
         run: |
           mkdir -p out
