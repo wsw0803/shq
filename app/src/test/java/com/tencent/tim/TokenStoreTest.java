@@ -209,7 +209,7 @@ public class TokenStoreTest {
         assertEquals("a b c", TokenStore.cleanNote("a\tb\nc"));
         assertEquals("a/b", TokenStore.cleanNote("a|b"));
         assertEquals("", TokenStore.cleanNote(null));
-        assertEquals("  压缩 空格  ", " " + TokenStore.cleanNote(" 压缩   空格  ") + " ");
+        assertEquals("压缩 空格", TokenStore.cleanNote(" 压缩   空格  "));
     }
 
     private static int countChar(String s, char c) {
