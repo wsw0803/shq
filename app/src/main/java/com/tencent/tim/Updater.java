@@ -57,6 +57,8 @@ single() 成功时已经完成 part -> out 的转换并 return true，
 public class Updater {
 
     private static final int THREADS = 8;
+    /** 每个分片最近一次真正收到数据的时刻，用于判断「假死」。 */
+    private static final long[] lastProgress = new long[THREADS];
     private static final long MIN_SIZE = 500000L;
 
     private static final int OK = 0;
@@ -89,7 +91,18 @@ public class Updater {
     }
 
     public static void start(final Activity act, final String url, final long expectSize, final Runnable onFail) {
+        start(act, url, expectSize, onFail, buildUrls(url));
+    }
+
+    /**
+     * 多线路下载：urls 里按优先级排列，probe() 会并发探测，
+     * 取第一个拿到完整内容且大小对得上的线路。
+     */
+    public static void start(final Activity act, final String url, final long expectSize,
+                             final Runnable onFail, final java.util.List<String> urls) {
         final Job job = new Job();
+        final java.util.List<String> cands = (urls == null || urls.isEmpty())
+                ? buildUrls(url) : new java.util.ArrayList<String>(urls);
 
         final Dialog dlg = new Dialog(act);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -133,7 +146,7 @@ public class Updater {
                 final File part = new File(dir, "update.apk.part");
                 final File state = new File(dir, "update.apk.state");
 
-                int result = fetch(act, job, bar, tip, buildUrls(url), expectSize, part, state, out);
+                int result = fetch(act, job, bar, tip, cands, expectSize, part, state, out);
 
                 // 签名只作为提示，不再阻断安装。
                 // 已 root 且安装器已去校验的设备可以正常覆盖安装，
@@ -396,6 +409,7 @@ public class Updater {
                                String src, File part, int idx) {
         long len = job.segEnd[idx] - job.segStart[idx] + 1;
         int tries = 0;
+        lastProgress[idx] = System.currentTimeMillis();
         while (job.segDone[idx] < len && !job.aborted.get()) {
             HttpURLConnection c = null;
             InputStream in = null;
@@ -417,6 +431,7 @@ public class Updater {
                     raf.write(buf, 0, n);
                     job.segDone[idx] += n;
                     job.got.addAndGet(n);
+                    lastProgress[idx] = System.currentTimeMillis();
                     ui(act, job, bar, tip, false);
                 }
             } catch (Exception e) {
@@ -427,7 +442,10 @@ public class Updater {
             }
             if (job.segDone[idx] >= len) break;
             tries++;
+            // 连续失败 30 次 → 放弃；距离上次真正收到数据超过 2 分钟 → 也放弃。
+            // 原来只看重试次数，服务器一直不回数据时会卡在弹窗上很久。
             if (tries > 30) break;
+            if (System.currentTimeMillis() - lastProgress[idx] > 120000L) break;
             try {
                 Thread.sleep(Math.min(250L * tries, 2000L));
             } catch (Exception e) {}

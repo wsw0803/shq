@@ -169,6 +169,22 @@ public class TokenStore {
         return r;
     }
 
+    /**
+     * 把备注压成一行。
+     *
+     * 备注可能来自 WebView 抓到的任意文本（含换行、竖线）。
+     * 存档格式是「备注|时间|appid|token|模式」，备注里一旦混进换行或竖线，
+     * 整行会被拆成两条、甚至后面几条 token 一起错位。
+     * 导出、导入、新增三处原来各自处理得不一致，这里统一收口。
+     */
+    static String cleanNote(String note) {
+        if (note == null) return "";
+        String s = note.replace("\r", " ").replace("\n", " ").replace("\t", " ").replace("|", "/").replace("%7C", "/");
+        s = s.trim();
+        while (s.contains("  ")) s = s.replace("  ", " ");
+        return s;
+    }
+
     public static String joinLine(String note, String time, String game, String rawSafe, String mode) { StringBuilder sb = new StringBuilder();
  String _rs = rawSafe;
  for (int _g = 0; _g < 6; _g++) {
@@ -180,7 +196,7 @@ public class TokenStore {
   else if (_rs.endsWith("|hang_up")) _rs = _rs.substring(0, _rs.length() - 8);
   else break;
  }
- rawSafe = _rs; if (note != null && note.length() > 0) { sb.append(note.replace("|", "/").replace((char) 10, (char) 32).replace((char) 13, (char) 32)).append(" "); } sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
+ rawSafe = _rs; { String _n = cleanNote(note); if (_n.length() > 0) sb.append(_n).append(" "); } sb.append(time).append((char) 124).append(game).append((char) 124).append(rawSafe).append((char) 124).append(mode); return sb.toString(); }
 
                                 private static java.util.Set<String> knownGameCache = null;
     private static long knownGameCacheAt = 0;
@@ -297,7 +313,13 @@ public class TokenStore {
 
     public static Entry parseLine(String line, String game) {
         if (line == null) return null;
-        String s = normalizeTokenInput(line);
+        // 先切成单行再解析：备注里混进换行时，整行会被拆散导致后面几条 token 错位。
+        // 正常存档行不含换行，这里对正常数据没有任何影响。
+        String s = line;
+        if (s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
+            s = s.replace("\r", " ").replace("\n", " ");
+        }
+        s = normalizeTokenInput(s);
         if (s.length() == 0) return null;
         Entry e = new Entry();
         java.util.List<String> parts = splitByPipe(s);
@@ -358,7 +380,10 @@ public class TokenStore {
         if (tokIdx >= 0 && tokIdx < parts.size()) {
             tokRaw = parts.get(tokIdx).trim().replace("%7C", "|");
         }
-        if (tokRaw.length() == 0) tokRaw = s.replace("%7C", "|");
+        if (tokRaw.length() == 0) {
+            // 整行兜底：换行已经压平过了，这里再兜一层，保证存下去的 raw 一定是单行
+            tokRaw = s.replace("%7C", "|").replace('\r', ' ').replace('\n', ' ').trim();
+        }
         e.raw = tokRaw;
         e.accessToken = extractToken(tokRaw);
         if (e.accessToken.length() == 0 && tokRaw.length() > 0 && tokRaw.indexOf((char) 61) < 0 && tokenCandidate(tokRaw) >= 0) e.accessToken = tokRaw;
@@ -899,7 +924,7 @@ private static boolean isExplicitToken(String p) {
                     Entry e = parseLine(ln, g);
                     if (e == null || e.accessToken.isEmpty()) continue;
                     if (!seen.add(e.accessToken)) continue;
-                    String rawSafe = e.raw.replace("|", "%7C"); w.append(joinLine(e.note, e.time, appidCol(e.appid, e.game, e.raw), rawSafe, e.mode));
+                    String rawSafe = e.raw.replace("|", "%7C"); w.append(joinLine(cleanNote(e.note), e.time, appidCol(e.appid, e.game, e.raw), rawSafe, e.mode));
                     
                     w.append((char)10);
                     n++;
@@ -943,7 +968,7 @@ private static boolean isExplicitToken(String p) {
                 if (game.isEmpty()) { unknown.add(line); continue; }
                 String appid = appidCol(pe.appid, game, pe.raw);
                 String t = (pe.time == null || pe.time.isEmpty()) ? now : pe.time;
-                String keep = joinLine(pe.note, t, appid, pe.raw.replace("|", "%7C"), pe.mode);
+                String keep = joinLine(cleanNote(pe.note), t, appid, pe.raw.replace("|", "%7C"), pe.mode);
                 res.resolved.add(new String[]{game, keep});
             }
             br.close();

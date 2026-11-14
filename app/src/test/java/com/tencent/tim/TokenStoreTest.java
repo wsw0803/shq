@@ -179,4 +179,42 @@ public class TokenStoreTest {
         assertNull(TokenStore.appidOfUrl("notclient_id=" + APPID));
         assertNull(TokenStore.appidOfUrl("client_id=123abc"));
     }
+
+    // ---- 备注写坏的回归用例 ----
+
+    @Test public void noteWithNewlineIsFlattenedOnSave() {
+        TokenStore.Entry e = TokenStore.parseAnyInput(PARAMS);
+        String line = TokenStore.joinLine("多行\n备注|带竖线", "2026-11-13 12:34:56",
+                TokenStore.appidCol(e.appid, "", e.raw), e.raw, "capture");
+        assertFalse("存档行不能含换行", line.contains("\n") || line.contains("\r"));
+        assertEquals("存档行只能有 3 个分隔符", 3, countChar(line, '|'));
+        TokenStore.Entry back = TokenStore.parseLine(line, "");
+        assertFields(back);
+        assertEquals(PARAMS, back.raw);
+        assertEquals("备注里的换行和竖线被压成空格与斜杠", "多行 备注/带竖线", back.note);
+    }
+
+    @Test public void brokenMultiLineNoteDoesNotPoisonFollowingEntries() {
+        String good1 = TokenStore.joinLine("", "2026-11-13 12:34:56", APPID, PARAMS, "capture");
+        String good2 = TokenStore.joinLine("", "2026-11-13 13:00:00", APPID,
+                "access_token=SECOND_" + ACCESS + "&openid=" + OPENID + "&", "login");
+        String whole = "备注第一行" + (char) 10 + "第二行|" + good1 + (char) 10 + good2;
+        TokenStore.Entry e = TokenStore.parseLine(whole, "");
+        assertNotNull(e);
+        assertFields(e);
+        assertFalse("解析结果里不能再残留换行", e.raw.contains("\n"));
+    }
+
+    @Test public void cleanNoteStripsControlChars() {
+        assertEquals("a b c", TokenStore.cleanNote("a\tb\nc"));
+        assertEquals("a/b", TokenStore.cleanNote("a|b"));
+        assertEquals("", TokenStore.cleanNote(null));
+        assertEquals("  压缩 空格  ", " " + TokenStore.cleanNote(" 压缩   空格  ") + " ");
+    }
+
+    private static int countChar(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
+        return n;
+    }
 }

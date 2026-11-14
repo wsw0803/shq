@@ -125,6 +125,8 @@ public class MainActivity extends BaseActivity {
         String body = "";
         String apkUrl = "";
         long size = 0;
+        /** 这个版本是从哪个镜像拿到的，下载时优先复用（同一个域名通常最快）。 */
+        String source = "";
     }
 
     @Override
@@ -1103,7 +1105,9 @@ public class MainActivity extends BaseActivity {
             return;
         }
 
-        Pattern pattern = Pattern.compile("图标：(.*?)；名称：(.*?)；链接：〖链接(.*?)〗；");
+        // DOTALL：服务端如果一条游戏记录里带了换行，原来的写法会整条匹配不到，
+        // 配合下面的兼容解析虽然能救回来，但名称/图标会错位。这里让 . 也能吃掉换行。
+        Pattern pattern = Pattern.compile("图标：(.*?)；名称：(.*?)；链接：〖链接(.*?)〗；", Pattern.DOTALL);
         Matcher matcher = pattern.matcher(data);
         java.util.List<GameItem> cloudParsed = new java.util.ArrayList<GameItem>();
 
@@ -1234,6 +1238,41 @@ public class MainActivity extends BaseActivity {
     }
 
     /**
+     * 去掉加速前缀，得到 GitHub 上的原始地址。
+     *
+     * 版本清单里的地址本身就是 GitHub 直链，下载时会再套一次加速。
+     * 前面拼过前缀的地址再去拼就会变成 https://gh-proxy.com/https://gh-proxy.com/... （必然 404），
+     * 所以解析时统一还原成直链保存。
+     */
+    private static String directUrl(String url) {
+        if (url == null) return "";
+        String u = url.trim();
+        if (u.startsWith("https://gh-proxy.com/")) u = u.substring("https://gh-proxy.com/".length());
+        return u;
+    }
+
+    /**
+     * 下载候选地址：加速线路优先，直连兜底。
+     *
+     * 原来只给一个 gh-proxy.com 的地址，镜像挂了就完全下不了。
+     * 现在按「清单来源 → 加速前缀 → 直连」的顺序排，Updater 会逐个探测，
+     * 谁先响应快就用谁。
+     */
+    private static java.util.List<String> downloadCandidates(String directUrl) {
+        java.util.List<String> list = new java.util.ArrayList<>();
+        String d = directUrl(directUrl);
+        if (d.isEmpty()) return list;
+        if (d.startsWith("https://github.com/")) {
+            list.add("https://gh-proxy.com/" + d);
+            list.add("https://ghfast.top/" + d);
+            list.add(d);
+        } else {
+            list.add(d);
+        }
+        return list;
+    }
+
+    /**
      * 检查更新：多个镜像依次尝试，任意一个成功就弹窗。
      *
      * 原实现只认 api.github.com，国内网络打不开时点按钮完全没反应。
@@ -1260,7 +1299,9 @@ public class MainActivity extends BaseActivity {
                         lastError = "空响应";
                         continue;
                     }
-                    newer = parseReleases(body, installed);
+                    newer = parseReleases(body, installed, endpoint);
+                    // 空清单也是有效结果（说明确实没有新版本），不能再继续试后面的镜像。
+                    // 否则 4 条镜像都会被请求一遍，慢的时候要好几十秒才提示「已是最新」。
                     usedEndpoint = endpoint;
                     break;
                 } catch (Throwable t) {
@@ -1319,10 +1360,28 @@ public class MainActivity extends BaseActivity {
      * 2) GitHub API 的 releases 数组（走 api.github.com）
      * 只返回比当前版本高的条目。
      */
+    /**
+     * 解析版本清单。
+     *
+     * 空响应/空数组直接返回已是最新（0 条），不再抛异常：
+     * jsDelivr 对不存在的文件会返回 200 + 空体，api.github.com 在没有 release 时返回 `[]`。
+     * 原来这两种情况都会抛异常，被外层当成「镜像失败」继续试下一个，
+     * 四条镜像全试完才提示「网络不通」，误导性很强。
+     * 现在只有真正解析不出结构（HTML 错误页等）才算失败。
+     */
     private static java.util.List<ReleaseInfo> parseReleases(String body, String installed)
             throws Exception {
+        return parseReleases(body, installed, "");
+    }
+
+    private static java.util.List<ReleaseInfo> parseReleases(String body, String installed, String mirror)
+            throws Exception {
         java.util.List<ReleaseInfo> out = new java.util.ArrayList<>();
-        String text = body.trim();
+        String text = body == null ? "" : body.trim();
+        if (text.isEmpty()) return out;
+        // 去掉可能的 UTF-8 BOM
+        if (text.charAt(0) == '\uFEFF') text = text.substring(1).trim();
+        if (text.isEmpty()) return out;
 
         if (text.startsWith("[")) {
             org.json.JSONArray arr = new org.json.JSONArray(text);
@@ -1336,6 +1395,9 @@ public class MainActivity extends BaseActivity {
                 org.json.JSONArray assets = rel.optJSONArray("assets");
                 if (assets == null || assets.length() == 0) continue;
 
+                // 优先取 .apk；没有 apk 时退回第一个资源。
+                // 原来「退回第一个资源」放在循环里，会把签名/哈希等非 apk 文件也可能选中，
+                // 现在先扫一遍 apk，扫不到再退回。
                 String apkUrl = "";
                 long apkSize = 0;
                 for (int a = 0; a < assets.length(); a++) {
@@ -1349,9 +1411,16 @@ public class MainActivity extends BaseActivity {
                         apkSize = as.optLong("size", 0);
                         break;
                     }
-                    if (apkUrl.isEmpty()) {
+                }
+                if (apkUrl.isEmpty()) {
+                    for (int a = 0; a < assets.length(); a++) {
+                        org.json.JSONObject as = assets.optJSONObject(a);
+                        if (as == null) continue;
+                        String u2 = as.optString("browser_download_url", "");
+                        if (u2.isEmpty()) continue;
                         apkUrl = u2;
                         apkSize = as.optLong("size", 0);
+                        break;
                     }
                 }
                 if (apkUrl.isEmpty()) continue;
@@ -1363,11 +1432,16 @@ public class MainActivity extends BaseActivity {
                 info.body = rel.optString("body", "");
                 info.apkUrl = speedUp(apkUrl);
                 info.size = apkSize;
+                info.source = directUrl(apkUrl);
                 out.add(info);
             }
             return out;
         }
 
+        // 只处理 JSON 对象；HTML 错误页等情况在这里判为失败，交给外层试下一个镜像
+        if (!text.startsWith("{")) {
+            throw new java.io.IOException("不是合法的版本清单: " + text.substring(0, Math.min(80, text.length())));
+        }
         org.json.JSONObject root = new org.json.JSONObject(text);
         org.json.JSONArray arr = root.optJSONArray("updates");
         if (arr == null) return out;
@@ -1384,8 +1458,11 @@ public class MainActivity extends BaseActivity {
             if (info.title.isEmpty()) info.title = "shq v" + ver;
             info.apkUrl = speedUp(apkUrl);
             info.size = rel.optLong("s", 0);
+            info.source = directUrl(apkUrl);
             out.add(info);
         }
+        // 兜底：清单里给的顺序不一定可靠，最后统一按版本号从新到旧排
+        java.util.Collections.sort(out, (x, y) -> -compareVersion(x.version, y.version));
         return out;
     }
 
@@ -1522,10 +1599,12 @@ public class MainActivity extends BaseActivity {
         btnOk.setOnClickListener(v -> {
             final ReleaseInfo target = chosen[0];
             dlg.dismiss();
-            Updater.start(act, target.apkUrl, target.size,
+            java.util.List<String> cands = downloadCandidates(target.apkUrl);
+            String first = cands.isEmpty() ? target.apkUrl : cands.get(0);
+            Updater.start(act, first, target.size,
                     () -> act.runOnUiThread(() -> {
                         Toast.makeText(act, "更新失败，请稍后重试", Toast.LENGTH_SHORT).show();
-                    }));
+                    }), cands);
         });
         android.widget.LinearLayout.LayoutParams lp2 = new android.widget.LinearLayout.LayoutParams(
                 0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1);
